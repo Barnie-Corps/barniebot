@@ -1,0 +1,31 @@
+{
+  "name": "random-hub",
+  "version": "1.0.0",
+  "description": "Get a random nsfw gif image (hentai, real...)",
+  "main": "random-hub.js",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yoannchb-pro/random-hub.git"
+  },
+  "keywords": [
+    "random-hub",
+    "hub",
+    "hentai",
+    "nsfw",
+    "porn",
+    "random",
+    "discord",
+    "real",
+    "gif",
+    "image"
+  ],
+  "author": "yoannchb",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/yoannchb-pro/random-hub/issues"
+  },
+  "homepage": "https://github.com/yoannchb-pro/random-hub#readme"
+}
