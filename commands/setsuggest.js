@@ -63,7 +63,7 @@ module.exports = {
         else {
             suggest = new Suggest({ guildId: guild.id, active: true });
         }
-        const lastCh = suggest.channelId !== "" ? `<#${suggest.channelId}>` : null;
+        const lastCh = suggest.channelId !== "" ? suggest.channelId : null;
         suggest.channelId = ch.id;
         await suggest.save();
         if (lastCh === null) {
