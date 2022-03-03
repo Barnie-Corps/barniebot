@@ -22,7 +22,7 @@ module.exports = {
             switch (lang.lang) {
                 case "en": {
                     nochannel = "You must mention the channel where u want to set the suggestions";
-                    alreadyChannel = "This channel has already been established as the suggestion channel";
+                    alreadyChannel = "That channel has already been established as the suggestion channel";
                     cannotSend = "I cannot send messages to that channel";
                     doneWithoutLast = "Channel successfully set";
                     break;
