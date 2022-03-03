@@ -66,7 +66,7 @@ module.exports = {
         const lastCh = suggest.channelId !== "" ? `<#${suggest.channelId}>` : null;
         suggest.channelId = ch.id;
         await suggest.save();
-        if (!lastCh) {
+        if (lastCh === null) {
             message.reply(doneWithoutLast);
         }
         else message.reply(genDoneWithLast(lang ? lang.lang : "es", lastCh, ch.id));
