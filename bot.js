@@ -1412,7 +1412,13 @@ client.on('messageCreate', async message => {
   }
   if (!content.toLowerCase().startsWith(prefix.toLowerCase())) return;
   const cmd = args.shift().toLowerCase();
-  const foundCmd = commands.get(cmd) ?? commands.find(c => c.aliases && c.aliases.includes(cmd.toLowerCase()));
+  const foundCmd = commands.get(cmd) ?? commands.find(c => {
+    if (c.aliases) {
+      if (c.aliases.includes(cmd)) return true;
+      else return false;
+    }
+    else return false;
+  });
   if (!foundCmd) return;
   try {
     const lng = foundL ? foundL : null;
