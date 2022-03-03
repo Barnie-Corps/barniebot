@@ -61,7 +61,7 @@ module.exports = {
             if (suggest.channelId === ch.id) return message.reply(alreadyChannel);
         }
         else {
-            suggest = new Suggest({ guildId: guild.id });
+            suggest = new Suggest({ guildId: guild.id, active: true });
         }
         const lastCh = suggest.channelId !== "" ? `<#${suggest.channelId}>` : null;
         suggest.channelId = ch.id;
