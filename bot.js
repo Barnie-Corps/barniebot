@@ -1679,6 +1679,8 @@ client.on('messageCreate', async message => {
 });
 client.on("messageUpdate", async (oldMessage, newMessage) => {
   if (!oldMessage.guild) return;
+  if (oldMessage.author.bot) return;
+  if (oldMessage.content === newMessage.content) return;
   const data = {
     title: {
       es: "Mensaje editado",
