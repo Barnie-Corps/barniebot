@@ -1690,7 +1690,7 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
       en: "Original message",
       br: "Mensagem original"
     },
-    newContentTile: {
+    newContentTitle: {
       es: "Nuevo mensaje",
       en: "New message",
       br: "Nova mensagem"
