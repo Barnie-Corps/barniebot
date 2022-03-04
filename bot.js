@@ -1468,6 +1468,7 @@ client.on('messageCreate', async message => {
   else {
     prefix = data.prefix;
   }
+  client.prefix = prefix;
   const guild = message.guild;
   const author = message.author;
   const channel = message.channel;
