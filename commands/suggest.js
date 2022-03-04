@@ -28,7 +28,7 @@ module.exports = {
         .setDescription(msg)
         const sug = await ch.send({ embeds: [embed] });
         await sug.react(client.cemojis.thumbup);
-        await sug.react(client.cemojis.thumbup);
+        await sug.react(client.cemojis.thumbdown);
         await message.react(client.cemojis.thumbup);
     }
 }
