@@ -1700,6 +1700,16 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
   }
   const foundC = await Log.findOne({ guildid: oldMessage.guild.id });
   if (!foundC) return;
+  let channelMessage = `Mensaje de <@${oldMessage.author.id}> editado en <#${oldMessage.channel.id}>`;
+  switch (foundC.lang) {
+    case "en": {
+      channelMessage = `Message from <@${oldMessage.author.id}> edited in <#${oldMessage.channel.id}>`;
+      break;
+    }
+    case "br": {
+      channelMessage = `Mensagem de <@${oldMessage.author.id}> editada em <#${oldMessage.channel.id}>`;
+    }
+  }
   const embed = new Discord.MessageEmbed()
   .setAuthor({ iconURL: oldMessage.author.displayAvatarURL({ dynamic: true }), name: oldMessage.author.tag })
   .setTitle(data.title[foundC.lang])
