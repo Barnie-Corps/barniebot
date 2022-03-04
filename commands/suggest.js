@@ -26,9 +26,9 @@ module.exports = {
         .setThumbnail(author.displayAvatarURL({ dynamic: true }))
         .setTimestamp()
         .setDescription(msg)
-        await ch.send({ embeds: [embed] });
-        await ch.react(client.cemojis.thumbup);
-        await ch.react(client.cemojis.thumbup);
+        const sug = await ch.send({ embeds: [embed] });
+        await sug.react(client.cemojis.thumbup);
+        await sug.react(client.cemojis.thumbup);
         await message.react(client.cemojis.thumbup);
     }
 }
