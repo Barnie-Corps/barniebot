@@ -1755,10 +1755,12 @@ client.on("messageDelete", async message => {
     }
   }
   const embed = new Discord.MessageEmbed()
+  .setAuthor({ iconURL: message.author.displayAvatarURL({ dynamic: true }), name: message.author.tag })
   .setTitle(data.title[foundG.lang])
   .setDescription(data.description[foundG.lang])
   .addField(data.contentTitle[foundG.lang], message.content)
   .setColor("PURPLE")
+  .setFooter({ text: `Message ID: ${message.id} || Author ID: ${message.author.id}` })
   .setTimestamp()
   if (!client.channels.cache.has(foundG.channelid)) return;
   const ch = client.channels.cache.get(foundG.channelid);
