@@ -1715,6 +1715,7 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
   .setFooter({ text: `Message ID: ${oldMessage.id} || Author ID: ${oldMessage.author.id}` })
   .setTimestamp()
   const ch = await client.channels.fetch(foundC.channelid);
+  if (ch.id === oldMessage.channel.id) return;
   await ch.send({ embeds: [embed] });
 });
 client.login(process.env.TOKEN);
