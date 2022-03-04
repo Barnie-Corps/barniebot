@@ -22,7 +22,13 @@ module.exports = {
         const embed = new MessageEmbed()
         .setAuthor({ iconURL: author.displayAvatarURL({ dynamic: true }), name: `${member.nickname ? member.nickname : author.username} (${author.tag})` })
         .setColor("PURPLE")
+        .setTitle("Suggestion")
+        .setThumbnail(author.displayAvatarURL({ dynamic: true }))
+        .setTimestamp()
         .setDescription(msg)
         await ch.send({ embeds: [embed] });
+        await ch.react(client.cemojis.thumbup);
+        await ch.react(client.cemojis.thumbup);
+        await message.react(client.cemojis.thumbup);
     }
 }
