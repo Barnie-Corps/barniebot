@@ -42,7 +42,7 @@ module.exports = {
         const option = args[0];
         if (!option) return message.reply("```\n" + `${client.prefix}logs {option} {args}\n${createSpaces(client.prefix.length)}      ^^^^^^\n\nERR: Missing Parameter` + "\n```");
         if (!options.some(o => o === option.toLowerCase())) return message.reply("```\n" + `${client.prefix}logs ${option} {args}\n${createSpaces(client.prefix.length)}     ${createArrows(option.length)}\n\nERR: Invalid Option` + "\n```");
-        let foundG = await Log.findOne({ guildId: guild.id });
+        let foundG = await Log.findOne({ guildid: guild.id });
         if (!foundG) {
             foundG = new Log({ guildid: guild.id, active: true });
         }
