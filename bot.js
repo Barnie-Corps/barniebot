@@ -302,7 +302,7 @@ client.on('messageCreate', async message => {
       .setDescription(`${desc}(https://discord.com/oauth2/authorize?client_id=900723711840251924&scope=bot%20applications.commands&permissions=8)\n\n- [Donate](https://paypal.me/EzequielValdez746?locale.x=es_XC)`)
       .setColor('PURPLE')
       .setTimestamp()
-      .setFooter(`Barnie Corps © 2021 - 2025 ${footer}`);
+      .setFooter({ text: `Barnie Corps © 2021 - 2025 ${footer}` });
     message.reply({ embeds: [inviteEmbed] });
   }
   if (content.toLowerCase().startsWith(prefix.toLowerCase() + 'help') || content.toLowerCase().startsWith(prefix.toLowerCase() + 'ayuda')) {
@@ -340,9 +340,15 @@ client.on('messageCreate', async message => {
     let sayDesc = "Sirve para hacer que el bot envíe un mensaje en el canal actual";
     let avatarDesc = "Sirve para ver tu avatar o el de algún otro usuario (Proporcionar una ID hará que se muestre el avatar de ese usuario sin importar que no esté en el servidor)";
     let clearDesc = "Sirve para eliminar hasta 100 mensajes en un segundo";
+    let logsDesc = "Sirve para establecer el canal e idioma de los logs, igual para apagarlos o encenderlos";
+    let setSuggestDesc = "Sirve para establecer el canal de sugerencias";
+    let suggestDesc = "Sirve para enviar una sugerencia al canal establecido para ello";
     let footer = 'Todos los derechos reservados.';
     if (foundL) {
       if (foundL.lang === 'en') {
+        suggestDesc = "It is used to send a suggestion to the channel established for this purpose.";
+        setSuggestDesc = "It is used to establish the suggestion channel";
+        logsDesc = "It is used to set the channel and language of the logs, as well as to turn them on or off.";
         clearDesc = "Deletes up to 100 messages in one second";
         sayDesc = "Used to make the bot send a message on the current channel.";
         avatarDesc = "It is used to see your avatar or another user's avatar (Providing an ID will show that user's avatar no matter if he/she is not on the server).";
@@ -380,6 +386,9 @@ client.on('messageCreate', async message => {
         footer = 'All rights reserved.';
       }
       else if (foundL.lang === 'br') {
+        suggestDesc = "É utilizado para enviar uma sugestão ao canal estabelecido para este fim.";
+        setSuggestDesc = "Serve para estabelecer o canal de sugestões";
+        logsDesc = "Utilizado para definir o canal e a língua dos registos, bem como para os ligar ou desligar.";
         clearDesc = "Elimina até 100 mensagens em um segundo";
         sayDesc = "Usado para fazer o bot enviar uma mensagem no canal atual.";
         avatarDesc = "Use para visualizar seu avatar ou o avatar de outro usuário (Fornecer uma ID mostrará o avatar desse usuário, independentemente de ele estar ou não no servidor).";
@@ -420,13 +429,13 @@ client.on('messageCreate', async message => {
     const embed = new Discord.MessageEmbed()
       .setTitle(`${embedTitle} :robot:`)
       .setDescription(embedDesc)
-      .setFooter(`Barnie Corps © 2021 - 2025 ${footer}`)
+      .setFooter({ text: `Barnie Corps © 2021 - 2025 ${footer}` })
       .setColor('PURPLE');
     const entre = new Discord.MessageEmbed()
       .setTitle(`${entTitle} 🎮`)
       .addField(prefix + 'ia', iaDesc)
       .addField(prefix + 'setchat', chatDesc)
-      .setFooter(`Barnie Corps © 2021 - 2025 ${footer}`)
+      .setFooter({ text: `Barnie Corps © 2021 - 2025 ${footer}` })
       .setColor('PURPLE');
     const mod = new Discord.MessageEmbed()
       .setTitle(`${modTitle} 🔒`)
@@ -434,7 +443,8 @@ client.on('messageCreate', async message => {
       .addField(prefix + 'warn', warndesc)
       .addField(prefix + 'viewwarns', warnviewdesc)
       .addField(prefix + 'clearwarns', clearwarnsdesc)
-      .setFooter(`Barnie Corps © 2021 - 2025 ${footer}`)
+      .addField(prefix + 'logs', logsDesc)
+      .setFooter({ text: `Barnie Corps © 2021 - 2025 ${footer}` })
       .setColor('PURPLE');
     const info = new Discord.MessageEmbed()
       .setTitle(`${infoTitle} 📌`)
@@ -442,7 +452,7 @@ client.on('messageCreate', async message => {
       .addField(prefix + 'botinfo', statsDesc)
       .addField(prefix + 'ping', pingDesc)
       .addField(prefix + 'top', topDesc)
-      .setFooter(`Barnie Corps © 2021 - 2025 ${footer}`)
+      .setFooter({ text: `Barnie Corps © 2021 - 2025 ${footer}` })
       .setColor('PURPLE');
     const uti = new Discord.MessageEmbed()
       .setTitle(`${utiTitle} 🔰`)
@@ -457,18 +467,20 @@ client.on('messageCreate', async message => {
       .addField(prefix + 'say', sayDesc)
       .addField(prefix + 'avatar', avatarDesc)
       .addField(prefix + 'clear', clearDesc)
-      .setFooter(`Barnie Corps © 2021 - 2025 ${footer}`)
+      .addField(prefix + 'setsuggest', setSuggestDesc)
+      .addField(prefix + 'suggest', suggestDesc)
+      .setFooter({ text: `Barnie Corps © 2021 - 2025 ${footer}` })
       .setColor('PURPLE');
     const sup = new Discord.MessageEmbed()
       .setTitle(`${supTitle} 📎`)
       .addField(prefix + 'ticket', ticketDesc)
-      .setFooter(`Barnie Corps © 2021 - 2025 ${footer}`)
+      .setFooter({ text: `Barnie Corps © 2021 - 2025 ${footer}` })
       .setColor('PURPLE');
     const eci = new Discord.MessageEmbed()
       .setTitle(`${ecoTitle} 💼`)
       .addField(prefix + 'bal', balDesc)
       .addField(prefix + 'work', workDesc)
-      .setFooter(`Barnie Corps © 2021 - 2025 ${footer}`)
+      .setFooter({ text: `Barnie Corps © 2021 - 2025 ${footer}` })
       .setColor('PURPLE');
     const sentMsg = await reply({ embeds: [embed] }).catch(error => message.channel.send(`Error while replying: \n\`${error}\``));
     sentMsg.react('🏠');
@@ -590,7 +602,7 @@ client.on('messageCreate', async message => {
       .setTitle(`${embtitle}`)
       .addField(enman, `:dollar: ${eco.hand_money}`)
       .addField(enbank, `:bank: ${eco.bank}`)
-      .setFooter(`Barnie Corps © 2021 - 2025 ${footer}`)
+      .setFooter({ text: `Barnie Corps © 2021 - 2025 ${footer}` })
       .setColor('PURPLE');
     message.reply({ embeds: [BalEmbed] });
   }
@@ -615,7 +627,7 @@ client.on('messageCreate', async message => {
       .setTitle(obtainTitle)
       .setDescription(`${obtainDesc} :dollar:${randomPaid}`)
       .setColor('PURPLE')
-      .setFooter(`Barnie Corps © 2021 - 2025 ${footer}`);
+      .setFooter({ text: `Barnie Corps © 2021 - 2025 ${footer}` });
     if (!eco) {
       const neweco = new Economy();
       neweco.userid = author.id;
