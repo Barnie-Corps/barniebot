@@ -1713,7 +1713,7 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
   const embed = new Discord.MessageEmbed()
   .setAuthor({ iconURL: oldMessage.author.displayAvatarURL({ dynamic: true }), name: oldMessage.author.tag })
   .setTitle(data.title[foundC.lang])
-  .setDescription(channelMessage)
+  .setDescription(`${channelMessage} - [link](${oldMessage.url})`)
   .addFields(
     {
       name: data.oldContentTitle[foundC.lang],
@@ -1727,8 +1727,42 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
   .setColor("PURPLE")
   .setFooter({ text: `Message ID: ${oldMessage.id} || Author ID: ${oldMessage.author.id}` })
   .setTimestamp()
-  const ch = await client.channels.fetch(foundC.channelid);
+  if (!client.channels.cache.has(foundC.channelid)) return;
+  const ch = client.channels.cache.get(foundC.channelid);
   if (ch.id === oldMessage.channel.id) return;
+  await ch.send({ embeds: [embed] });
+});
+client.on("messageDelete", async message => {
+  if (!message.guild) return;
+  const foundG = await Log.findOne({ guildid: message.guild.id });
+  if (!foundG) return;
+  if (message.channel.id === foundG.channelid || message.author.bot) return;
+  const data = {
+    title: {
+      es: "Mensaje eliminado",
+      en: "Message deleted",
+      br: "Mensagem eliminada"
+    },
+    description: {
+      es: `Mensaje de <@${message.author.id}> eliminado en <#${message.channel.id}>`,
+      en: `Message from <@${message.author.id}> deleted in <#${message.channel.id}>`,
+      br: `Mensagem de <@${message.author.id}> eliminada em <#${message.channel.id}>`
+    },
+    contentTitle: {
+      es: "Mensaje",
+      en: "Message",
+      br: "Mensagem"
+    }
+  }
+  const embed = new Discord.MessageEmbed()
+  .setTitle(data.title[foundG.lang])
+  .setDescription(data.description[foundG.lang])
+  .addField(data.contentTitle[foundG.lang], message.content)
+  .setColor("PURPLE")
+  .setTimestamp()
+  if (!client.channels.cache.has(foundG.channelid)) return;
+  const ch = client.channels.cache.get(foundG.channelid);
+  if (ch.id === message.channel.id) return;
   await ch.send({ embeds: [embed] });
 });
 client.login(process.env.TOKEN);
