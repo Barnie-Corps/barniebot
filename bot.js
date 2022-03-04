@@ -1713,6 +1713,7 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
   const embed = new Discord.MessageEmbed()
   .setAuthor({ iconURL: oldMessage.author.displayAvatarURL({ dynamic: true }), name: oldMessage.author.tag })
   .setTitle(data.title[foundC.lang])
+  .setDescription(channelMessage)
   .addFields(
     {
       name: data.oldContentTitle[foundC.lang],
