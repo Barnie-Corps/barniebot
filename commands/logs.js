@@ -53,7 +53,7 @@ module.exports = {
                  * @type {TextChannel}
                  */
                 let ch = message.mentions.channels.first();
-                if (!ch) return message.reply("```\n" + `${client.prefix}logs set {channel}\n${createSpace(client.prefix.length)}          ^^^^^^^\n\nERR: Missing Parameter` + "\n```");
+                if (!ch) return message.reply("```\n" + `${client.prefix}logs set {channel}\n${createSpaces(client.prefix.length)}          ^^^^^^^\n\nERR: Missing Parameter` + "\n```");
                 let lng = args[2];
                 if (!lng) return message.reply("```\n" + `${client.prefix}logs set #${ch.name} {lang}\n${createSpaces(client.prefix.length)}          ${createSpaces(ch.name.length)}  ^^^^\n\nERR: Missing Parameter` + "\n```");
                 if (!langs.some(l => l === lng.toLowerCase())) return message.reply("```\n" + `${client.prefix}logs set #${ch.name} ${lng}\n${createSpaces(client.prefix.length)}          ${createSpaces(ch.name.length)} ${createArrows(lng.length)}\n\nERR: Invalid Lang` + "\n```");
