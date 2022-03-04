@@ -91,6 +91,7 @@ const Cmd = require('./models/customcmds');
 const Time = require('./models/temps');
 const Employee = require("./models/clynet_employees");
 const loadingdc = '<a:discordproloading:875107406462472212>';
+const Log = require("./models/logs");
 async function botlog(text) {
   const target = await client.channels.fetch('789294581333884948');
   target.send(text);
@@ -1675,6 +1676,46 @@ client.on('messageCreate', async message => {
       console.log(`There was an error while sending the message\n\`${err}\``);
     }
   });
+});
+client.on("messageUpdate", async (oldMessage, newMessage) => {
+  if (!oldMessage.guild) return;
+  const data = {
+    title: {
+      es: "Mensaje editado",
+      en: "Edited message",
+      br: "Mensagem editada"
+    },
+    oldContentTitle: {
+      es: "Mensaje original",
+      en: "Original message",
+      br: "Mensagem original"
+    },
+    newContentTile: {
+      es: "Nuevo mensaje",
+      en: "New message",
+      br: "Nova mensagem"
+    }
+  }
+  const foundC = await Log.findOne({ guildid: oldMessage.guild.id });
+  if (!foundC) return;
+  const embed = new Discord.MessageEmbed()
+  .setAuthor({ iconURL: oldMessage.author.displayAvatarURL({ dynamic: true }), name: oldMessage.author.tag })
+  .setTitle(data.title[foundC.lang])
+  .addFields(
+    {
+      name: data.oldContentTitle[foundC.lang],
+      value: oldMessage.content
+    },
+    {
+      name: data.newContentTitle[foundC.lang],
+      value: newMessage.content
+    }
+  )
+  .setColor("PURPLE")
+  .setFooter({ text: `Message ID: ${oldMessage.id} || Author ID: ${oldMessage.author.id}` })
+  .setTimestamp()
+  const ch = await client.channels.fetch(foundC.channelid);
+  await ch.send({ embeds: [embed] });
 });
 client.login(process.env.TOKEN);
 module.exports = client;
