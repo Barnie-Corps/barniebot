@@ -63,6 +63,14 @@ module.exports = {
         else {
             suggest = new Suggest({ guildId: guild.id, active: true });
         }
+        try {
+            let test = await ch.send(".");
+            test.delete();
+        }
+        catch (err) {
+            console.log(err.stack);
+            return message.reply(cannotSend);
+        }
         const lastCh = suggest.channelId !== "" ? suggest.channelId : null;
         suggest.channelId = ch.id;
         await suggest.save();
