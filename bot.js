@@ -1634,12 +1634,11 @@ client.on('messageCreate', async message => {
             const referenceGuild = await client.guilds.fetch(m.reference.guildId);
             const referenceChannel = referenceGuild.channels.cache.get(m.reference.channelId);
             const referenceMessage = await referenceChannel.messages.fetch(m.reference.messageId);
-            content2 = `> ${referenceMessage.content && referenceMessage.attachments ? referenceMessage.content.replace('> >', '>').replace(`<@${data.owner}>`, '[mention owner]').replace(`<@!${data.owner}>`, '[mention owner]') : '*Attachment*'}\n\`@${referenceMessage.author.username}\` ${m.content}`;
+            content = `> ${referenceMessage.content && referenceMessage.attachments ? referenceMessage.content.replace('> >', '>').replace(`<@${data.owner}>`, '[mention owner]').replace(`<@!${data.owner}>`, '[mention owner]') : '*Attachment*'}\n\`@${referenceMessage.author.username}\` ${m.content}`;
           }
           for (const word of badwords) {
             const regW = new RegExp(word, 'ig');
             content = content.replaceAll(regW, `\`${censoreds[word.length - 1]}\``);
-            content2 = content2.replaceAll(regW, `\`${censoreds[word.length - 1]}\``);
             num = num + 1;
           }
           let username = m.author.username;
@@ -1662,7 +1661,7 @@ client.on('messageCreate', async message => {
             username = username.replaceAll('[MOD]', '').replaceAll('[VIP]', '').replaceAll('[ADM]', '').replaceAll('[ADMIN]', '').replaceAll('[DEV]', '');
           }
           await webh.send({
-            content: m.content ? content2 : '*Attachment*',
+            content: m.content ? content : '*Attachment*',
             username: username,
             files: m.attachments.size > 0 ? m.attachments : null,
             avatarURL: m.author.displayAvatarURL({ dynamic: true }),
@@ -1675,7 +1674,7 @@ client.on('messageCreate', async message => {
               g2.webhookToken = webh2.token;
               await g2.save();
               await webh2.send({
-                content: m.content ? content2 : '*Attachment*',
+                content: m.content ? content : '*Attachment*',
                 username: m.author.username,
                 files: m.attachments.size > 0 ? m.attachments : null,
                 avatarURL: m.author.displayAvatarURL({ dynamic: true }),
