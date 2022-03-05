@@ -1660,7 +1660,7 @@ client.on('messageCreate', async message => {
           await webh.send({
             content: m.content ? content2 : '*Attachment*',
             username: username,
-            files: m.attachments ? m.attachments : null,
+            files: m.attachments.size > 0 ? m.attachments : null,
             avatarURL: m.author.displayAvatarURL({ dynamic: true }),
           }).catch(async err => {
             if (err.message.toLowerCase().includes('unknown webhook')) {
@@ -1673,7 +1673,7 @@ client.on('messageCreate', async message => {
               await webh2.send({
                 content: m.content ? content2 : '*Attachment*',
                 username: m.author.username,
-                files: m.attachments ? m.attachments : null,
+                files: m.attachments.size > 0 ? m.attachments : null,
                 avatarURL: m.author.displayAvatarURL({ dynamic: true }),
               }).catch(err => console.log(err));
             }
