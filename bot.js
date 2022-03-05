@@ -1,4 +1,5 @@
 const Discord = require('discord.js');
+const { TextMessage } = require("discord.js");
 const { Configuration, OpenAIApi } = require("openai");
 const config = new Configuration({
     apiKey: process.env.OPEN_KEY
@@ -1616,6 +1617,9 @@ client.on('messageCreate', async message => {
   chats.forEach(async g2 => {
     try {
       if (g2.active === true && client.channels.cache.has(g2.channelid)) {
+        /**
+         * @type {TextChannel}
+         */
         const chin = client.channels.cache.get(g2.channelid);
         if (chin.id === m.channel.id) return;
         const badwords = [];
