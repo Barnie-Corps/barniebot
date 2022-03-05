@@ -1712,6 +1712,7 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
   }
   const foundC = await Log.findOne({ guildid: oldMessage.guild.id });
   if (!foundC) return;
+  if (!foundC.active) return;
   let channelMessage = `Mensaje de <@${oldMessage.author.id}> editado en <#${oldMessage.channel.id}>`;
   switch (foundC.lang) {
     case "en": {
@@ -1748,6 +1749,7 @@ client.on("messageDelete", async message => {
   if (!message.guild) return;
   const foundG = await Log.findOne({ guildid: message.guild.id });
   if (!foundG) return;
+  if (!foundG.active) return;
   if (message.channel.id === foundG.channelid || message.author.bot) return;
   const data = {
     title: {
