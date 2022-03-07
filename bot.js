@@ -1454,12 +1454,6 @@ client.on('messageCreate', async message => {
     }
     if (foundCmd.tier && foundCmd.tier === 1 && !foundP || foundP && foundP.tier < foundCmd.tier) return reply(nobeta);
     if (foundCmd.tier && foundCmd.tier === 2 && !foundP || foundP && foundP.tier < foundCmd.tier) return reply(novip);
-    const foundEmployee = await Employee.findOne({ discordID: message.author.id });
-    if (foundCmd.clynet) {
-      if (foundCmd.clynet.requiredRank) {
-        if (!foundEmployee || foundEmployee && foundEmployee.rankLevel < foundCmd.clynet.requiredRank) return reply("You're not authorized to use this command.");
-      }
-    }
     async function getInput() {
       const filter = m => m.author.id === message.author.id;
       const collected = await message.channel.awaitMessages({ filter: filter, max: 1 });
