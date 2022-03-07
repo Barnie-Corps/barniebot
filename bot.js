@@ -1,5 +1,5 @@
 const Discord = require('discord.js');
-const { TextMessage } = require("discord.js");
+const { TextChannel } = require("discord.js");
 const { Configuration, OpenAIApi } = require("openai");
 const config = new Configuration({
     apiKey: process.env.OPEN_KEY
