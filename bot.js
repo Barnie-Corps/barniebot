@@ -2,7 +2,7 @@ const Discord = require('discord.js');
 const { TextChannel } = require("discord.js");
 const { Configuration, OpenAIApi } = require("openai");
 const config = new Configuration({
-    apiKey: process.env.OPEN_KEY
+  apiKey: process.env.OPEN_KEY
 });
 const openai = new OpenAIApi(config);
 /**
@@ -41,18 +41,18 @@ class Ai {
    */
   async getResponse(message, id) {
     if (!message || message === "") return console.log('AI: Cannot send an empty message to the API.');
-   /*this.msg += `\nUser: ${message}\nBarnie:`;
-    const response = await openai.createCompletion("text-davinci-001", {
-        prompt: this.msg,
-        temperature: 0.9,
-        max_tokens: 150,
-        top_p: 1,
-        frequency_penalty: 0,
-        presence_penalty: 0.7,
-        stop: ["User:"]
-    });
-    this.msg += response.data.choices[0].text;
-    return response.data.choices[0].text;*/
+    /*this.msg += `\nUser: ${message}\nBarnie:`;
+     const response = await openai.createCompletion("text-davinci-001", {
+         prompt: this.msg,
+         temperature: 0.9,
+         max_tokens: 150,
+         top_p: 1,
+         frequency_penalty: 0,
+         presence_penalty: 0.7,
+         stop: ["User:"]
+     });
+     this.msg += response.data.choices[0].text;
+     return response.data.choices[0].text;*/
     const response = await fetch(`http://localhost:3000/ai/barnie?id=${id}&msg=${message.replace(/ /g, "%20").replaceAll("+", "%2B").replaceAll("?", "%3F")}`);
     const rsp = await response.json();
     return rsp.response;
@@ -817,7 +817,7 @@ client.on('messageCreate', async message => {
       newp.prefix = p;
       await newp.save();
       try {
-      await guild.me.setNickname(`[${p.toLowerCase()}] Barnie`);
+        await guild.me.setNickname(`[${p.toLowerCase()}] Barnie`);
       }
       catch (err) {
         console.log(err.stack);
@@ -1727,22 +1727,22 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
     }
   }
   const embed = new Discord.MessageEmbed()
-  .setAuthor({ iconURL: oldMessage.author.displayAvatarURL({ dynamic: true }), name: oldMessage.author.tag })
-  .setTitle(data.title[foundC.lang])
-  .setDescription(`${channelMessage} - [link](${oldMessage.url})`)
-  .addFields(
-    {
-      name: data.oldContentTitle[foundC.lang],
-      value: oldMessage.content
-    },
-    {
-      name: data.newContentTitle[foundC.lang],
-      value: newMessage.content
-    }
-  )
-  .setColor("PURPLE")
-  .setFooter({ text: `Message ID: ${oldMessage.id} || Author ID: ${oldMessage.author.id}` })
-  .setTimestamp()
+    .setAuthor({ iconURL: oldMessage.author.displayAvatarURL({ dynamic: true }), name: oldMessage.author.tag })
+    .setTitle(data.title[foundC.lang])
+    .setDescription(`${channelMessage} - [link](${oldMessage.url})`)
+    .addFields(
+      {
+        name: data.oldContentTitle[foundC.lang],
+        value: oldMessage.content
+      },
+      {
+        name: data.newContentTitle[foundC.lang],
+        value: newMessage.content
+      }
+    )
+    .setColor("PURPLE")
+    .setFooter({ text: `Message ID: ${oldMessage.id} || Author ID: ${oldMessage.author.id}` })
+    .setTimestamp()
   if (!client.channels.cache.has(foundC.channelid)) return;
   const ch = client.channels.cache.get(foundC.channelid);
   if (ch.id === oldMessage.channel.id) return;
@@ -1772,13 +1772,13 @@ client.on("messageDelete", async message => {
     }
   }
   const embed = new Discord.MessageEmbed()
-  .setAuthor({ iconURL: message.author.displayAvatarURL({ dynamic: true }), name: message.author.tag })
-  .setTitle(data.title[foundG.lang])
-  .setDescription(data.description[foundG.lang])
-  .addField(data.contentTitle[foundG.lang], message.content)
-  .setColor("PURPLE")
-  .setFooter({ text: `Message ID: ${message.id} || Author ID: ${message.author.id}` })
-  .setTimestamp()
+    .setAuthor({ iconURL: message.author.displayAvatarURL({ dynamic: true }), name: message.author.tag })
+    .setTitle(data.title[foundG.lang])
+    .setDescription(data.description[foundG.lang])
+    .addField(data.contentTitle[foundG.lang], message.content)
+    .setColor("PURPLE")
+    .setFooter({ text: `Message ID: ${message.id} || Author ID: ${message.author.id}` })
+    .setTimestamp()
   if (!client.channels.cache.has(foundG.channelid)) return;
   const ch = client.channels.cache.get(foundG.channelid);
   if (ch.id === message.channel.id) return;
