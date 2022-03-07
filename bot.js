@@ -90,7 +90,6 @@ const Warn = require('./models/warns');
 const Chat = require('./models/chat');
 const Cmd = require('./models/customcmds');
 const Time = require('./models/temps');
-const Employee = require("./models/clynet_employees");
 const loadingdc = '<a:discordproloading:875107406462472212>';
 const Log = require("./models/logs");
 async function botlog(text) {
