@@ -23,8 +23,15 @@ module.exports = {
     if (!targetPage) return message.reply(nourl).catch(err => message.channel.send(`Error while replying\n\`${err}\``));
     if (!targetPage.includes("http://") && !targetPage.includes('https://')) return message.reply(nohttp);
     await fetch(targetPage).then(async res => {
-      let statusmsg = res.status === 404 ? "Not found" : "Forbidden";
-      if (res.status === 404 || res.status === 403) return message.reply(`${res.status} - ${statusmsg}`);
+      const errorMessages = {
+        404: "Not found",
+        400: "Bad request",
+        403: "Forbbiden",
+        401: "Not authorized",
+        429: "Too many requests (ratelimit)",
+        500: "Internal server error"
+      }
+      if (res.status > 399) return message.reply(`${res.status} - ${errorMessages[res.status.toString()] ? errorMessages[res.status.toString()] : "Unknown error type"}`);
       const response = await res.text();
       const filePath = '../page.html';
       fs.writeFileSync(filePath, 'Loading...');
