@@ -1616,7 +1616,7 @@ client.on('messageCreate', async message => {
         const chin = client.channels.cache.get(g2.channelid);
         if (chin.id === m.channel.id) return;
         const badwords = [];
-        badwords.push('pene', 'p3ne', 'pen3', 'p3n3', 'vagina', 'v4gina', 'vagin4', 'v4gin4', 'https://t.me/joinchat/', '@everyone', '@here', '<@889871287453888532>', '<!@889871287453888532>');
+        badwords.push('pene', 'p3ne', 'pen3', 'p3n3', 'vagina', 'v4gina', 'vagin4', 'v4gin4', 'https://t.me/joinchat/', '@everyone', '@here', '<@889871287453888532>', '<!@889871287453888532>', 'https://discord.gg/', 'discord.gg');
         const censoreds = ['*', '**', '***', '****', '*****', '******', '*******', '********', '*********', '**********', '***********', '************', '*************', '**************', '***************', '****************', '*****************', '******************', '*******************', '********************', '*********************', '**********************', '***********************', '************************', '*************************', '**************************', '***************************'];
         badwords.push('puto', 'put0', 'pvto', 'pvt0', 'pto', 'pt0');
         let num = 0;
@@ -1629,6 +1629,18 @@ client.on('messageCreate', async message => {
             const referenceMessage = await referenceChannel.messages.fetch(m.reference.messageId);
             content = `> ${referenceMessage.content && referenceMessage.attachments ? referenceMessage.content.replace('> >', '>').replace(`<@${data.owner}>`, '[mention owner]').replace(`<@!${data.owner}>`, '[mention owner]') : '*Attachment*'}\n\`@${referenceMessage.author.username}\` ${m.content}`;
           }
+     if (content.toLowerCase().includes('https://discord.gg') || content.toLowerCase().includes('discord.gg')) {
+    let prdc = 'Tu mensaje contiene un link de invitación por lo que no se ha envíado en el chat global.';
+    if (founu) {
+      if (founu.lang === 'en') {
+        prdc = 'Your message contains an invitation link so it has not been sent in the global chat.';
+      }
+      else if (founu.lang === 'br') {
+        prdc = 'Sua mensagem contém um link de convite para que não tenha sido enviada no bate-papo global.';
+      }
+    }
+    return m.author.send(prdc);
+  }
           for (const word of badwords) {
             const regW = new RegExp(word, 'ig');
             content = content.replaceAll(regW, `\`${censoreds[word.length - 1]}\``);
