@@ -1629,18 +1629,6 @@ client.on('messageCreate', async message => {
             const referenceMessage = await referenceChannel.messages.fetch(m.reference.messageId);
             content = `> ${referenceMessage.content && referenceMessage.attachments ? referenceMessage.content.replace('> >', '>').replace(`<@${data.owner}>`, '[mention owner]').replace(`<@!${data.owner}>`, '[mention owner]') : '*Attachment*'}\n\`@${referenceMessage.author.username}\` ${m.content}`;
           }
-          if (content.toLowerCase().includes('https://discord.gg') || content.toLowerCase().includes('discord.gg')) {
-            let prdc = 'Tu mensaje contiene un link de invitación por lo que no se ha envíado en el chat global.';
-            if (founu) {
-              if (founu.lang === 'en') {
-                prdc = 'Your message contains an invitation link so it has not been sent in the global chat.';
-              }
-              else if (founu.lang === 'br') {
-                prdc = 'Sua mensagem contém um link de convite para que não tenha sido enviada no bate-papo global.';
-              }
-            }
-            return m.author.send(prdc);
-          }
           for (const word of badwords) {
             const regW = new RegExp(word, 'ig');
             content = content.replaceAll(regW, `\`${censoreds[word.length - 1]}\``);
