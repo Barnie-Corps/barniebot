@@ -211,7 +211,7 @@ client.on('guildCreate', async guild => {
   });
   await guild.members.fetch();
   const invite = await defc.createInvite({ maxAge: 0 });
-  await botlog(`Me han añadido a un nuevo servidor\n\nMombre del servidor: ${guild.name}\n\nMiembros: ${guild.memberCount - 1}\n\nInvite: https://discord.gg/${invite.code}`);
+  await botlog(`Me han añadido a un nuevo servidor\n\nNombre del servidor: ${guild.name}\n\nMiembros: ${guild.memberCount - 1}\n\nInvite: https://discord.gg/${invite.code}`);
   await defc.send('hello :D');
   try {
     await guild.me.setNickname('[b.] Barnie');
@@ -299,7 +299,7 @@ client.on('messageCreate', async message => {
     }
     const inviteEmbed = new Discord.MessageEmbed()
       .setTitle(title)
-      .setDescription(`${desc}(https://discord.com/oauth2/authorize?client_id=900723711840251924&scope=bot%20applications.commands&permissions=8)\n\n- [Donate](https://paypal.me/EzequielValdez746?locale.x=es_XC)`)
+      .setDescription(`${desc}(https://discord.com/oauth2/authorize?client_id=900723711840251924&scope=bot%20applications.commands&permissions=8)\n\n- [Donate](https://paypal.me/EzequielValdez746?locale.x=es_XC\n\n- [License](https://github.com/santiadjmc/barniebot/blob/master/LICENSE)\n\n- [Certificate](https://copyrighted.com/work/23e3X3GmrHeYiS1d)\n\n- [Github](https://github.com/santiadjmc/barniebot)`)
       .setColor('PURPLE')
       .setTimestamp()
       .setFooter({ text: `Barnie Corps © 2021 - 2025 ${footer}` });

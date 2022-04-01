@@ -54,7 +54,7 @@ module.exports = {
 			.setTitle('Stats')
 			.addField('General', `${devmsg}: **Santiago.#9521**\n\n${servermsg}: **${message.client.guilds.cache.size}**\n\n${cachedu}: **${message.client.users.cache.size}**\n\n${totalu}: ${loadingdc}\n\n${upt}: ${loadingdc}\n\n${ram}: **${formatMemoryUsage(process.memoryUsage().heapUsed)} MB / ${formatMemoryUsage(os.totalmem())} MB**`, true)
 			.addField(dbmsg, `\n${dbusers}: ${loadingdc}\n\n${db_mensajes}: ${loadingdc}\n`, true)
-			.addField('Links', `\n- [Invite](https://discord.com/oauth2/authorize?client_id=900723711840251924&scope=bot%20applications.commands&permissions=8)\n`)
+			.addField('Links', `\n- [Invite](https://discord.com/oauth2/authorize?client_id=900723711840251924&scope=bot%20applications.commands&permissions=8)\n\n- [License](https://github.com/santiadjmc/barniebot/blob/master/LICENSE)\n\n- [Certificate](https://copyrighted.com/work/23e3X3GmrHeYiS1d)\n\n- [Github](https://github.com/santiadjmc/barniebot)`)
 			.setColor('PURPLE')
 			.setFooter(noal);
 		const waitmsg = await message.reply({ embeds: [loadEmbed] });
@@ -69,7 +69,7 @@ module.exports = {
 			.setTitle('Stats')
 			.addField('General', `${devmsg}: **Santiago.#9521**\n\n${servermsg}: **${message.client.guilds.cache.size}**\n\n${cachedu}: **${message.client.users.cache.size}**\n\n${totalu}: **${coumt}**\n\n${upt}: **${actividad}**\n\n${ram}: **${formatMemoryUsage(process.memoryUsage().heapUsed)} MB / ${formatMemoryUsage(os.totalmem())} MB**`, true)
 			.addField(dbmsg, `\n${dbusers}: **${users.length}**\n\n${db_mensajes}: **${msgs[0].count}**\n`, true)
-			.addField('Links', `\n- [Invite](https://discord.com/oauth2/authorize?client_id=900723711840251924&scope=bot%20applications.commands&permissions=8)\n`)
+			.addField('Links', `\n- [Invite](https://discord.com/oauth2/authorize?client_id=900723711840251924&scope=bot%20applications.commands&permissions=8)\n\n- [License](https://github.com/santiadjmc/barniebot/blob/master/LICENSE)\n\n- [Certificate](https://copyrighted.com/work/23e3X3GmrHeYiS1d)\n\n- [Github](https://github.com/santiadjmc/barniebot)`)
 			.setColor('PURPLE')
 			.setFooter(noal);
 		waitmsg.edit({ embeds: [statEmbed] });
