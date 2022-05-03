@@ -20,7 +20,8 @@ const utils = {
         }
     },
     hasWord: (text, word) => {
-        return RegExp(`\\b${word}+\\b`, 'gi').test(text);
+        const reg = new RegExp(`\\b${word}\\b`, 'ig');
+        return reg.test(text); 
     }
 }
 module.exports = utils;
