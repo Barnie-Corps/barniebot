@@ -20,7 +20,7 @@ const utils = {
         }
     },
     hasWord: (text, word) => {
-        return text.toLowerCase().indexOf(word.toLowerCase()) > -1;
+        return RegExp(`\\b${word}+\\b`, 'gi').test(text);
     }
 }
 module.exports = utils;
