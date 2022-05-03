@@ -38,11 +38,11 @@ module.exports = {
         if (!targetText) return message.reply(nomsg);
         switch (algorithm.toLowerCase()) {
             case 'aes': {
-                if (message.deletable) await message.delete();
                 const decrypted = utils.decryptWithAES(key, targetText);
                 if (decrypted === null) {
                     return message.reply(`${advMessage}`);
                 }
+                if (message.deletable) await message.delete();
                 return message.channel.send(`${decrypted}`);
             }
         }
