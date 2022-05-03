@@ -20,8 +20,7 @@ const utils = {
         }
     },
     hasWord: (text, word) => {
-        const reg = new RegExp(`\\b${word}\\b`, 'ig');
-        return reg.test(text); 
+        return text.toLowerCase().includes(word.toLowerCase());
     }
 }
 module.exports = utils;
