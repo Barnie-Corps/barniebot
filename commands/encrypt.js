@@ -44,7 +44,7 @@ module.exports = {
       case 'aes': {
         if (message.deletable) await message.delete();
         const encrypted = utils.encryptWithAES(key, targetText);
-        return message.reply(`${encrypted}\n\`${advMessage}\``);
+        return message.channel.send(`${encrypted}\n\`${advMessage}\``);
       }
     }
   }
