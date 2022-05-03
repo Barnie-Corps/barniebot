@@ -1,6 +1,7 @@
 const Discord = require('discord.js');
 const { TextChannel } = require("discord.js");
 const { Configuration, OpenAIApi } = require("openai");
+const utils = require("./utils");
 const config = new Configuration({
   apiKey: process.env.OPEN_KEY
 });
@@ -266,6 +267,15 @@ client.on('messageCreate', async message => {
     newUser.tag = author.tag;
     await newUser.save();
     console.log('[!] New user registered in the DB.\nTag: ' + author.tag + `\nChannel of the message: ${message.channel.name}\nGuild: ${message.guild.name}`);
+  }
+  if (utils.hasWord(message.content, "love") || utils.hasWord(message.content, "amor")) {
+    message.react('💖');
+  }
+  if (utils.hasWord(message.content, "hate") || utils.hasWord(message.content, "odio")) {
+    message.react('💔');
+  }
+  if (utils.hasWord(message.content, "hello") || utils.hasWord(message.content, "hola") || utils.hasWord(message.content, "hi") || utils.hasWord(message.content, "hey")) {
+    message.react('👋');
   }
   if (content.toLowerCase().startsWith(prefix.toLowerCase())) {
     let sib = 'Te encuentras en la black list, no puedes usar mis comandos.';
