@@ -11,7 +11,7 @@ module.exports = {
     let advMessage = "Este hash solo puede ser desencriptado con la misma clave de encriptación";
     let notSupported = "Este algoritmo no está soportado";
     const supportedAlgorithms = ["bcrypt", "aes"];
-    const targetText = args.slice(1).join(" ");
+    const targetText = args.slice(2).join(" ");
     const key = args[1];
     const algorithm = args[0];
     if (lang !== null) {
