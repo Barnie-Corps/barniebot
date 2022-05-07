@@ -274,7 +274,7 @@ client.on('messageCreate', async message => {
   if (utils.hasWord(message.content, "hate") || utils.hasWord(message.content, "odio")) {
     message.react('💔');
   }
-  if (utils.hasWord(message.content, "hello") || utils.hasWord(message.content, "hola") || utils.hasWord(message.content, "hi") || utils.hasWord(message.content, "hey")) {
+  if (message.content.toLowerCase().startsWith("hola") || message.content.toLowerCase().startsWith("hello") ||  message.content.toLowerCase().startsWith("hi")) {
     message.react('👋');
   }
   if (content.toLowerCase().startsWith(prefix.toLowerCase())) {
