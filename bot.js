@@ -54,9 +54,14 @@ class Ai {
      });
      this.msg += response.data.choices[0].text;
      return response.data.choices[0].text;*/
-    const response = await fetch(`http://localhost:3000/ai/barnie?id=${id}&msg=${message.replace(/ /g, "%20").replaceAll("+", "%2B").replaceAll("?", "%3F")}`);
-    const rsp = await response.json();
-    return rsp.response;
+     async function getResponse(text, uid) {
+      text = encodeURIComponent(text).replaceAll("'", "%27").replaceAll("*", "%2A").replaceAll("?", "%3F");
+      const uri = `${process.env.AI_API}bid=${process.env.AI_BID}&key=${process.env.AI_KEY}&uid=${uid}&msg=${text}`;
+      const res = await fetch(uri);
+      const json = await res.json();
+      return json.cnt.replace("(translations by Microsoft translator)", "");
+  }
+  return await getResponse(message, id);
   }
 }
 /**
