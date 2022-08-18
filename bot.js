@@ -1649,6 +1649,8 @@ client.on('messageCreate', async message => {
             content = content.replaceAll(regW, `\`${censoreds[word.length - 1]}\``);
             num = num + 1;
           }
+          const regU = new RegExp(/<@!?[0-9]{18}>/g);
+          content = content.replaceAll(regU, '[mention]');
           let username = m.author.username;
           const eco = await Economy.findOne({ userid: m.author.id });
           if (eco && eco.rank !== 1) {
