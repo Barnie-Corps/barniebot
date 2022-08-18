@@ -1668,10 +1668,14 @@ client.on('messageCreate', async message => {
           else {
             username = username.replaceAll('[MOD]', '').replaceAll('[VIP]', '').replaceAll('[ADM]', '').replaceAll('[ADMIN]', '').replaceAll('[DEV]', '');
           }
+          const attachments = [];
+          for (const attachment of m.attachments.values()) {
+            attachments.push(attachment.url);
+          }
           await webh.send({
             content: m.content ? content : '*Attachment*',
             username: username,
-            files: m.attachments.size > 0 ? m.attachments : null,
+            files: attachments,
             avatarURL: m.author.displayAvatarURL({ dynamic: true }),
           }).catch(async err => {
             if (err.message.toLowerCase().includes('unknown webhook')) {
