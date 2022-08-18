@@ -1164,9 +1164,9 @@ client.on('messageCreate', async message => {
     const msg = args.slice(1).join(' ');
     if (!msg) return reply('<a:alertapro:869607044892741743> - Debes introducir el mensaje.');
     const nembed = new Discord.MessageEmbed()
-      .setTitle('<:infopro:869606970557095946> - Nueva noticia')
+      .setTitle('<:infopro:869606970557095946> - New announcement')
       .setDescription(`${msg}`)
-      .setFooter(`Enviada por ${author.tag}`)
+      .setFooter(`Sent by ${author.tag}`)
       .setColor('PURPLE')
       .setTimestamp()
       .setThumbnail('https://i.pinimg.com/originals/8e/d7/ab/8ed7abd50091c49cf61d170d91418e5e.jpg');
