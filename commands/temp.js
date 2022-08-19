@@ -47,287 +47,34 @@ module.exports = {
     if (tt === 0 || tt < 0) return reply(nozero);
     const types = ["mins", "secs", "hrs"];
     if (!types.some(ty => type.toLowerCase().includes(ty))) return reply(invalidty);
-    if (foundT) {
-      if (type.toLowerCase() === "mins") {
-        foundT.active = true;
-        foundT.total = tt;
-        foundT.left = 60 * tt;
-        foundT.type = "mins";
-        await foundT.save();
-        reply(started);
-    const interval2 = setInterval(async function() {
-        const foundtt = await Time.findOne({ userid: message.author.id });
-        if (foundtt.active === false) return;
-        foundtt.left = foundtt.left - 1;
-        await foundtt.save();
-        if (foundtt.left === 0){
-          const u = await client.users.fetch(foundtt.userid);
-          let timeup = "El tiempo se ha acabado";
-          let desk = "El tiempo establecido ha acabado, si deseas volver a establecerlo usa el comando del temporizador nuevamente";
-          let tl = "Tiempo establecido";
-          if (lang !== null && lang.lang !== "es") {
-            if (lang.lang === "en") {
-              timeup = "Time is up";
-              desk = "The set time is over, if you want to reset it use the timer command again.";
-              tl = "Established time";
-            }
-            else if (lang.lang === "br") {
-              timeup = "O tempo se esgotou";
-              desk = "O tempo definido expirou, se você desejar reinicializá-lo utilize novamente o comando do timer.";
-              tl = "Tempo estabelecido";
-            }
-          }
-          const embed =  new Discord.MessageEmbed()
-          .setTitle(timeup)
-          .setDescription(desk)
-          .addField(tl, `${foundtt.total} ${foundtt.type}`)
-          .setColor("PURPLE")
-          .setTimestamp()
-          clearInterval(interval2);
-          foundtt.active = false;
-          await foundtt.save();
-          clearInterval(interval2)
-          try {
-            u.send({ embeds: [embed] });
-          }
-          catch (e) {
-            console.log(e);
-          }
-        }
-      }, 1000);
-      }
-      else if (type.toLowerCase() === "secs") {
-        foundT.active = true;
-        foundT.total = tt;
-        foundT.left = tt;
-        foundT.type = "secs";
-        await foundT.save();
-        reply(started);
-    const interval2 = setInterval(async function() {
-        const foundtt = await Time.findOne({ userid: message.author.id });
-        if (foundtt.active === false) return;
-        foundtt.left = foundtt.left - 1;
-        await foundtt.save();
-        if (foundtt.left === 0){
-          const u = await client.users.fetch(foundtt.userid);
-          let timeup = "El tiempo se ha acabado";
-          let desk = "El tiempo establecido ha acabado, si deseas volver a establecerlo usa el comando del temporizador nuevamente";
-          let tl = "Tiempo establecido";
-          if (lang !== null && lang.lang !== "es") {
-            if (lang.lang === "en") {
-              timeup = "Time is up";
-              desk = "The set time is over, if you want to reset it use the timer command again.";
-              tl = "Established time";
-            }
-            else if (lang.lang === "br") {
-              timeup = "O tempo se esgotou";
-              desk = "O tempo definido expirou, se você desejar reinicializá-lo utilize novamente o comando do timer.";
-              tl = "Tempo estabelecido";
-            }
-          }
-          const embed =  new Discord.MessageEmbed()
-          .setTitle(timeup)
-          .setDescription(desk)
-          .addField(tl, `${foundtt.total} ${foundtt.type}`)
-          .setColor("PURPLE")
-          .setTimestamp()
-          clearInterval(interval2);
-          foundtt.active = false;
-          await foundtt.save();
-          try {
-            u.send({ embeds: [embed] });
-          }
-          catch (e) {
-            console.log(e);
-          }
-        }
-      }, 1000);
-      }
-      else if (type.toLowerCase() === "hrs") {
-        foundT.active = true;
-        foundT.total = tt;
-        foundT.total = 60 * 60 * tt;
-    const interval2 = setInterval(async function() {
-        const foundtt = await Time.findOne({ userid: message.author.id });
-        if (foundtt.active === false) return;
-        foundtt.left = foundtt.left - 1;
-        await foundtt.save();
-        if (foundtt.left === 0){
-          const u = await client.users.fetch(foundtt.userid);
-          let timeup = "El tiempo se ha acabado";
-          let desk = "El tiempo establecido ha acabado, si deseas volver a establecerlo usa el comando del temporizador nuevamente";
-          let tl = "Tiempo establecido";
-          if (lang !== null && lang.lang !== "es") {
-            if (lang.lang === "en") {
-              timeup = "Time is up";
-              desk = "The set time is over, if you want to reset it use the timer command again.";
-              tl = "Established time";
-            }
-            else if (lang.lang === "br") {
-              timeup = "O tempo se esgotou";
-              desk = "O tempo definido expirou, se você desejar reinicializá-lo utilize novamente o comando do timer.";
-              tl = "Tempo estabelecido";
-            }
-          }
-          const embed =  new Discord.MessageEmbed()
-          .setTitle(timeup)
-          .setDescription(desk)
-          .addField(tl, `${foundtt.total} ${foundtt.type}`)
-          .setColor("PURPLE")
-          .setTimestamp()
-          clearInterval(interval2);
-          foundtt.active = false;
-          await foundtt.save();
-          try {
-            u.send({ embeds: [embed] });
-          }
-          catch (e) {
-            console.log(e);
-          }
-        }
-      }, 1000);
-      }
-    }
-    else {
+    if (foundT) await foundT.delete();
       const newT = new Time();
       newT.active = true;
       newT.userid = message.author.id;
       newT.total = tt;
       if (type.toLowerCase() === "mins") {
-        newT.left = 60 * tt;
+        const now = new Date();
+        newT.started = now;
+        newT.finished = now+ (tt * 60000);
         newT.type = "mins";
         await newT.save();
         reply(started);
-    const interval2 = setInterval(async function() {
-        const foundtt = await Time.findOne({ userid: message.author.id });
-        if (foundtt.active === false) return;
-        foundtt.left = foundtt.left - 1;
-        await foundtt.save();
-        if (foundtt.left === 0){
-          const u = await client.users.fetch(foundtt.userid);
-          let timeup = "El tiempo se ha acabado";
-          let desk = "El tiempo establecido ha acabado, si deseas volver a establecerlo usa el comando del temporizador nuevamente";
-          let tl = "Tiempo establecido";
-          if (lang !== null && lang.lang !== "es") {
-            if (lang.lang === "en") {
-              timeup = "Time is up";
-              desk = "The set time is over, if you want to reset it use the timer command again.";
-              tl = "Established time";
-            }
-            else if (lang.lang === "br") {
-              timeup = "O tempo se esgotou";
-              desk = "O tempo definido expirou, se você desejar reinicializá-lo utilize novamente o comando do timer.";
-              tl = "Tempo estabelecido";
-            }
-          }
-          const embed =  new Discord.MessageEmbed()
-          .setTitle(timeup)
-          .setDescription(desk)
-          .addField(tl, `${foundtt.total} ${foundtt.type}`)
-          .setColor("PURPLE")
-          .setTimestamp()
-          clearInterval(interval2);
-          foundtt.active = false;
-          await foundtt.save();
-          try {
-            u.send({ embeds: [embed] });
-          }
-          catch (e) {
-            console.log(e);
-          }
-        }
-      }, 1000);
       }
       else if (type.toLowerCase() === "secs") {
-        newT.left = tt;
+        const now = Date.now();
+        newT.started = now;
+        newT.finished = now + (tt * 1000);
         newT.type = "secs";
         await newT.save();
         reply(started);
-    const interval2 = setInterval(async function() {
-        const foundtt = await Time.findOne({ userid: message.author.id });
-        if (foundtt.active === false) return;
-        foundtt.left = foundtt.left - 1;
-        await foundtt.save();
-        if (foundtt.left === 0){
-          const u = await client.users.fetch(foundtt.userid);
-          let timeup = "El tiempo se ha acabado";
-          let desk = "El tiempo establecido ha acabado, si deseas volver a establecerlo usa el comando del temporizador nuevamente";
-          let tl = "Tiempo establecido";
-          if (lang !== null && lang.lang !== "es") {
-            if (lang.lang === "en") {
-              timeup = "Time is up";
-              desk = "The set time is over, if you want to reset it use the timer command again.";
-              tl = "Established time";
-            }
-            else if (lang.lang === "br") {
-              timeup = "O tempo se esgotou";
-              desk = "O tempo definido expirou, se você desejar reinicializá-lo utilize novamente o comando do timer.";
-              tl = "Tempo estabelecido";
-            }
-          }
-          const embed =  new Discord.MessageEmbed()
-          .setTitle(timeup)
-          .setDescription(desk)
-          .addField(tl, `${foundtt.total} ${foundtt.type}`)
-          .setColor("PURPLE")
-          .setTimestamp()
-          clearInterval(interval2);
-          foundtt.active = false;
-          await foundtt.save();
-          try {
-            u.send({ embeds: [embed] });
-          }
-          catch (e) {
-            console.log(e);
-          }
-        }
-      }, 1000);
       }
       else if (type.toLowerCase() === "hrs") {
-        newT.left = 60 * 60 * tt;
+        const now = Date.now();
+        newT.started = now;
+        newT.finished = now + (tt * 3600000);
         newT.type = "hrs";
         await newT.save();
         reply(started);
-    const interval2 = setInterval(async function() {
-        const foundtt = await Time.findOne({ userid: message.author.id });
-        if (foundtt.active === false) return;
-        foundtt.left = foundtt.left - 1;
-        await foundtt.save();
-        if (foundtt.left === 0){
-          const u = await client.users.fetch(foundtt.userid);
-          let timeup = "El tiempo se ha acabado";
-          let desk = "El tiempo establecido ha acabado, si deseas volver a establecerlo usa el comando del temporizador nuevamente";
-          let tl = "Tiempo establecido";
-          if (lang !== null && lang.lang !== "es") {
-            if (lang.lang === "en") {
-              timeup = "Time is up";
-              desk = "The set time is over, if you want to reset it use the timer command again.";
-              tl = "Established time";
-            }
-            else if (lang.lang === "br") {
-              timeup = "O tempo se esgotou";
-              desk = "O tempo definido expirou, se você desejar reinicializá-lo utilize novamente o comando do timer.";
-              tl = "Tempo estabelecido";
-            }
-          }
-          const embed =  new Discord.MessageEmbed()
-          .setTitle(timeup)
-          .setDescription(desk)
-          .addField(tl, `${foundtt.total} ${foundtt.type}`)
-          .setColor("PURPLE")
-          .setTimestamp()
-          clearInterval(interval2);
-          foundtt.active = false;
-          await foundtt.save();
-          try {
-            u.send({ embeds: [embed] });
-          }
-          catch (e) {
-            console.log(e);
-          }
-        }
-      }, 1000);
       }
-    }
   }
 }

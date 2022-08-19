@@ -15,6 +15,7 @@ const Discord = require('discord.js');
 const { TextChannel } = require("discord.js");
 const { Configuration, OpenAIApi } = require("openai");
 const utils = require("./utils");
+const wait = require('util').promisify(setTimeout);
 const config = new Configuration({
   apiKey: process.env.OPEN_KEY
 });
@@ -67,14 +68,14 @@ class Ai {
      });
      this.msg += response.data.choices[0].text;
      return response.data.choices[0].text;*/
-     async function getResponse(text, uid) {
+    async function getResponse(text, uid) {
       text = encodeURIComponent(text).replaceAll("'", "%27").replaceAll("*", "%2A").replaceAll("?", "%3F");
       const uri = `${process.env.AI_API}bid=${process.env.AI_BID}&key=${process.env.AI_KEY}&uid=${uid}&msg=${text}`;
       const res = await fetch(uri);
       const json = await res.json();
       return json.cnt.replace("(translations by Microsoft translator)", "");
-  }
-  return await getResponse(message, id);
+    }
+    return await getResponse(message, id);
   }
 }
 /**
@@ -148,80 +149,58 @@ client.on('ready', async () => {
   await client.user.setStatus('idle');
   const totalai = await Ia.find();
   let num = 0;
-  totalai.forEach(async user => {
-    user.active = false;
-    await user.save();
-    num = num + 1;
-  });
-  const checkInterval = setInterval(async function () {
-    if (num === totalai.length) {
-      clearInterval(checkInterval);
-      print(`Set ${num} users as AI off.`);
-    }
-  }, 100);
-  let coumt = 0;
-  const interval = setInterval(async function () {
-    clearInterval(interval);
-    for (const g of client.guilds.cache.values()) {
-      coumt += g.memberCount;
-    }
-    const activities2 = [`${coumt} users woah`, `${client.guilds.cache.size} Guilds / Servidores`];
-    await client.user.setPresence({ activities: [{ name: activities2[Math.floor(Math.random() * activities2.length)] }], status: 'online' });
-    setInterval(async function () {
-      coumt = 0;
-      for (const g of client.guilds.cache.values()) {
-        coumt += g.memberCount;
-      }
-      const activities = [`${coumt} users woah`, `${client.guilds.cache.size} Guilds / Servidores`];
-      if (client.user.presence.activities.find(ac => ac.name === 'Reconnecting...')) return;
-      await client.user.setPresence({ activities: [{ name: activities[Math.floor(Math.random() * activities.length)] }], status: 'online' });
-    }, 15000);
-  }, 10);
-  const times = await Time.find();
-  for (const time of times) {
-    if (time.left !== 0 && time.active === true) {
-      const interval2 = setInterval(async function () {
-        const tt = await Time.findOne({ userid: time.userid });
-        if (tt.active === false) return;
-        tt.left = tt.left - 1;
-        await tt.save();
-        if (tt.left === 0) {
-          const u = await client.users.fetch(tt.userid);
-          const foundL = await Lang.findOne({ userid: tt.userid });
-          let timeup = 'El tiempo se ha acabado';
-          let desk = 'El tiempo establecido ha acabado, si deseas volver a establecerlo usa el comando del temporizador nuevamente';
-          let tl = 'Tiempo establecido';
-          if (foundL && foundL.lang !== 'es') {
-            if (foundL.lang === 'en') {
-              timeup = 'Time is up';
-              desk = 'The set time is over, if you want to reset it use the timer command again.';
-              tl = 'Established time';
-            }
-            else if (foundL.lang === 'br') {
-              timeup = 'O tempo se esgotou';
-              desk = 'O tempo definido expirou, se você desejar reinicializá-lo utilize novamente o comando do timer.';
-              tl = 'Tempo estabelecido';
-            }
-          }
-          const embed = new Discord.MessageEmbed()
-            .setTitle(timeup)
-            .setDescription(desk)
-            .addField(tl, `${tt.total} ${tt.type}`)
-            .setColor('PURPLE')
-            .setTimestamp();
-          clearInterval(interval2);
-          tt.active = false;
-          await tt.save();
-          try {
-            u.send({ embeds: [embed] });
-          }
-          catch (e) {
-            console.log(e);
-          }
-        }
-      }, 1000);
-    }
+  for (const usr of totalai) {
+    usr.active = false;
+    await usr.save();
+    num++;
   }
+  console.log(`${num} AI users have been set to inactive.`);
+  let coumt = client.guilds.cache.reduce((a, b) => a.memberCount ?? 0 + b.memberCount ?? 0);
+  await wait(10);
+  const activities2 = [`${coumt} users woah`, `${client.guilds.cache.size} Guilds / Servidores`];
+  await client.user.setPresence({ activities: [{ name: activities2[Math.floor(Math.random() * activities2.length)] }], status: 'online' });
+  setInterval(async function () {
+    coumt = client.guilds.cache.reduce((a, b) => a.memberCount ?? 0 + b.memberCount ?? 0);
+    const activities = [`${coumt} users woah`, `${client.guilds.cache.size} Guilds / Servidores`];
+    if (client.user.presence.activities.find(ac => ac.name === 'Reconnecting...')) return;
+    await client.user.setPresence({ activities: [{ name: activities[Math.floor(Math.random() * activities.length)] }], status: 'online' });
+  }, 20000);
+  setInterval(async function () {
+    const times = await Time.find();
+    times.forEach(async time => {
+      const messages = {
+        title: {
+          es: "Tiempo finalizado",
+          en: "Time's up",
+          br: "Tempo acabou",
+        },
+        description: {
+          es: "El temporizador establecido ha finalizado.",
+          en: "The timer set has ended.",
+          br: "O temporizador foi acabado.",
+        }
+      }
+      if (time.finished === Date.now() && time.active || time.finished - Date.now() <= 0 && time.active) {
+        const user = await client.users.fetch(time.userid);
+        try {
+          const foundLang = await Lang.findOne({ userid: time.userid });
+          const embed = new Discord.MessageEmbed()
+            .setTitle(messages.title[foundLang.lang ?? "es"])
+            .setDescription(`${messages.description[foundLang.lang ?? "es"]}\n\n${time.total} ${time.type}`)
+            .setColor("PURPLE")
+            .setTimestamp()
+            .setAuthor(client.user.username, client.user.avatarURL());
+          const msg = await user.send({ embeds: [embed] });
+          embed.setFooter(`Delay: ${msg.createdTimestamp - time.finished}ms (${(msg.createdTimestamp - time.finished) / 1000}s)`);
+          await msg.edit({ embeds: [embed] });
+        }
+        catch (err) {
+          console.log(err);
+        };
+        await time.delete();
+      }
+    });
+  }, 1000);
 });
 client.on('guildCreate', async guild => {
   let defc = 'none';
@@ -292,7 +271,7 @@ client.on('messageCreate', async message => {
   if (utils.hasWord(message.content, "hate") || utils.hasWord(message.content, "odio")) {
     message.react('💔');
   }
-  if (message.content.toLowerCase().startsWith("hola") || message.content.toLowerCase().startsWith("hello") ||  message.content.toLowerCase().startsWith("hi")) {
+  if (message.content.toLowerCase().startsWith("hola") || message.content.toLowerCase().startsWith("hello") || message.content.toLowerCase().startsWith("hi")) {
     message.react('👋');
   }
   if (content.toLowerCase().startsWith(prefix.toLowerCase())) {

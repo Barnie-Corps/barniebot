@@ -1,9 +1,10 @@
 const { Schema, model } = require('mongoose');
 const TimeSchema = new Schema({
   userid: String,
-  left: Number,
+  started: Number,
   active: Boolean,
   type: String,
-  total: Number
+  total: Number,
+  finished: Number
 });
 module.exports = model("temps", TimeSchema);
