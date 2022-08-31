@@ -79,3 +79,5 @@ client.on("messageCreate", async (message): Promise<any> => {
         }
     }
 });
+
+client.login(data.bot.token);
