@@ -59,7 +59,13 @@ client.on("ready", async (): Promise<any> => {
 });
 
 client.on("messageCreate", async (message): Promise<any> => {
-    const prefix = message.guild ? ((await db.query("SELECT * FROM prefixes WHERE guild = ?", [message.guild.id]) as unknown) as any[])[0].prefix as string ?? "b." : "b.";
+    let prefix = "b.";
+    if (message.guild) {
+        const DBPrefix = ((await db.query("SELECT * FROM prefixes WHERE guild = ?", [message.guild.id]) as unknown) as any[]);
+        if (DBPrefix[0]) {
+            prefix = DBPrefix[0].prefix;
+        }
+    }
     const args = message.content.slice(prefix.length).trim().split(" ");
     const command = message.content.toLowerCase().startsWith(prefix.toLowerCase()) ? args.shift() : "none";
     async function reply(content: string) {
