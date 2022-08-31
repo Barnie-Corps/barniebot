@@ -76,7 +76,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (command === "none") return;
     else {
         const foundCommand = data.bot.commands.get(command as string) ?? data.bot.commands.find(c => c.data.aliases.includes(command));
-        if (!foundCommand) return reply("```\n" + `${prefix}${command}\n${utils.createSpaces(prefix.length)}${utils.createArrows((command as string).length)}\n\nERR: Unknown command`);
+        if (!foundCommand) return reply("```\n" + `${prefix}${command} ${args.slice(0).join(" ")}\n${utils.createSpaces(prefix.length)}${utils.createArrows((command as string).length)}\n\nERR: Unknown command` + "\n```");
         try {
             await foundCommand.execute(message, args, reply, prefix);
         }
