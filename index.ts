@@ -12,7 +12,7 @@
  */
 import * as dotenv from "dotenv";
 dotenv.config();
-import { EmbedBuilder, ActionRow, GatewayIntentBits, Client } from "discord.js";
+import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType } from "discord.js";
 import * as fs from "fs";
 import data from "./data";
 import Log from "./Log";
@@ -56,6 +56,7 @@ const client = new Client({
 client.on("ready", async (): Promise<any> => {
     Log.success("bot", `Successfully logged in at discord as ${client.user?.tag}`);
     queries();
+    client.user?.setPresence({ activities: [{ name: String(process.env.VERSION), type: ActivityType.Playing }] });
 });
 
 client.on("messageCreate", async (message): Promise<any> => {
