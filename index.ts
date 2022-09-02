@@ -77,8 +77,9 @@ client.on("messageCreate", async (message): Promise<any> => {
     else {
         const foundCommand = data.bot.commands.get(command as string) ?? data.bot.commands.find(c => c.data.aliases.includes(command));
         if (!foundCommand) return reply("```\n" + `${prefix}${command} ${args.slice(0).join(" ")}\n${utils.createSpaces(prefix.length)}${utils.createArrows((command as string).length)}\n\nERR: Unknown command` + "\n```");
+        const Lang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]);
         try {
-            await foundCommand.execute(message, args, reply, prefix);
+            await foundCommand.execute(message, args, reply, prefix, Lang[0] ? Lang[0].lang : "en");
         }
         catch (err: any) {
             Log.error("bot", `Couldn't execute command '${foundCommand.data.name}' as '${command}' due to an unexpected error: ${err}`);

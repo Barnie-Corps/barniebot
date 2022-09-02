@@ -19,3 +19,6 @@ export interface BotEmoji {
     name: string;
     id: string;
 }
+export interface ReplyFunction {
+    (content: string): Promise<Message<boolean>>
+}
