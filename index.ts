@@ -56,7 +56,7 @@ const client = new Client({
 client.on("ready", async (): Promise<any> => {
     Log.success("bot", `Successfully logged in at discord as ${client.user?.tag}`);
     queries();
-    client.user?.setPresence({ activities: [{ name: String(process.env.VERSION), type: ActivityType.Playing }] });
+    client.user?.setPresence({ activities: [{ name: `V ${String(process.env.VERSION)}`, type: ActivityType.Playing }] });
 });
 
 client.on("messageCreate", async (message): Promise<any> => {
