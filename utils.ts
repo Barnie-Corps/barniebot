@@ -18,7 +18,7 @@ const utils = {
     translate: async (text: string, from: string, target: string): Promise<any> => {
         const result = await translate(text, { to: target, from });
         return result;
-    }, 
+    },
     parallel: (functions: any): Promise<any[]> => {
         return new Promise((resolve, reject) => {
             if (typeof functions !== "object") reject(new TypeError("functions parameter must be of type object"));

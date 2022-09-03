@@ -49,44 +49,44 @@ export default {
             }
         });
         const row = new ActionRowBuilder()
-        .addComponents(
-            new SelectMenuBuilder()
-            .setCustomId(`commands-${message.author.id}`)
-            .setPlaceholder(texts.categories.placeholder)
-            .setOptions(
-                {
-                    label: texts.categories.info,
-                    value: "info_category"
-                },
-                {
-                    label: texts.categories.utility,
-                    value: "utility_category"
-                },
-                {
-                    label: texts.categories.mod,
-                    value: "mod_category"
-                },
-                {
-                    label: texts.categories.fun,
-                    value: "fun_category"
-                },
-                {
-                    label: texts.categories.config,
-                    value: "config_category"
-                },
-                {
-                    label: texts.categories.support,
-                    value: "support_category"
-                }
-            )
-        );
+            .addComponents(
+                new SelectMenuBuilder()
+                    .setCustomId(`commands-${message.author.id}`)
+                    .setPlaceholder(texts.categories.placeholder)
+                    .setOptions(
+                        {
+                            label: texts.categories.info,
+                            value: "info_category"
+                        },
+                        {
+                            label: texts.categories.utility,
+                            value: "utility_category"
+                        },
+                        {
+                            label: texts.categories.mod,
+                            value: "mod_category"
+                        },
+                        {
+                            label: texts.categories.fun,
+                            value: "fun_category"
+                        },
+                        {
+                            label: texts.categories.config,
+                            value: "config_category"
+                        },
+                        {
+                            label: texts.categories.support,
+                            value: "support_category"
+                        }
+                    )
+            );
         const embed = new EmbedBuilder()
-        .setAuthor({ iconURL: message.author.displayAvatarURL(), name: message.author.tag })
-        .setTitle(texts.embed.title)
-        .setDescription(texts.embed.description)
-        .setFooter({ text: texts.embed.footer })
-        .setTimestamp()
-        .setColor("Purple")
+            .setAuthor({ iconURL: message.author.displayAvatarURL(), name: message.author.tag })
+            .setTitle(texts.embed.title)
+            .setDescription(texts.embed.description)
+            .setFooter({ text: texts.embed.footer })
+            .setTimestamp()
+            .setColor("Purple")
         await reply({ embeds: [embed], components: [row] } as unknown as string);
     }
 }

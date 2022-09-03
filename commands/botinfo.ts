@@ -68,31 +68,31 @@ export default {
         }
         const cpuUsage = `${await cpu.usage()}%`;
         const memUsage = `${Math.floor(process.memoryUsage().heapUsed / 1000000)}~ MB /${Math.round((await mem.info()).totalMemMb / 1024)}~ GB`;
-        const storage =  `${(await drive.info("/")).freeGb}/${(await drive.info("/")).totalGb} GB`;
+        const storage = `${(await drive.info("/")).freeGb}/${(await drive.info("/")).totalGb} GB`;
         const embed = new EmbedBuilder()
-        .setAuthor({ iconURL: message.author.displayAvatarURL(), name: message.author.tag })
-        .setTitle(texts.embed.title)
-        .setDescription(texts.embed.description)
-        .addFields(
-            {
-                name: "Bot",
-                value: `${texts.fields.bot.cachedUsers}: ${message.client.users.cache.size}\n${texts.fields.bot.totalUsers}: ${totalUsers}\n${texts.fields.bot.guilds}: ${message.client.guilds.cache.size}\n${texts.fields.bot.channels}: ${message.client.channels.cache.size}`,
-                inline: true
-            },
-            {
-                name: texts.fields.database.title,
-                value: `${texts.fields.database.users}: 0`,
-                inline: true
-            },
-            {
-                name: texts.fields.system.title,
-                value: `${texts.fields.system.cpu}: ${cpuUsage}\n${texts.fields.system.storage}: ${storage}\nRam: ${memUsage}`,
-                inline: true
-            }
-        )
-        .setFooter({ text: texts.embed.footer })
-        .setTimestamp()
-        .setColor("Purple")
+            .setAuthor({ iconURL: message.author.displayAvatarURL(), name: message.author.tag })
+            .setTitle(texts.embed.title)
+            .setDescription(texts.embed.description)
+            .addFields(
+                {
+                    name: "Bot",
+                    value: `${texts.fields.bot.cachedUsers}: ${message.client.users.cache.size}\n${texts.fields.bot.totalUsers}: ${totalUsers}\n${texts.fields.bot.guilds}: ${message.client.guilds.cache.size}\n${texts.fields.bot.channels}: ${message.client.channels.cache.size}`,
+                    inline: true
+                },
+                {
+                    name: texts.fields.database.title,
+                    value: `${texts.fields.database.users}: 0`,
+                    inline: true
+                },
+                {
+                    name: texts.fields.system.title,
+                    value: `${texts.fields.system.cpu}: ${cpuUsage}\n${texts.fields.system.storage}: ${storage}\nRam: ${memUsage}`,
+                    inline: true
+                }
+            )
+            .setFooter({ text: texts.embed.footer })
+            .setTimestamp()
+            .setColor("Purple")
         await msg.delete();
         await reply({ embeds: [embed] } as unknown as string);
     }

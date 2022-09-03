@@ -41,25 +41,25 @@ export default {
             }
         });
         const embed = new EmbedBuilder()
-        .setAuthor({ iconURL: message.author.displayAvatarURL(), name: message.author.tag })
-        .setTitle(texts.embed.title)
-        .setDescription(texts.embed.description)
-        .addFields(
-            {
-                name: texts.fields.aliases,
-                value: foundCommand.data.aliases.length > 0 ? `${foundCommand.data.aliases.map((c: any) => c).join(", ")}.` : texts.embed.empty
-            }
-        )
-        .setColor("Purple")
-        .setFooter({ text: texts.embed.footer })
-        .setTimestamp()
+            .setAuthor({ iconURL: message.author.displayAvatarURL(), name: message.author.tag })
+            .setTitle(texts.embed.title)
+            .setDescription(texts.embed.description)
+            .addFields(
+                {
+                    name: texts.fields.aliases,
+                    value: foundCommand.data.aliases.length > 0 ? `${foundCommand.data.aliases.map((c: any) => c).join(", ")}.` : texts.embed.empty
+                }
+            )
+            .setColor("Purple")
+            .setFooter({ text: texts.embed.footer })
+            .setTimestamp()
         const row = new ActionRowBuilder()
-        .addComponents(
-            new ButtonBuilder()
-            .setCustomId(`execute-command-${foundCommand.data.name}-${message.author.id}`)
-            .setLabel("Execute")
-            .setStyle(ButtonStyle.Primary)
-        )
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`execute-command-${foundCommand.data.name}-${message.author.id}`)
+                    .setLabel("Execute")
+                    .setStyle(ButtonStyle.Primary)
+            )
         await reply({ embeds: [embed], components: [row] } as unknown as string);
     }
 }

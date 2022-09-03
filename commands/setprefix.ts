@@ -17,7 +17,7 @@ export default {
         newPrefix = newPrefix.toLowerCase();
         if (newPrefix.length > 4) return reply("```\n" + `${prefix}setprefix ${newPrefix}\n${utils.createSpaces(`${prefix}setprefic `.length)}${utils.createArrows(newPrefix.length)}\n\nERR: The new prefix cannot have more than 4 characters.` + "\n```");
         if (newPrefix === prefix) return reply("```\n" + `${prefix}setprefix ${newPrefix}\n${utils.createSpaces(`${prefix}setprefix `.length)}${utils.createArrows(newPrefix.length)}\n\nERR: Cannot set same prefix twice.` + "\n```");
-        const foundPrefix = ((await db.query("SELECT * FROM prefixes WHERE guild = ?", [message.guild?.id])as unknown) as any[]);
+        const foundPrefix = ((await db.query("SELECT * FROM prefixes WHERE guild = ?", [message.guild?.id]) as unknown) as any[]);
         if (foundPrefix[0]) {
             await db.query("UPDATE prefixes SET ? WHERE guild = ?", [{ changedAt: Math.round(Date.now() / 1000), changedBy: message.author.id, lastPrefix: prefix, prefix: newPrefix }, message.guild?.id]);
         }
