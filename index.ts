@@ -27,7 +27,7 @@ const client = new Client({
         }
     }
 });
-(async function() {
+(async function () {
     const commandsDir = fs.readdirSync("./commands").filter(f => f.endsWith(".ts"));
     for (const cmdFile of commandsDir) {
         try {
@@ -38,7 +38,7 @@ const client = new Client({
                 Log.warn("commands", `The command file '${cmdFile}' has the following required properties missing: ${missingProperties.map(p => p).join(", ")}. To avoid any error, it hasn't been loaded.`);
                 continue;
             }
-            const requiredDataProperties: string[] = ["name", "aliases", "requiredGuildPermissions", "guildOnly"];
+            const requiredDataProperties: string[] = ["name", "aliases", "requiredGuildPermissions", "guildOnly", "category"];
             const missingDataProperties: string[] = requiredDataProperties.filter(p => !Object.keys(command.data).includes(p));
             if (missingDataProperties.length > 0) {
                 Log.warn("commands", `The command file '${cmdFile}' has the following required data properties missing: ${missingDataProperties.map(p => p).join(", ")}. To avoid any error, it hasn't been loaded.`);
@@ -70,20 +70,104 @@ client.on("messageCreate", async (message): Promise<any> => {
     const args = message.content.slice(prefix.length).trim().split(" ");
     const command = message.content.toLowerCase().startsWith(prefix.toLowerCase()) ? args.shift() : "none";
     async function reply(content: string) {
-        return message.reply(content).catch((err:  any) => {
+        return message.reply(content).catch((err: any) => {
             Log.error("bot", `Couldn't reply to ${message.author.tag} due to an unexpected error: ${err}`);
         });
     }
     if (command === "none") return;
     else {
         const foundCommand = data.bot.commands.get(command as string) ?? data.bot.commands.find(c => c.data.aliases.includes(command));
-        if (!foundCommand) return reply("```\n" + `${prefix}${command} ${args.slice(0).join(" ")}\n${utils.createSpaces(prefix.length)}${utils.createArrows((command as string).length)}\n\nERR: Unknown command` + "\n```");
+        if (!foundCommand) return reply("```\n" + `${prefix}${command} ${args.slice(0).join(" ")}\n${utils.createSpaces(prefix.length)}${utils.createArrows((command as string).length)}\n\nERR: Unknown command.` + "\n```");
         const Lang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]);
+        let missingRequiredPermissions: string[] = [];
+        if (foundCommand.data.guildOnly && !message.guild) return;
+        if (foundCommand.data.requiredGuildPermissions.length > 0 && foundCommand.data.guildOnly && message.guild) {
+            if (!foundCommand.data.requiredGuildPermissions.every((p: any) => {
+                if (message.member?.permissions.has(p)) return true;
+                else {
+                    missingRequiredPermissions.push(p);
+                    return false;
+                }
+            })) return reply("```\n" + `${prefix}${command}\n${utils.createSpaces(`${prefix}`.length)}${utils.createArrows((command as string).length)}\n\nERR: Missing required guild permissions: ${missingRequiredPermissions.map(p => p).join(", ")}.` + "\n```");
+        }
         try {
             await foundCommand.execute(message, args, reply, prefix, Lang[0] ? Lang[0].lang : "en");
         }
         catch (err: any) {
-            Log.error("bot", `Couldn't execute command '${foundCommand.data.name}' as '${command}' due to an unexpected error: ${err}`);
+            Log.error("bot", `Couldn't execute command '${foundCommand.data.name}' as '${command}' due to an unexpected error: ${err.stack}`);
+        }
+    }
+});
+client.on("interactionCreate", async (interaction): Promise<any> => {
+    const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
+    const Lang = foundLang[0] ? foundLang[0].lang : "en";
+    let prefix = "b.";
+    if (interaction.guild) {
+        const DBPrefix = ((await db.query("SELECT * FROM prefixes WHERE guild = ?", [interaction.guild.id]) as unknown) as any[]);
+        if (DBPrefix[0]) {
+            prefix = DBPrefix[0].prefix;
+        }
+    }
+    if (interaction.isSelectMenu()) {
+        if (interaction.customId.startsWith("commands-")) {
+            await interaction.deferReply({ ephemeral: true });
+            let authorId = interaction.customId.slice("commands-".length);
+            if (interaction.user.id !== authorId) return interaction.editReply(Lang !== "es" ? (await utils.translate("Tú no fuiste quién usó el comando, no puedes cambiar de categoría.", "es", Lang)).text : "Tú no fuiste quién usó el comando, no puedes cambiar de categoría.");
+            else {
+                const texts = {
+                    embed: {
+                        description: `Puedes usar el comando **${prefix}command** para ver información de un comando específico.`,
+                        footer: "Santiago Morales © 2020 - 2025 All rights reserved.",
+                        empty: "Oops... este lugar parece vacío",
+                        messageEdited: "El mensaje embed ha sido editado."
+                    },
+                    categories: {
+                        info: "Información",
+                        mod: "Moderación",
+                        config: "Configuración",
+                        fun: "Diversión",
+                        support: "Soporte",
+                        logs: "Logísitca",
+                        utility: "Utilidad",
+                        placeholder: "Selecciona una opción..."
+                    }
+                }
+                await utils.parallel({
+                    embed: async (callback: any) => {
+                        if (Lang !== "es") {
+                            texts.embed.description = (await utils.translate(texts.embed.description, "es", Lang)).text;
+                            texts.embed.empty = (await utils.translate(texts.embed.empty, "es", Lang)).text;
+                            texts.embed.messageEdited = (await utils.translate(texts.embed.messageEdited, "es", Lang)).text;
+                        }
+                        callback(null, true);
+                    },
+                    categories: async (callback: any) => {
+                        if (Lang !== "es") {
+                            for (const [key, value] of Object.entries(texts.categories)) {
+                                (texts.categories as any)[`${key}`] = (await utils.translate(value, "es", Lang)).text;
+                            }
+                        }
+                        callback(null, true);
+                    }
+                });
+                const selectedCategory = interaction.values[0].trim().split("_")[0];
+                const filteredCommands = data.bot.commands.filter(c => c.data.category === selectedCategory);
+                const embed = new EmbedBuilder()
+                    .setAuthor({ iconURL: interaction.user.displayAvatarURL(), name: interaction.user.tag })
+                    .setTitle((texts.categories as any)[selectedCategory])
+                    .setDescription(texts.embed.description)
+                    .addFields(
+                        {
+                            name: Lang === "es" ? "Comandos" : (await utils.translate("Comandos", "es", Lang)).text,
+                            value: `${filteredCommands.size > 0 ? filteredCommands.map(c => `**${prefix}${c.data.name}**`).join(", ") : texts.embed.empty}.`
+                        }
+                    )
+                    .setFooter({ text: texts.embed.footer })
+                    .setTimestamp()
+                    .setColor("Purple")
+                await interaction.editReply(texts.embed.messageEdited);
+                await interaction.message.edit({ embeds: [embed] });
+            }
         }
     }
 });

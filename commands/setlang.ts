@@ -10,7 +10,8 @@ export default {
         aliases: ["setlanguage"],
         description: "Este comando sirve para establecer el idioma en que quieres que el bot te responda.",
         guildOnly: false,
-        requiredGuildPermissions: []
+        requiredGuildPermissions: [],
+        category: "config"
     },
     execute: async (message: Message, args: string[], reply: ReplyFunction, prefix: string, lang: string) => {
         let newLang = args[0];

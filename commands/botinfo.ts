@@ -10,7 +10,8 @@ export default {
         description: "Este comando sirve para ver estadísticas del bot.",
         aliases: ["info", "stats"],
         guildOnly: false,
-        requiredGuildPermissions: []
+        requiredGuildPermissions: [],
+        category: "info"
     },
     execute: async (message: Message, args: string[], reply: ReplyFunction, prefix: string, lang: string) => {
         const msg = await reply(lang !== "es" ? (await utils.translate("Cargando...", "es", lang)).text : "Cargando...");
@@ -18,7 +19,7 @@ export default {
             embed: {
                 title: "Información general",
                 description: "Aquí verás estadísticas generales del bot.",
-                footer: "Barnie Corps © 2020 - 2025 All rights reserved."
+                footer: "Santiago Morales © 2020 - 2025 All rights reserved.",
             },
             fields: {
                 database: {
