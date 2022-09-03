@@ -25,5 +25,6 @@ export default {
             await db.query("INSERT INTO prefixes SET ?", [{ guild: message.guild?.id, prefix: newPrefix, lastPrefix: prefix, changedAt: Math.round(Date.now() / 1000), changedBy: message.author.id }]);
         }
         await reply(lang === "es" ? `Prefijo establecido correctamente a **${newPrefix}**.` : (await utils.translate(`Prefijo establecido correctamente a **${newPrefix}**.`, "es", lang)).text);
+        message.guild?.members.me?.setNickname(`[${newPrefix}] BarnieBot`);
     }
 }

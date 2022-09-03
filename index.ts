@@ -60,6 +60,7 @@ client.on("ready", async (): Promise<any> => {
 });
 
 client.on("messageCreate", async (message): Promise<any> => {
+    if(message.author.bot) return;
     let prefix = "b.";
     if (message.guild) {
         const DBPrefix = ((await db.query("SELECT * FROM prefixes WHERE guild = ?", [message.guild.id]) as unknown) as any[]);
