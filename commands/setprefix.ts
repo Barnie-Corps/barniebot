@@ -6,7 +6,7 @@ export default {
     data: {
         name: "setprefix",
         aliases: [],
-        description: "Este comando sirve para establecer el prefijo de BarnieBot en el servidor en que se ejecute el comando.",
+        description: "Establece el prefijo del bot.",
         guildOnly: true,
         requiredGuildPermissions: ["ManageGuild"],
         category: "config"

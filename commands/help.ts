@@ -7,7 +7,7 @@ export default {
         aliases: ["ayuda", "ajuda"],
         requiredGuildPermissions: [],
         guildOnly: false,
-        description: "Comando de ayuda.",
+        description: "Muestra información sobre BarnieBot.",
         category: "info"
     },
     execute: async (message: Message, args: string[], reply: ReplyFunction, prefix: string, lang: string) => {

@@ -7,7 +7,7 @@ const { mem, cpu, drive } = osu;
 export default {
     data: {
         name: "botinfo",
-        description: "Este comando sirve para ver estadísticas del bot.",
+        description: "Muestra información general del bot.",
         aliases: ["info", "stats"],
         guildOnly: false,
         requiredGuildPermissions: [],

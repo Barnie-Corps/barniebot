@@ -8,7 +8,7 @@ export default {
     data: {
         name: "setlang",
         aliases: ["setlanguage"],
-        description: "Este comando sirve para establecer el idioma en que quieres que el bot te responda.",
+        description: "Establece el idioma en que quieres que el bot te responda proporcionando el código ISO 639-1.",
         guildOnly: false,
         requiredGuildPermissions: [],
         category: "config"

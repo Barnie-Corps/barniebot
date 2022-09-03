@@ -8,7 +8,7 @@ export default {
     data: {
         name: "command",
         aliases: ["comando", "commandinfo"],
-        description: "Este comando sirve para ver información específica de un comando.",
+        description: "Muestra información de un comando específico.",
         guildOnly: false,
         requiredGuildPermissions: [],
         category: "info"
