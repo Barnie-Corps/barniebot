@@ -4,3 +4,4 @@ filter_words.txt
 page.html
 forms.txt
 response.json
+node_modules/
