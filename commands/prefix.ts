@@ -6,7 +6,7 @@ import utils from "../utils";
 export default {
     data: {
         name: "prefix",
-        desription: "Muestra el prefijo actual, el prefijo anterior, la última vez que se cambió y el usuario que lo cambió.",
+        description: "Muestra el prefijo actual, el prefijo anterior, la última vez que se cambió y el usuario que lo cambió.",
         guildOnly: true,
         requiredGuildPermissions: [],
         aliases: ["prefijo"],

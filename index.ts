@@ -39,7 +39,7 @@ const client = new Client({
                 Log.warn("commands", `The command file '${cmdFile}' has the following required properties missing: ${missingProperties.map(p => p).join(", ")}. To avoid any error, it hasn't been loaded.`);
                 continue;
             }
-            const requiredDataProperties: string[] = ["name", "aliases", "requiredGuildPermissions", "guildOnly", "category"];
+            const requiredDataProperties: string[] = ["name", "aliases", "requiredGuildPermissions", "guildOnly", "category", "description"];
             const missingDataProperties: string[] = requiredDataProperties.filter(p => !Object.keys(command.data).includes(p));
             if (missingDataProperties.length > 0) {
                 Log.warn("commands", `The command file '${cmdFile}' has the following required data properties missing: ${missingDataProperties.map(p => p).join(", ")}. To avoid any error, it hasn't been loaded.`);
