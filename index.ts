@@ -13,7 +13,7 @@
  */
 import * as dotenv from "dotenv";
 dotenv.config();
-import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType } from "discord.js";
+import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials } from "discord.js";
 import * as fs from "fs";
 import data from "./data";
 import Log from "./Log";
@@ -21,7 +21,8 @@ import queries from "./mysql/queries";
 import db from "./mysql/database";
 import utils from "./utils";
 const client = new Client({
-    intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.GuildMessageTyping, GatewayIntentBits.GuildEmojisAndStickers],
+    intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.GuildMessageTyping, GatewayIntentBits.GuildEmojisAndStickers, GatewayIntentBits.DirectMessages, GatewayIntentBits.DirectMessageTyping, GatewayIntentBits.DirectMessageReactions],
+    partials: [Partials.Channel, Partials.GuildMember, Partials.Message, Partials.User],
     ws: {
         properties: {
             browser: "Discord Android"
@@ -58,6 +59,11 @@ client.on("ready", async (): Promise<any> => {
     Log.success("bot", `Successfully logged in at discord as ${client.user?.tag}`);
     queries();
     client.user?.setPresence({ activities: [{ name: `V ${String(process.env.VERSION)}`, type: ActivityType.Playing }] });
+    Log.info("bot", `Fetching members from ${client.guilds.cache.size} guilds...`);
+    for (const guild of client.guilds.cache.values()) {
+        await guild.members.fetch();
+    }
+    Log.info("bot", `Members fetched from all guilds. Current users cache size: ${client.users.cache.size}`);
 });
 
 client.on("messageCreate", async (message): Promise<any> => {
@@ -80,9 +86,9 @@ client.on("messageCreate", async (message): Promise<any> => {
     else {
         const foundCommand = data.bot.commands.get(command as string) ?? data.bot.commands.find(c => c.data.aliases.includes(command));
         if (!foundCommand) return reply("```\n" + `${prefix}${command} ${args.slice(0).join(" ")}\n${utils.createSpaces(prefix.length)}${utils.createArrows((command as string).length)}\n\nERR: Unknown command.` + "\n```");
+        if (foundCommand.data.guildOnly && !message.guild) return;
         const Lang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]);
         let missingRequiredPermissions: string[] = [];
-        if (foundCommand.data.guildOnly && !message.guild) return;
         if (foundCommand.data.requiredGuildPermissions.length > 0 && foundCommand.data.guildOnly && message.guild) {
             if (!foundCommand.data.requiredGuildPermissions.every((p: any) => {
                 if (message.member?.permissions.has(p)) return true;
