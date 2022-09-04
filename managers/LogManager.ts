@@ -34,7 +34,7 @@ class LogManager {
         if (typeof source !== "string") throw new TypeError(`Source parameter must be of type string, received ${typeof source}`);
         if (typeof message !== "string") throw new TypeError(`Source parameter must be of type string, received ${typeof message}`);
         if (!this.sources.some(s => s.toLowerCase() === source.toLowerCase())) throw new RangeError("Unknown source");
-        return console.log(`[${source.toUpperCase()}][WARN]: ${message}`.yellow);
+        return console.log(`[${source.toUpperCase()}][WARNING]: ${message}`.yellow);
     }
 }
 export default LogManager;
