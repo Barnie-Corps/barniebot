@@ -175,3 +175,5 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
 });
 
 client.login(data.bot.token);
+
+export default client;
