@@ -13,7 +13,7 @@
  */
 import * as dotenv from "dotenv";
 dotenv.config();
-import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials } from "discord.js";
+import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits } from "discord.js";
 import * as fs from "fs";
 import data from "./data";
 import Log from "./Log";
@@ -45,6 +45,19 @@ const client = new Client({
             if (missingDataProperties.length > 0) {
                 Log.warn("commands", `The command file '${cmdFile}' has the following required data properties missing: ${missingDataProperties.map(p => p).join(", ")}. To avoid any error, it hasn't been loaded.`);
                 continue;
+            }
+            if (command.data.requiredGuildPermissions.length > 0 && command.data.guildOnly) {
+                const invalidPermissions: any[] = [];
+                if (!command.data.requiredGuildPermissions.every((p: any) => {
+                    if (!(PermissionFlagsBits as any)[p as string]) {
+                        invalidPermissions.push(p);
+                        return false;
+                    }
+                    else return true;
+                })) {
+                    Log.error("commands", `The guild-only '${command.data.name}' command has the following invalid required permissions: ${invalidPermissions.join(", ")}. To avoid any error, it hasn't been loaded.`);
+                    continue;
+                }
             }
             data.bot.commands.set(command.data.name, command);
         }

@@ -14,7 +14,7 @@ export default {
         category: "info"
     },
     execute: async (message: Message, args: string[], reply: ReplyFunction, prefix: string, lang: string) => {
-        const msg = await reply(lang !== "es" ? (await utils.translate("Cargando...", "es", lang)).text : "Cargando...");
+        const msg = await reply(lang !== "es" ? (await utils.translate("Espere...", "es", lang)).text : "Espere...");
         const texts = {
             embed: {
                 title: "Información general",
