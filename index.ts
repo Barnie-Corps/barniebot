@@ -115,7 +115,7 @@ client.on("messageCreate", async (message): Promise<any> => {
             await foundCommand.execute(message, args, reply, prefix, Lang[0] ? Lang[0].lang : "en");
         }
         catch (err: any) {
-            Log.error("bot", `Couldn't execute command '${foundCommand.data.name}' as '${command}' due to an unexpected error: ${err}`);
+            Log.error("bot", `Couldn't execute command '${foundCommand.data.name}' as '${command}' due to an unexpected error: ${err.stack}`);
         }
     }
 });
