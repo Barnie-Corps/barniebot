@@ -201,6 +201,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (!gchatObject[0]) return;
     if (!gchatObject[0].active) return;
     if (gchatObject[0].channel !== message.channel.id) return;
+    if (gchatObject[0].restricted) return message.react((data.bot.emojis.find(e => e.name === "thumbsdown") as any));
     const channels = (await db.query("SELECT * FROM global_chats") as unknown) as any[];
     channels.forEach(async obj => {
         if (obj.guild === message.guild?.id) return;
