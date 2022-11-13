@@ -67,7 +67,7 @@ export default {
             totalUsers += guild.memberCount;
         }
         const cpuUsage = `${await cpu.usage()}%`;
-        const memUsage = `${Math.floor(process.memoryUsage().heapUsed / 1000000)}~ MB /${Math.round((await mem.info()).totalMemMb / 1024)}~ GB`;
+        const memUsage = `${Math.floor(process.memoryUsage().heapUsed / 1000000)} MB /${Math.round((await mem.info()).totalMemMb / 1024)} GB`;
         const storage = `${(await drive.info("/")).freeGb}/${(await drive.info("/")).totalGb} GB`;
         const embed = new EmbedBuilder()
             .setAuthor({ iconURL: message.author.displayAvatarURL(), name: message.author.tag })
@@ -86,7 +86,7 @@ export default {
                 },
                 {
                     name: texts.fields.system.title,
-                    value: `${texts.fields.system.cpu}: ${cpuUsage}\n${texts.fields.system.storage}: ${storage}\nRam: ${memUsage}`,
+                    value: `${texts.fields.system.cpu}: ${cpuUsage}\n${texts.fields.system.storage}: ${storage}\nRam (approx): ${memUsage}`,
                     inline: true
                 }
             )

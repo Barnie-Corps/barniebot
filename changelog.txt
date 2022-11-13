@@ -1,0 +1,20 @@
+Update V 3.1.7 Changelog
+
+[!] Tags:
+ - ALPHA: It's in early usage, which means it's not completely done and bugs are expected.
+ - DEV: It's meant for developers and normal users should just ignore them.
+ - BETA: It's completely done but there are still bugs that are being fixed.
+
+[/] Changes:
+  - Updated ReplyFunction interface [DEV]
+
+[+] New:
+ - Added social category
+ - Added Global Chats function (b.command gchat) [ALPHA]
+ - Created global_chats MySQL table [DEV]
+
+[-] Removed:
+ - Removed discord_users MySQL table [DEV]
+ - Removed ChatManager [DEV]
+
+This is the first changelog note, this file will contain all changelogs from V 3.1.7, if it becomes too large (that surely will happen), changelogs will be published on single files as releases in github.

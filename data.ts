@@ -9,7 +9,16 @@ const data: DataType = {
     },
     bot: {
         owners: [],
-        emojis: [],
+        emojis: [{
+            name: "thumbsup",
+            id: "thumbsup",
+            emoji: "👍"
+        },
+        {
+            name: "thumbsdown",
+            id: "thumbsdown",
+            emoji: "👎"
+        }],
         token: String(process.env.TOKEN),
         commands: new Collection()
     }

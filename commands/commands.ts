@@ -28,6 +28,7 @@ export default {
                 support: "Soporte",
                 logs: "Logísitca",
                 utility: "Utilidad",
+                social: "Social",
                 placeholder: "Selecciona una opción..."
             }
         }
@@ -77,6 +78,10 @@ export default {
                         {
                             label: texts.categories.support,
                             value: "support_category"
+                        },
+                        {
+                            label: texts.categories.social,
+                            value: "social_category"
                         }
                     )
             );

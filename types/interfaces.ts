@@ -1,4 +1,4 @@
-import { Collection, Message } from "discord.js";
+import { Collection, Message, MessagePayload, ReplyMessageOptions } from "discord.js";
 export interface DataType {
     database: {
         host: string;
@@ -20,5 +20,5 @@ export interface BotEmoji {
     id: string;
 }
 export interface ReplyFunction {
-    (content: string): Promise<Message<boolean>>
+    (options: string | MessagePayload | ReplyMessageOptions): Promise<Message<boolean>>
 }

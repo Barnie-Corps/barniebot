@@ -13,7 +13,7 @@
  */
 import * as dotenv from "dotenv";
 dotenv.config();
-import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits } from "discord.js";
+import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, MessagePayload, ReplyMessageOptions, WebhookClient, TextChannel, Message } from "discord.js";
 import * as fs from "fs";
 import data from "./data";
 import Log from "./Log";
@@ -90,8 +90,8 @@ client.on("messageCreate", async (message): Promise<any> => {
     }
     const args = message.content.slice(prefix.length).trim().split(" ");
     const command = message.content.toLowerCase().startsWith(prefix.toLowerCase()) ? args.shift() : "none";
-    async function reply(content: string) {
-        return message.reply(content).catch((err: any) => {
+    async function reply(options: string | MessagePayload | ReplyMessageOptions) {
+        return message.reply(options).catch((err: any) => {
             Log.error("bot", `Couldn't reply to ${message.author.tag} due to an unexpected error: ${err}`);
         });
     }
@@ -115,7 +115,7 @@ client.on("messageCreate", async (message): Promise<any> => {
             await foundCommand.execute(message, args, reply, prefix, Lang[0] ? Lang[0].lang : "en");
         }
         catch (err: any) {
-            Log.error("bot", `Couldn't execute command '${foundCommand.data.name}' as '${command}' due to an unexpected error: ${err.stack}`);
+            Log.error("bot", `Couldn't execute command '${foundCommand.data.name}' as '${command}' due to an unexpected error: ${err}`);
         }
     }
 });
@@ -150,6 +150,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         support: "Soporte",
                         logs: "Logísitca",
                         utility: "Utilidad",
+                        social: "Social",
                         placeholder: "Selecciona una opción..."
                     }
                 }
@@ -191,6 +192,36 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             }
         }
     }
+});
+
+client.on("messageCreate", async (message): Promise<any> => {
+    if (!message.guild) return;
+    if (message.author.bot) return;
+    let gchatObject = (await db.query("SELECT * FROM global_chats WHERE guild = ?", [message.guild?.id]) as unknown) as any[];
+    if (!gchatObject[0]) return;
+    if (!gchatObject[0].active) return;
+    if (gchatObject[0].channel !== message.channel.id) return;
+    const channels = (await db.query("SELECT * FROM global_chats") as unknown) as any[];
+    channels.forEach(async obj => {
+        if (obj.guild === message.guild?.id) return;
+        if (!obj.active) return;
+        let webhook = new WebhookClient({ id: obj.webhook_id, token: obj.webhook_token });
+        if (!webhook) {
+            webhook = (await (await client.channels.fetch(obj.channel) as TextChannel).createWebhook({ name: "Global Chat" }) as any);
+            await db.query("UPDATE global_chats SET ? WHERE guild = ?", [{ webhook_id: webhook.id, webhook_token: webhook.token }, obj.guild]);
+        }
+        let content = message.content;
+        if (message.reference) {
+            const referenceMessage = message.channel.messages.cache.get((message.reference as any).messageId);
+            content = `> ${(referenceMessage as Message).content ?? "*Attachment*"}\n\n\`@${referenceMessage?.author.username}\` ${message.content ?? "*Attachment*"}`;
+        }
+        webhook.send({
+            content: content,
+            attachments: (message.attachments as any),
+            username: message.author.username,
+            avatarURL: message.author.displayAvatarURL()
+        });
+    });
 });
 
 client.login(data.bot.token);
