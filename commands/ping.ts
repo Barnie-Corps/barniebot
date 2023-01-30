@@ -1,18 +1,14 @@
-import { Message } from "discord.js";
-import { ReplyFunction } from "../types/interfaces";
+import { ChatInputCommandInteraction, SlashCommandBuilder } from "discord.js";
 
 export default {
-    data: {
-        name: "ping",
-        description: "Muestra el tiempo de respuesta del bot",
-        guildOnly: false,
-        requiredGuildPermissions: [],
-        aliases: ["latency"],
-        category: "info"
-    },
-    execute: async (message: Message, args: string[], reply: ReplyFunction, prefix: string, lang: string) => {
-        reply(`HTTP API: ----//----\nAPI Heartbeat: ${message.client.ws.ping} ms`).then(m => {
-            m.edit(`HTTP API: ${m.createdTimestamp - message.createdTimestamp} ms\nAPI Heartbeat: ${message.client.ws.ping} ms`);
-        });
+    data: new SlashCommandBuilder()
+    .setName("ping")
+    .setDescription("Shows bot's latency"),
+    async execute (interaction: ChatInputCommandInteraction, lang: string) {
+        const start = Date.now();
+        await interaction.reply(`:ping_pong: Pong!\nSocket latency: ${interaction.client.ws.ping} ms\nHTTP API latency: --//--`);
+        const end = Date.now();
+        const wsPing = interaction.client.ws.ping;
+        await interaction.editReply(`:ping_pong: Pong!\nSocket latency: ${wsPing} ms (${wsPing / 1000} s)\nHTTP API latency: ${end - start} ms (${(end - start) / 1000} s)`);
     }
 }

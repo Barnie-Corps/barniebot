@@ -1,31 +1,30 @@
-import { Message } from "discord.js";
-import { ReplyFunction } from "../types/interfaces";
-import * as langs from "langs";
+import { ChatInputCommandInteraction, SlashCommandBuilder } from "discord.js"
+import langs from "langs";
 import utils from "../utils";
 import db from "../mysql/database";
 
 export default {
-    data: {
-        name: "setlang",
-        aliases: ["setlanguage"],
-        description: "Establece el idioma en que quieres que el bot te responda proporcionando el código ISO 639-1.",
-        guildOnly: false,
-        requiredGuildPermissions: [],
-        category: "config"
-    },
-    execute: async (message: Message, args: string[], reply: ReplyFunction, prefix: string, lang: string) => {
-        let newLang = args[0];
-        if (!newLang) return reply("```\n" + `${prefix}setlang <language>\n${utils.createSpaces(`${prefix}setlang <`.length)}${utils.createArrows("language".length)}\n\nERR: Missing required argument.` + "\n```");
+    data: new SlashCommandBuilder()
+        .setName("setlang")
+        .setDescription("Sets your language")
+        .addStringOption(o => o.setName("language").setDescription("New language's code").setRequired(true)),
+    execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
+        await interaction.deferReply();
+        let newLang = interaction.options.getString("language");
+        const reply = (text: string) => {
+            return interaction.editReply(text);
+        }
+        if (!newLang) return reply("```\n" + `/setlang <language>\n${utils.createSpaces(`/setlang <`.length)}${utils.createArrows("language".length)}\n\nERR: Missing required argument.` + "\n```");
         newLang = newLang.toLowerCase();
-        if (newLang === lang) return reply("```\n" + `${prefix}setlang ${newLang}\n${utils.createSpaces(`${prefix}setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Cannot set same language twice.` + "\n```");
-        if (newLang.length > 2) return reply("```\n" + `${prefix}setlang ${newLang}\n${utils.createSpaces(`${prefix}setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Language code cannot have more than 2 characters.` + "\n```");
-        if (!langs.has(1, newLang) || newLang === "br") return reply("```\n" + `${prefix}setlang ${newLang}\n${utils.createSpaces(`${prefix}setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Invalid language code.` + "\n```");
-        const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]);
+        if (newLang === lang) return reply("```\n" + `/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Cannot set same language twice.` + "\n```");
+        if (newLang.length > 2) return reply("```\n" + `/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Language code cannot have more than 2 characters.` + "\n```");
+        if (!langs.has(1, newLang) || newLang === "br") return reply("```\n" + `/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Invalid language code.` + "\n```");
+        const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
         if (foundLang[0]) {
-            await db.query("UPDATE languages SET ? WHERE userid = ?", [{ lang: newLang }, message.author.id]);
+            await db.query("UPDATE languages SET ? WHERE userid = ?", [{ lang: newLang }, interaction.user.id]);
         }
         else {
-            await db.query("INSERT INTO languages SET ?", [{ userid: message.author.id, lang: newLang }]);
+            await db.query("INSERT INTO languages SET ?", [{ userid: interaction.user.id, lang: newLang }]);
         }
         await reply(newLang === "es" ? `Idioma establecido correctamente a **${langs.where("1", newLang)?.local}**` : (await utils.translate(`Idioma establecido correctamente a **${langs.where("1", newLang)?.local}**`, "es", newLang)).text);
     }

@@ -20,6 +20,7 @@ import Log from "./Log";
 import queries from "./mysql/queries";
 import db from "./mysql/database";
 import utils from "./utils";
+import load_slash from "./load_slash";
 const client = new Client({
     intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.GuildMessageTyping, GatewayIntentBits.GuildEmojisAndStickers, GatewayIntentBits.DirectMessages, GatewayIntentBits.DirectMessageTyping, GatewayIntentBits.DirectMessageReactions],
     partials: [Partials.Channel, Partials.GuildMember, Partials.Message, Partials.User],
@@ -34,31 +35,6 @@ const client = new Client({
     for (const cmdFile of commandsDir) {
         try {
             const command = (await import(`./commands/${cmdFile.trim().split(".")[0]}`)).default;
-            const requiredProperties: string[] = ["data", "execute"];
-            const missingProperties: string[] = requiredProperties.filter(p => !Object.keys(command).includes(p));
-            if (missingProperties.length > 0) {
-                Log.warn("commands", `The command file '${cmdFile}' has the following required properties missing: ${missingProperties.map(p => p).join(", ")}. To avoid any error, it hasn't been loaded.`);
-                continue;
-            }
-            const requiredDataProperties: string[] = ["name", "aliases", "requiredGuildPermissions", "guildOnly", "category", "description"];
-            const missingDataProperties: string[] = requiredDataProperties.filter(p => !Object.keys(command.data).includes(p));
-            if (missingDataProperties.length > 0) {
-                Log.warn("commands", `The command file '${cmdFile}' has the following required data properties missing: ${missingDataProperties.map(p => p).join(", ")}. To avoid any error, it hasn't been loaded.`);
-                continue;
-            }
-            if (command.data.requiredGuildPermissions.length > 0 && command.data.guildOnly) {
-                const invalidPermissions: any[] = [];
-                if (!command.data.requiredGuildPermissions.every((p: any) => {
-                    if (!(PermissionFlagsBits as any)[p as string]) {
-                        invalidPermissions.push(p);
-                        return false;
-                    }
-                    else return true;
-                })) {
-                    Log.error("commands", `The guild-only '${command.data.name}' command has the following invalid required permissions: ${invalidPermissions.join(", ")}. To avoid any error, it hasn't been loaded.`);
-                    continue;
-                }
-            }
             data.bot.commands.set(command.data.name, command);
         }
         catch (err: any) {
@@ -72,6 +48,7 @@ client.on("ready", async (): Promise<any> => {
     Log.success("bot", `Successfully logged in at discord as ${client.user?.tag}`);
     queries();
     client.user?.setPresence({ activities: [{ name: `V ${String(process.env.VERSION)}`, type: ActivityType.Playing }] });
+    await load_slash();
     Log.info("bot", `Fetching members from ${client.guilds.cache.size} guilds...`);
     for (const guild of client.guilds.cache.values()) {
         await guild.members.fetch();
@@ -82,147 +59,39 @@ client.on("ready", async (): Promise<any> => {
 client.on("messageCreate", async (message): Promise<any> => {
     if (message.author.bot) return;
     let prefix = "b.";
-    if (message.guild) {
-        const DBPrefix = ((await db.query("SELECT * FROM prefixes WHERE guild = ?", [message.guild.id]) as unknown) as any[]);
-        if (DBPrefix[0]) {
-            prefix = DBPrefix[0].prefix;
+    const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]);
+    const Lang = foundLang[0] ? foundLang[0].lang : "en";
+    if (message.content.toLowerCase().startsWith("b.")) {
+        if (Lang === "es") {
+            message.reply("Lo siento, los comandos de prefijo ya no son soportados.");
         }
-    }
-    const args = message.content.slice(prefix.length).trim().split(" ");
-    const command = message.content.toLowerCase().startsWith(prefix.toLowerCase()) ? args.shift() : "none";
-    async function reply(options: string | MessagePayload | ReplyMessageOptions) {
-        return message.reply(options).catch((err: any) => {
-            Log.error("bot", `Couldn't reply to ${message.author.tag} due to an unexpected error: ${err}`);
-        });
-    }
-    if (command === "none") return;
-    else {
-        const foundCommand = data.bot.commands.get(command as string) ?? data.bot.commands.find(c => c.data.aliases.includes(command));
-        if (!foundCommand) return reply("```\n" + `${prefix}${command} ${args.slice(0).join(" ")}\n${utils.createSpaces(prefix.length)}${utils.createArrows((command as string).length)}\n\nERR: Unknown command.` + "\n```");
-        if (foundCommand.data.guildOnly && !message.guild) return;
-        const Lang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]);
-        let missingRequiredPermissions: string[] = [];
-        if (foundCommand.data.requiredGuildPermissions.length > 0 && foundCommand.data.guildOnly && message.guild) {
-            if (!foundCommand.data.requiredGuildPermissions.every((p: any) => {
-                if (message.member?.permissions.has(p)) return true;
-                else {
-                    missingRequiredPermissions.push(p);
-                    return false;
-                }
-            })) return reply("```\n" + `${prefix}${command}\n${utils.createSpaces(`${prefix}`.length)}${utils.createArrows((command as string).length)}\n\nERR: Missing required guild permissions: ${missingRequiredPermissions.map(p => p).join(", ")}.` + "\n```");
-        }
-        try {
-            await foundCommand.execute(message, args, reply, prefix, Lang[0] ? Lang[0].lang : "en");
-        }
-        catch (err: any) {
-            Log.error("bot", `Couldn't execute command '${foundCommand.data.name}' as '${command}' due to an unexpected error: ${err.stack}`);
+        else {
+            const reply = (await utils.translate("Lo siento, los comandos de prefijo ya no son soportados.", "es", Lang)).text;
+            message.reply(reply);
         }
     }
 });
 client.on("interactionCreate", async (interaction): Promise<any> => {
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
     const Lang = foundLang[0] ? foundLang[0].lang : "en";
-    let prefix = "b.";
-    if (interaction.guild) {
-        const DBPrefix = ((await db.query("SELECT * FROM prefixes WHERE guild = ?", [interaction.guild.id]) as unknown) as any[]);
-        if (DBPrefix[0]) {
-            prefix = DBPrefix[0].prefix;
+    if (interaction.isCommand()) {
+        const cmd = data.bot.commands.get(interaction.commandName as string);
+        if (!cmd) {
+            return await interaction.reply({ content: "```\n" + `/${interaction.commandName}\n ${utils.createArrows(`${interaction.command?.name}`.length)}\n\nERR: Unknown slash command` + "\n```", ephemeral: true });
         }
-    }
-    if (interaction.isSelectMenu()) {
-        if (interaction.customId.startsWith("commands-")) {
-            await interaction.deferReply({ ephemeral: true });
-            let authorId = interaction.customId.slice("commands-".length);
-            if (interaction.user.id !== authorId) return interaction.editReply(Lang !== "es" ? (await utils.translate("Tú no fuiste quién usó el comando, no puedes cambiar de categoría.", "es", Lang)).text : "Tú no fuiste quién usó el comando, no puedes cambiar de categoría.");
-            else {
-                const texts = {
-                    embed: {
-                        description: `Puedes usar el comando **${prefix}command** para ver información de un comando específico.`,
-                        footer: "Santiago Morales © 2020 - 2025 All rights reserved.",
-                        empty: "Oops... este lugar parece vacío",
-                        messageEdited: "El mensaje embed ha sido editado."
-                    },
-                    categories: {
-                        info: "Información",
-                        mod: "Moderación",
-                        config: "Configuración",
-                        fun: "Diversión",
-                        support: "Soporte",
-                        logs: "Logísitca",
-                        utility: "Utilidad",
-                        social: "Social",
-                        placeholder: "Selecciona una opción..."
-                    }
-                }
-                await utils.parallel({
-                    embed: async (callback: any) => {
-                        if (Lang !== "es") {
-                            texts.embed.description = (await utils.translate(texts.embed.description, "es", Lang)).text;
-                            texts.embed.empty = (await utils.translate(texts.embed.empty, "es", Lang)).text;
-                            texts.embed.messageEdited = (await utils.translate(texts.embed.messageEdited, "es", Lang)).text;
-                        }
-                        callback(null, true);
-                    },
-                    categories: async (callback: any) => {
-                        if (Lang !== "es") {
-                            for (const [key, value] of Object.entries(texts.categories)) {
-                                (texts.categories as any)[`${key}`] = (await utils.translate(value, "es", Lang)).text;
-                            }
-                        }
-                        callback(null, true);
-                    }
-                });
-                const selectedCategory = interaction.values[0].trim().split("_")[0];
-                const filteredCommands = data.bot.commands.filter(c => c.data.category === selectedCategory);
-                const embed = new EmbedBuilder()
-                    .setAuthor({ iconURL: interaction.user.displayAvatarURL(), name: interaction.user.tag })
-                    .setTitle((texts.categories as any)[selectedCategory])
-                    .setDescription(texts.embed.description)
-                    .addFields(
-                        {
-                            name: Lang === "es" ? "Comandos" : (await utils.translate("Comandos", "es", Lang)).text,
-                            value: `${filteredCommands.size > 0 ? filteredCommands.map(c => `**${prefix}${c.data.name}**`).join(", ") : texts.embed.empty}.`
-                        }
-                    )
-                    .setFooter({ text: texts.embed.footer })
-                    .setTimestamp()
-                    .setColor("Purple")
-                await interaction.editReply(texts.embed.messageEdited);
-                await interaction.message.edit({ embeds: [embed] });
+        try {
+            await cmd.execute(interaction, Lang);
+        }
+        catch (err: any) {
+            if (interaction.deferred || interaction.replied) {
+                await interaction.editReply("ERROR");
             }
+            else {
+                await interaction.reply({ ephemeral: true, content: "ERROR" });
+            }
+            Log.error("bot", `Error executing slash command ${cmd.data.name}\n${err.stack}`);
         }
     }
-});
-
-client.on("messageCreate", async (message): Promise<any> => {
-    if (!message.guild) return;
-    if (message.author.bot) return;
-    let gchatObject = (await db.query("SELECT * FROM global_chats WHERE guild = ?", [message.guild?.id]) as unknown) as any[];
-    if (!gchatObject[0]) return;
-    if (!gchatObject[0].active) return;
-    if (gchatObject[0].channel !== message.channel.id) return;
-    if (gchatObject[0].restricted) return message.react((data.bot.emojis.find(e => e.name === "thumbsdown") as any));
-    const channels = (await db.query("SELECT * FROM global_chats") as unknown) as any[];
-    channels.forEach(async obj => {
-        if (obj.guild === message.guild?.id) return;
-        if (!obj.active) return;
-        let webhook = new WebhookClient({ id: obj.webhook_id, token: obj.webhook_token });
-        if (!webhook) {
-            webhook = (await (await client.channels.fetch(obj.channel) as TextChannel).createWebhook({ name: "Global Chat" }) as any);
-            await db.query("UPDATE global_chats SET ? WHERE guild = ?", [{ webhook_id: webhook.id, webhook_token: webhook.token }, obj.guild]);
-        }
-        let content = message.content;
-        if (message.reference) {
-            const referenceMessage = message.channel.messages.cache.get((message.reference as any).messageId);
-            content = `> ${(referenceMessage as Message).content ?? "*Attachment*"}\n\n\`@${referenceMessage?.author.username}\` ${message.content ?? "*Attachment*"}`;
-        }
-        webhook.send({
-            content: content,
-            attachments: (message.attachments as any),
-            username: message.author.username,
-            avatarURL: message.author.displayAvatarURL()
-        });
-    });
 });
 
 client.login(data.bot.token);

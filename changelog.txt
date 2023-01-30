@@ -18,3 +18,22 @@ Update V 3.1.7 Changelog
  - Removed ChatManager [DEV]
 
 This is the first changelog note, this file will contain all changelogs from V 3.1.7, if it becomes too large (that surely will happen), changelogs will be published on single files as releases in github.
+
+Update V 4.1.7 Changelog :O
+
+[!] Tags:
+ - ALPHA: It's in early usage, which means it's not completely done and bugs are expected.
+ - DEV: It's meant for developers and normal users should just ignore them.
+ - BETA: It's completely done but there are still bugs that are being fixed.
+
+ [/] Changes:
+  - Commands avatar, botinfo, setlang and ping were recreated as slash commands
+  - index changed to handle and register only slash commands [DEV]
+
+[+] New: 
+ - Nothing this time...
+
+[-] Removed: 
+ - Commands 'commands', command, gchat, help, prefix, say and setprefix were deleted (say command could come back in a future version, now it is not important)
+
+Have a good day or a good night :D
