@@ -1,0 +1,8 @@
+/**
+ * THESE COMMENTS MUST NOT BE REMOVED.
+ * This is a discord bot based on BarnieBot's code (https://github.com/Barnie-Corps/barniebot) distributing or using this bot without giving credits to original author
+ * could result in a demand due to this code's license.
+ * You read the full license at the LICENSE file that must be on this directory.
+ * TIP: You can always contact the original creator on discord as Retr0#9521 or by email: santiadjmc@gmail.com
+ * Certificate of registration: https://www.copyrighted.com/work/23e3X3GmrHeYiS1d
+ */
