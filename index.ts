@@ -1,5 +1,5 @@
 /**
- * Open source discord bot created by Santiago.#9521 (owner of Barnie Corps)
+ * Open source discord bot created by Retr0#9521 (owner of Barnie Corps)
  * Please read the license at LICENSE in the root of the project.
  * It is highly recommended that you read the license before using this bot's code but if you do not, you can do so at https://opensource.org/licenses/MIT.
  * Here's a summary of the license:
