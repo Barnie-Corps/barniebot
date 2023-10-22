@@ -37,3 +37,26 @@ Update V 4.1.7 Changelog :O
  - Commands 'commands', command, gchat, help, prefix, say and setprefix were deleted (say command could come back in a future version, now it is not important)
 
 Have a good day or a good night :D
+
+Update V 4.2.7
+[!] Tags:
+ - ALPHA: It's in early usage, which means it's not completely done and bugs are expected.
+ - DEV: It's meant for developers and normal users should just ignore them.
+ - BETA: It's completely done but there are still bugs that are being fixed.
+
+ [/] Changes:
+  - Updated packages [DEV]
+  - Changed botinfo language translation algorithm incresing it's loading speed
+  - Added defering to ping command
+  - Modified setlang done message to notify about data collection
+  - Modified botinfo's database section to now show real data and not just 0.
+
+ [+] New:
+ - New autoTranslate function that recursively translates objects strings to a desiged language [DEV]
+ - Added command tracking in the interactionCreate event [DEV]
+ - Added user public data registering
+ - Added kick command
+ - Added github command
+ - Added discord_users and executed_commands to the tables created in the queries function [DEV]
+
+And that's it.

@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder } from "discord.js"
+import { ChatInputCommandInteraction, Collection, Message, SlashCommandBuilder } from "discord.js"
 import langs from "langs";
 import utils from "../utils";
 import db from "../mysql/database";
@@ -26,6 +26,6 @@ export default {
         else {
             await db.query("INSERT INTO languages SET ?", [{ userid: interaction.user.id, lang: newLang }]);
         }
-        await reply(newLang === "es" ? `Idioma establecido correctamente a **${langs.where("1", newLang)?.local}**` : (await utils.translate(`Idioma establecido correctamente a **${langs.where("1", newLang)?.local}**`, "es", newLang)).text);
+        await reply(newLang === "es" ? `Idioma establecido correctamente a **${langs.where("1", newLang)?.local}**\n\nRecuerda: BarnieBot almacena información pública de tu perfil, tal como lo es tu ID de discord, tu nombre de usuario, foto de perfil, etc. ¡Nosotros no almacenamos tus mensajes!` : (await utils.translate(`Idioma establecido correctamente a **${langs.where("1", newLang)?.local}**\n\nRecuerda: BarnieBot almacena información pública de tu perfil, tal como lo es tu ID de discord, tu nombre de usuario, foto de perfil, etc. ¡Nosotros no almacenamos tus mensajes!`, "es", newLang)).text);
     }
 }

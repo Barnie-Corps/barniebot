@@ -14,7 +14,7 @@
  */
 import * as dotenv from "dotenv";
 dotenv.config();
-import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, MessagePayload, ReplyMessageOptions, WebhookClient, TextChannel, Message } from "discord.js";
+import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, MessagePayload, ReplyMessageOptions, WebhookClient, TextChannel, Message, time, TimestampStyles } from "discord.js";
 import * as fs from "fs";
 import data from "./data";
 import Log from "./Log";
@@ -22,6 +22,12 @@ import queries from "./mysql/queries";
 import db from "./mysql/database";
 import utils from "./utils";
 import load_slash from "./load_slash";
+process.on("uncaughtException", (err: any) => {
+    console.log(`Unknown Error: ${err.stack}`);
+});
+process.on("unhandledRejection", (err: any) => {
+    console.log(`Unknown Error: ${err.stack}`);
+});
 const client = new Client({
     intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.GuildMessageTyping, GatewayIntentBits.GuildEmojisAndStickers, GatewayIntentBits.DirectMessages, GatewayIntentBits.DirectMessageTyping, GatewayIntentBits.DirectMessageReactions],
     partials: [Partials.Channel, Partials.GuildMember, Partials.Message, Partials.User],
@@ -39,7 +45,7 @@ const client = new Client({
             data.bot.commands.set(command.data.name, command);
         }
         catch (err: any) {
-            Log.error("commands", `Couldn't load command file '${cmdFile}' properly due to an unexpected error:\n${err}`);
+            Log.error("commands", `Couldn't load command file '${cmdFile}' properly due to an unexpected error:\n${err.stack}`);
         }
     }
     Log.success("commands", `Successfully loaded ${data.bot.commands.size}/${commandsDir.length} commands.`);
@@ -50,11 +56,7 @@ client.on("ready", async (): Promise<any> => {
     queries();
     client.user?.setPresence({ activities: [{ name: `V ${String(process.env.VERSION)}`, type: ActivityType.Playing }] });
     await load_slash();
-    Log.info("bot", `Fetching members from ${client.guilds.cache.size} guilds...`);
-    for (const guild of client.guilds.cache.values()) {
-        await guild.members.fetch();
-    }
-    Log.info("bot", `Members fetched from all guilds. Current users cache size: ${client.users.cache.size}`);
+    Log.info("bot", `Current users cache size: ${client.users.cache.size}`);
 });
 
 client.on("messageCreate", async (message): Promise<any> => {
@@ -82,6 +84,15 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
         }
         try {
             await cmd.execute(interaction, Lang);
+            await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE");
+            await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]);
+            const foundU: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [interaction.user.id]);
+            if (foundU[0]) {
+                await db.query("UPDATE discord_users SET command_executions = command_executions + 1, pfp = ?, username = ? WHERE id = ?", [interaction.user.displayAvatarURL({ size: 1024 }), interaction.user.username, interaction.user.id]);
+            }
+            else {
+                await db.query("INSERT INTO discord_users SET ?", { id: interaction.user.id, pfp: interaction.user.displayAvatarURL({ size: 1024 }), username: interaction.user.username });
+            }
         }
         catch (err: any) {
             if (interaction.deferred || interaction.replied) {

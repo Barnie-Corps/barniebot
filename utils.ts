@@ -27,6 +27,31 @@ const utils = {
                 else resolve(results as any[]);
             });
         });
+    },
+    autoTranslate: async (obj: any, language: string): Promise<typeof obj> => {
+        if (typeof obj !== "object" || Array.isArray(obj)) throw new TypeError(`The autoTranslate function takes as first argument an object, got ${Array.isArray(obj) ? "Array" : typeof obj}`);
+        if (typeof language !== "string") throw new TypeError(`The autoTranslate function takes as second argument a string, got ${typeof language}`);
+        const keys = Object.keys(obj);
+        const newObj = obj;
+        const validKeys: string[] = [];
+        for (const k of keys) {
+            if (typeof obj[k] === "object" && !Array.isArray(obj)) {
+                const newProperty = await utils.autoTranslate(obj[k], language);
+                newObj[k] = newProperty;
+                continue;
+            }
+            validKeys.push(k);
+        }
+        const translateObj: any = new Object;
+        for (const vk of validKeys) {
+            translateObj[vk] = async (done: any) => {
+                const translation = (await utils.translate(obj[vk], "es", language)).text;
+                newObj[vk] = translation;
+                done(null, true);
+            }
+        }
+        await utils.parallel(translateObj);
+        return newObj;
     }
 };
 export default utils;

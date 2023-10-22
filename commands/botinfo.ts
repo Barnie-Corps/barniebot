@@ -1,16 +1,22 @@
-import { ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder } from "discord.js";
+import { ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder, TimestampStyles, time } from "discord.js";
 import { ReplyFunction } from "../types/interfaces";
 import * as osu from "node-os-utils";
 import utils from "../utils";
-const { mem, cpu, drive } = osu;
+import * as disk from "node-disk-info";
+import db from "../mysql/database";
+const { mem, cpu } = osu;
 
 export default {
     data: new SlashCommandBuilder()
     .setName("botinfo")
     .setDescription("Shows bot's info"),
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
+        function byteToGB(b: number): number {
+            return ((b / 1024) / 1024) / 1024;
+        }
         await interaction.deferReply();
-        const texts = {
+        const users: any = await db.query("SELECT * FROM discord_users");
+        let texts = {
             embed: {
                 title: "Información general",
                 description: "Aquí verás estadísticas generales del bot.",
@@ -19,7 +25,8 @@ export default {
             fields: {
                 database: {
                     users: "Usuarios",
-                    title: "Base de datos"
+                    title: "Base de datos",
+                    last_command: "Último comando ejecutado"
                 },
                 system: {
                     cpu: "Carga de la CPU",
@@ -34,36 +41,18 @@ export default {
                 }
             }
         }
-        await utils.parallel({
-            embed: async (callback: any) => {
-                if (lang !== "es") {
-                    texts.embed.description = (await utils.translate(texts.embed.description, "es", lang)).text;
-                    texts.embed.title = (await utils.translate(texts.embed.title, "es", lang)).text;
-                }
-                callback(null, true);
-            },
-            fields: async (callback: any) => {
-                if (lang !== "es") {
-                    texts.fields.system.title = (await utils.translate(texts.fields.system.title, "es", lang)).text;
-                    texts.fields.system.cpu = (await utils.translate(texts.fields.system.cpu, "es", lang)).text;
-                    texts.fields.system.storage = (await utils.translate(texts.fields.system.storage, "es", lang)).text;
-                    texts.fields.database.title = (await utils.translate(texts.fields.database.title, "es", lang)).text;
-                    texts.fields.database.users = (await utils.translate(texts.fields.database.users, "es", lang)).text;
-                    texts.fields.bot.cachedUsers = (await utils.translate(texts.fields.bot.cachedUsers, "es", lang)).text;
-                    texts.fields.bot.totalUsers = (await utils.translate(texts.fields.bot.totalUsers, "es", lang)).text;
-                    texts.fields.bot.guilds = (await utils.translate(texts.fields.bot.guilds, "es", lang)).text;
-                    texts.fields.bot.channels = (await utils.translate(texts.fields.bot.channels, "es", lang)).text;
-                }
-                callback(null, true);
-            }
-        });
+        if (lang !== "es") {
+            texts = await utils.autoTranslate(texts, lang);
+        }
         let totalUsers = 0;
         for (const guild of interaction.client.guilds.cache.values()) {
             totalUsers += guild.memberCount;
         }
         const cpuUsage = `${await cpu.usage()}%`;
         const memUsage = `${Math.floor(process.memoryUsage().heapUsed / 1000000)} MB / ${Math.round((await mem.info()).totalMemMb / 1024)} GB`;
-        const storage = `${(await drive.info("/")).freeGb}/${(await drive.info("/")).totalGb} GB`;
+        const storage = `${byteToGB(disk.getDiskInfoSync()[0].available).toFixed(1)}/${byteToGB(disk.getDiskInfoSync()[0].blocks).toFixed(1)} GB (${disk.getDiskInfoSync()[0].capacity})`;
+        const last_command_executed: any = await db.query("SELECT * FROM executed_commands WHERE is_last = TRUE"); 
+        const lastU = await interaction.client.users.fetch(last_command_executed[0].uid);
         const embed = new EmbedBuilder()
             .setAuthor({ iconURL: interaction.user.displayAvatarURL(), name: interaction.user.tag })
             .setTitle(texts.embed.title)
@@ -76,7 +65,7 @@ export default {
                 },
                 {
                     name: texts.fields.database.title,
-                    value: `${texts.fields.database.users}: 0`,
+                    value: `${texts.fields.database.users}: ${users.length}\n${texts.fields.database.last_command}: ${last_command_executed[0].command} - ${lastU?.username} (${time(last_command_executed[0].at, TimestampStyles.RelativeTime)})`,
                     inline: true
                 },
                 {
