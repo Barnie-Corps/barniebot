@@ -2,7 +2,7 @@
   "name": "barniebot",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "index.ts",
   "dependencies": {
     "@discordjs/rest": "^1.1.0",
     "@types/async": "^3.2.21",
