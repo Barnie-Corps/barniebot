@@ -6,7 +6,7 @@ We are committed to respecting and protecting the privacy of all users who inter
 
 2. Information We Collect
 
-We collect public data from Discord, including your profile picture, username, Discord ID, and command executions (both count and complete log). We also store messages, including their content, when they're sent through the bot's global chat for security purposes. This information cannot be deleted. We also collect public guild info and bot interaction statistics.
+We collect public data from Discord, including your profile picture, username, Discord ID, and command executions (both count and complete log). We also store messages, including their [encrypted] content, when they're sent through the bot's global chat for security purposes. This information cannot be deleted. We also collect public guild info and bot interaction statistics.
 
 3. Use of Information
 
