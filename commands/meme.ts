@@ -7,7 +7,6 @@ export default {
     .setName("meme")
     .setDescription("Shows a random meme"),
     async execute (interaction: ChatInputCommandInteraction, lang: string) {
-        await interaction.deferReply();
         async function getMeme() {
             let rsp = await fetch("https://meme-api.com/gimme");
             let json = await rsp.json();
@@ -39,5 +38,6 @@ export default {
         .setTimestamp()
         .setFooter({ text: `${data.bot.emojis[0].emoji} ${meme.ups}` })
         await interaction.editReply({ embeds: [embed], components: [row as any] });
-    }
+    },
+    ephemeral: false
 }

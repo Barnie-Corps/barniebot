@@ -15,5 +15,6 @@ export default {
         .setImage(target.displayAvatarURL({ size: 1024 }))
         .setColor("Purple")
         await interaction.editReply({ embeds: [embed] });
-    }
+    },
+    ephemeral: false
 }

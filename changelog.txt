@@ -3,7 +3,7 @@ Update V 3.1.7 Changelog
 [!] Tags:
  - ALPHA: It's in early usage, which means it's not completely done and bugs are expected.
  - DEV: It's meant for developers and normal users should just ignore them.
- - BETA: It's completely done but there are still bugs that are being fixed.
+ - BETA: It's completely done but there are still bugs or could be bugs that are being fixed.
 
 [/] Changes:
   - Updated ReplyFunction interface [DEV]
@@ -24,7 +24,7 @@ Update V 4.1.7 Changelog :O
 [!] Tags:
  - ALPHA: It's in early usage, which means it's not completely done and bugs are expected.
  - DEV: It's meant for developers and normal users should just ignore them.
- - BETA: It's completely done but there are still bugs that are being fixed.
+ - BETA: It's completely done but there are still bugs or could be bugs that are being fixed.
 
  [/] Changes:
   - Commands avatar, botinfo, setlang and ping were recreated as slash commands
@@ -42,7 +42,7 @@ Update V 4.2.7
 [!] Tags:
  - ALPHA: It's in early usage, which means it's not completely done and bugs are expected.
  - DEV: It's meant for developers and normal users should just ignore them.
- - BETA: It's completely done but there are still bugs that are being fixed.
+ - BETA: It's completely done but there are still bugs or could be bugs that are being fixed.
 
  [/] Changes:
   - Updated packages [DEV]
@@ -52,11 +52,35 @@ Update V 4.2.7
   - Modified botinfo's database section to now show real data and not just 0.
 
  [+] New:
- - New autoTranslate function that recursively translates objects strings to a desiged language [DEV]
- - Added command tracking in the interactionCreate event [DEV]
- - Added user public data registering
- - Added kick command
- - Added github command
- - Added discord_users and executed_commands to the tables created in the queries function [DEV]
+  - New autoTranslate function that recursively translates objects strings to a desiged language [DEV]
+  - Added command tracking in the interactionCreate event [DEV]
+  - Added user public data registering
+  - Added kick command
+  - Added github command
+  - Added discord_users and executed_commands to the tables created in the queries function [DEV]
+
+ [-] Removed: 
+  - Nothing this time...
 
 And that's it.
+
+Update V 4.3.7
+[!] Tags:
+ - ALPHA: It's in early usage, which means it's not completely done and bugs are expected.
+ - DEV: It's meant for developers and normal users should just ignore them.
+ - BETA: It's completely done but there are still bugs or could be bugs that are being fixed.
+
+ [/] Changes:
+  - Modified index and command files to defer an ephemeral or non-ephemeral reply before any command execution using a new ephemeral propertie on command objects [DEV]
+  - Modified data object and interface to add an ecryption key property [DEV]
+
+ [+] New:
+  - Created ChatManager class to make global chat easier to manage [DEV]
+  - Created commando globalchats and 3 subcommands for its actions: set (channel), toggle, language (language 2 digits code), autotranslate (True/False)
+  - Added Global Chats feature [BETA]
+  - Added globalchats, global_messages and guilds (Currently not in use) queries [DEV]
+
+ [-] Removed:
+  - Nothing this time...
+
+Have a good day.

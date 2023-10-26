@@ -22,6 +22,8 @@ import queries from "./mysql/queries";
 import db from "./mysql/database";
 import utils from "./utils";
 import load_slash from "./load_slash";
+import ChatManager from "./managers/ChatManager";
+const manager = new ChatManager();
 process.on("uncaughtException", (err: any) => {
     console.log(`Unknown Error: ${err.stack}`);
 });
@@ -77,12 +79,20 @@ client.on("messageCreate", async (message): Promise<any> => {
 client.on("interactionCreate", async (interaction): Promise<any> => {
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
     const Lang = foundLang[0] ? foundLang[0].lang : "en";
+    let texts = {
+        new: "Hey! Veo que es la primera vez que utilizas uno de mis comandos, por lo menos en esta cuenta jaja. Quiero decirte que no te olvides de leer mi política de privacidad!",
+        error: "Whoops... Ha ocurrido un error inesperado, ya he reportado el error pero si éste persiste, puedes notificarlo en el siguiente enlace:"
+    }
+    if (Lang !== "es") {
+        texts = await utils.autoTranslate(texts, "es", Lang);
+    }
     if (interaction.isCommand()) {
         const cmd = data.bot.commands.get(interaction.commandName as string);
         if (!cmd) {
             return await interaction.reply({ content: "```\n" + `/${interaction.commandName}\n ${utils.createArrows(`${interaction.command?.name}`.length)}\n\nERR: Unknown slash command` + "\n```", ephemeral: true });
         }
         try {
+            await interaction.deferReply({ ephemeral: cmd.ephemeral as boolean });
             await cmd.execute(interaction, Lang);
             await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE");
             await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]);
@@ -92,18 +102,52 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             }
             else {
                 await db.query("INSERT INTO discord_users SET ?", { id: interaction.user.id, pfp: interaction.user.displayAvatarURL({ size: 1024 }), username: interaction.user.username });
+                await interaction.channel?.send(`<@${interaction.user.id}>, ${texts.new}: [privacy.txt](https://github.com/Barnie-Corps/barniebot/blob/master/privacy.txt)`);
             }
         }
         catch (err: any) {
             if (interaction.deferred || interaction.replied) {
-                await interaction.editReply("ERROR");
+                try {
+                    await interaction.editReply(`${texts.error} https://discord.gg/BKFa6tFYJx`);
+                }
+                catch (err: any) {
+                    Log.error("bot", `Couldn't send error message to user ${interaction.user.username}`);
+                    await interaction.channel?.send(`<@${interaction.user.id}>, ${texts.error} https://discord.gg/BKFa6tFYJx`);
+                }
             }
             else {
-                await interaction.reply({ ephemeral: true, content: "ERROR" });
+                try {
+                    await interaction.reply({ ephemeral: true, content: `${texts.error} https://discord.gg/BKFa6tFYJx` });
+                }
+                catch (err: any) {
+                    Log.error("bot", `Couldn't send error message to user ${interaction.user.username}`);
+                }
             }
             Log.error("bot", `Error executing slash command ${cmd.data.name}\n${err.stack}`);
         }
     }
+});
+
+client.on("messageCreate", async (message): Promise<any> => {
+    if (!message.inGuild()) return;
+    const chatdb: any = await db.query("SELECT * FROM globalchats WHERE guild = ?", [message.guildId]);
+    if (!chatdb[0]) return;
+    if (message.channelId !== chatdb[0].channel) return;
+    const { author, channel, guild, content } = message;
+    if (author.bot) return;
+    await manager.processUser(author);
+    await manager.processMessage(message);
+});
+
+manager.on("limit-reached", async u => {
+    const user = await client.users.fetch(u.uid);
+    Log.info("bot", `User ${user?.username} has reached messages limit. This user's gonna be ratelimited if he sends another message before time resets.`);
+    await manager.announce(`User ${user?.username} has reached messages limit. This user's gonna be ratelimited if he sends another message before time resets.`, "en");
+});
+manager.on("limit-exceed", async u => {
+    const user = await client.users.fetch(u.uid);
+    manager.ratelimit(u.uid, user?.username);
+    Log.info("bot", `User ${user?.username} has been ratelimited for ${manager.options.ratelimit_time / 1000} seconds`);
 });
 
 client.login(data.bot.token);

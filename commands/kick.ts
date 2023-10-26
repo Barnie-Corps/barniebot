@@ -26,5 +26,6 @@ export default {
         } catch (error) {
             await interaction.editReply(':x:');
         }
-    }
+    },
+    ephemeral: false
 }

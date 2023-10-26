@@ -14,7 +14,6 @@ export default {
         function byteToGB(b: number): number {
             return ((b / 1024) / 1024) / 1024;
         }
-        await interaction.deferReply();
         const users: any = await db.query("SELECT * FROM discord_users");
         let texts = {
             embed: {
@@ -42,7 +41,7 @@ export default {
             }
         }
         if (lang !== "es") {
-            texts = await utils.autoTranslate(texts, lang);
+            texts = await utils.autoTranslate(texts, "es", lang);
         }
         let totalUsers = 0;
         for (const guild of interaction.client.guilds.cache.values()) {
@@ -78,5 +77,6 @@ export default {
             .setTimestamp()
             .setColor("Purple")
             await interaction.editReply({ embeds: [embed] });
-    }
+    },
+    epehemeral: false
 }

@@ -11,7 +11,8 @@ export interface DataType {
         owners: string[];
         emojis: BotEmoji[];
         token: string;
-        commands: Collection<string, any>
+        commands: Collection<string, any>;
+        encryption_key: string;
     }
 }
 export interface BotEmoji {
@@ -21,4 +22,10 @@ export interface BotEmoji {
 }
 export interface ReplyFunction {
     (options: string | MessagePayload | ReplyMessageOptions): Promise<Message<boolean>>
+}
+
+export interface ChatManagerOptions {
+    ratelimit_time: number;
+    messages_limit: number;
+    time: number
 }

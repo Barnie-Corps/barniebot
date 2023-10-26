@@ -20,7 +20,8 @@ const data: DataType = {
             emoji: "👎"
         }],
         token: String(process.env.TOKEN),
-        commands: new Collection()
+        commands: new Collection(),
+        encryption_key: String(process.env.ECNRYPTION_KEY)
     }
 }
 export default data;
