@@ -62,6 +62,7 @@ client.on("ready", async (): Promise<any> => {
 });
 
 client.on("messageCreate", async (message): Promise<any> => {
+    if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(message.author.id)) return;
     if (message.author.bot) return;
     let prefix = "b.";
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]);
@@ -77,6 +78,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     }
 });
 client.on("interactionCreate", async (interaction): Promise<any> => {
+    if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(interaction.user.id)) return;
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
     const Lang = foundLang[0] ? foundLang[0].lang : "en";
     let texts = {
@@ -129,6 +131,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
 });
 
 client.on("messageCreate", async (message): Promise<any> => {
+    if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(message.author.id)) return;
     if (!message.inGuild()) return;
     const chatdb: any = await db.query("SELECT * FROM globalchats WHERE guild = ?", [message.guildId]);
     if (!chatdb[0]) return;
