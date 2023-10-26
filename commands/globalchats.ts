@@ -110,7 +110,7 @@ export default {
                         await interaction.editReply(texts.errors.not_registered);
                         break;
                     }
-                    await db.query("UPDATE globalchat SET enabled = ? WHERE guild = ?", [chatdb[0].enabled ? false : true, interaction.guildId]);
+                    await db.query("UPDATE globalchats SET enabled = ? WHERE guild = ?", [chatdb[0].enabled ? false : true, interaction.guildId]);
                     await interaction.editReply(chatdb[0].enabled ? texts.success.disabled : texts.success.disabled);
                     break;
                 }
