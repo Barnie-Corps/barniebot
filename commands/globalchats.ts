@@ -50,16 +50,16 @@ export default {
                     const channel = interaction.options.getChannel("channel") as TextChannel;
                     if (channel.type !== ChannelType.GuildText) return await interaction.editReply(texts.errors.not_valid);
                     let chatdb: any = await db.query("SELECT * FROM globalchats WHERE guild = ?", [interaction.guildId]);
+                    const wh = await channel.createWebhook({
+                        name: "GlobalHook",
+                        avatar: client.user?.displayAvatarURL()
+                    });
                     if (!chatdb[0]) {
-                        const wh = await channel.createWebhook({
-                            name: "GlobalHook",
-                            avatar: client.user?.displayAvatarURL()
-                        });
                         await db.query("INSERT INTO globalchats SET ?", [{ guild: interaction.guildId, channel: channel.id, language: lang, webhook_id: wh.id, webhook_token: wh.token }]);
                         await interaction.editReply(`${texts.success.first_time_enabled}`);
                         break;
                     }
-                    await db.query("UPDATE globalchats SET ? WHERE guild = ?", [{ channel: channel.id, enabled: true }, interaction.guildId]);
+                    await db.query("UPDATE globalchats SET ? WHERE guild = ?", [{ channel: channel.id, enabled: true, webhook_id: wh.id, webhook_token: wh.token }, interaction.guildId]);
                     await interaction.editReply(texts.success.set);
                     break;
                 }
