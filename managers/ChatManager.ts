@@ -55,6 +55,10 @@ export default class ChatManager extends EventEmitter {
             message.attachments
             parallelObject[g.id] = async (done: any): Promise<any> => {
                 let { content } = message;
+                if (message.reference) {
+                    const ref = await message.fetchReference();
+                    content = `> ${ref.content}\n\`@${ref.author.username}\` ${content}`;
+                }
                 if (userLanguage[0]) {
                     if (userLanguage[0].lang !== graw.language && graw.autotranslate) {
                         content = `${(await utils.translate(content, userLanguage[0].lang, graw.language)).text}\n*Translated from ${langs.where("1", userLanguage[0].lang)?.name}*`;
