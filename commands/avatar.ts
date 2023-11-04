@@ -6,7 +6,6 @@ export default {
     .setDescription("Shows the avatar of an specified user or the author if none specified.")
     .addUserOption(o => o.setName("target").setDescription("Target whose avatar u wanna see (don't specify if you want to see ur own avatar)").setRequired(false)),
     async execute (interaction: ChatInputCommandInteraction) {
-        await interaction.deferReply();
         let target = interaction.options.getUser("target");
         if (!target) target = interaction.user;
         const embed = new EmbedBuilder()
