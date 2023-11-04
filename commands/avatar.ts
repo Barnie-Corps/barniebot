@@ -9,8 +9,8 @@ export default {
         let target = interaction.options.getUser("target");
         if (!target) target = interaction.user;
         const embed = new EmbedBuilder()
-        .setAuthor({ name: interaction.user.tag, iconURL: interaction.user.displayAvatarURL() })
-        .setTitle(target.tag)
+        .setAuthor({ name: interaction.user.username, iconURL: interaction.user.displayAvatarURL() })
+        .setTitle(target.username)
         .setImage(target.displayAvatarURL({ size: 1024 }))
         .setColor("Purple")
         await interaction.editReply({ embeds: [embed] });
