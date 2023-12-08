@@ -48,7 +48,7 @@
     "delayed-stream": "^1.0.0",
     "denque": "^1.5.1",
     "discord-api-types": "^0.26.1",
-    "discord.js": "^14.3.0",
+    "discord.js": "^14.14.1",
     "doctrine": "^3.0.0",
     "dot-prop": "^5.3.0",
     "dotenv": "^16.0.2",

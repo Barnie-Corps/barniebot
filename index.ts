@@ -16,7 +16,7 @@ import fetch from "node-fetch";
 globalThis.fetch = fetch as any;
 import * as dotenv from "dotenv";
 dotenv.config();
-import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, MessagePayload, ReplyMessageOptions, WebhookClient, TextChannel, Message, time, TimestampStyles } from "discord.js";
+import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, MessagePayload, WebhookClient, TextChannel, Message, time, TimestampStyles } from "discord.js";
 import * as fs from "fs";
 import data from "./data";
 import Log from "./Log";
@@ -34,12 +34,7 @@ process.on("unhandledRejection", (err: any) => {
 });
 const client = new Client({
     intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.GuildMessageTyping, GatewayIntentBits.GuildEmojisAndStickers, GatewayIntentBits.DirectMessages, GatewayIntentBits.DirectMessageTyping, GatewayIntentBits.DirectMessageReactions],
-    partials: [Partials.Channel, Partials.GuildMember, Partials.Message, Partials.User],
-    ws: {
-        properties: {
-            browser: "Discord Android"
-        }
-    }
+    partials: [Partials.Channel, Partials.GuildMember, Partials.Message, Partials.User]
 });
 (async function () {
     const commandsDir = fs.readdirSync("./commands").filter(f => f.endsWith(".ts"));
