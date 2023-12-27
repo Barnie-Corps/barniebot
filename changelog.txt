@@ -84,3 +84,22 @@ Update V 4.3.7
   - Nothing this time...
 
 Have a good day.
+
+Update 4.3.8
+[!] Tags:
+ - ALPHA: It's in early usage, which means it's not completely done and bugs are expected.
+ - DEV: It's meant for developers and normal users should just ignore them.
+ - BETA: It's completely done but there are still bugs or could be bugs that are being fixed.
+
+ [/] Changes:
+  - Owners IDs are now taken from the environment variables, but they still can be inserted directly in the array. [DEV]
+  - Updated .env.example to show the new 2 environment variables in use. [DEV]
+
+ [+] New:
+  - Added 2 commands for owners that are shutdown and announce. [DEV]
+  - Added owners environment variable load into the data object in bot startup [DEV]
+  - Added safe shutdown check in bot startup [DEV]
+ [-] Removed:
+  - Again, nothing...
+
+Lol.

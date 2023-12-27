@@ -52,7 +52,6 @@ export default class ChatManager extends EventEmitter {
             if (g.id === message.guildId) continue;
             const c = g.channels.cache.get(graw.channel);
             const wh = new WebhookClient({ id: graw.webhook_id, token: graw.webhook_token });
-            message.attachments
             parallelObject[g.id] = async (done: any): Promise<any> => {
                 let { content } = message;
                 if (message.reference) {
@@ -65,8 +64,9 @@ export default class ChatManager extends EventEmitter {
                     }
                 }
                 try {
+                    content = content.replace(/(http|https):\/\/[\w-]+(\.[\w-]+)+([\w.,@?^=%&amp;:/~+#-]*[\w@?^=%&amp;/~+#-])?/g, "[LINK]");
                     await wh.send({
-                        username: message.author.username,
+                        username: data.bot.owners.includes(message.author.id) ? `[OWNER] ${message.author.username}` : message.author.username,
                         avatarURL: message.author.displayAvatarURL(),
                         content,
                         allowedMentions: { parse: [] },

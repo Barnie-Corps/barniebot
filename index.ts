@@ -56,6 +56,12 @@ client.on("ready", async (): Promise<any> => {
     client.user?.setPresence({ activities: [{ name: `V ${String(process.env.VERSION)}`, type: ActivityType.Playing }] });
     await load_slash();
     Log.info("bot", `Current users cache size: ${client.users.cache.size}`);
+    data.bot.owners.push(...String(process.env.OWNERS).trim().split(","));
+    Log.info("bot", "Owners data loaded.");
+    if (Number(process.env.SAFELY_SHUTTED_DOWN) === 0) {
+        await manager.announce("¡Hey! He sido reiniciado... Según mis registros, fue un reinicio forzado, por lo cual, no pude avisarles de éste. Lamentamos cualquier inconveniente o interrupción que esto haya causado.", "es");
+    }
+    fs.writeFileSync(".\\.env", fs.readFileSync('.\\.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
 });
 
 client.on("messageCreate", async (message): Promise<any> => {
@@ -64,13 +70,29 @@ client.on("messageCreate", async (message): Promise<any> => {
     let prefix = "b.";
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]);
     const Lang = foundLang[0] ? foundLang[0].lang : "en";
-    if (message.content.toLowerCase().startsWith("b.")) {
+    if (message.content.toLowerCase().startsWith("b.") && !data.bot.owners.includes(message.author.id)) {
         if (Lang === "es") {
             message.reply("Lo siento, los comandos de prefijo ya no son soportados.");
+            return;
         }
         else {
             const reply = (await utils.translate("Lo siento, los comandos de prefijo ya no son soportados.", "es", Lang)).text;
             message.reply(reply);
+            return;
+        }
+    }
+    const [command, ...args] = message.content.slice(prefix.length).trim().split(" ");
+    switch (command) {
+        case "shutdown": {
+            await manager.announce("¡Hey! Seré apagado en un segundo, lamentamos inconvenientes.", "es");
+            fs.writeFileSync(".\\.env", fs.readFileSync('.\\.env').toString().replace("SAFELY_SHUTTED_DOWN=0", "SAFELY_SHUTTED_DOWN=1"));
+            client.destroy();
+            process.exit(0);
+            break;
+        }
+        case "announce": {
+            const [language, ...msg] = args;
+            await manager.announce(msg.join(" "), language);
         }
     }
 });
