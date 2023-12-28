@@ -43,7 +43,8 @@ export default class ChatManager extends EventEmitter {
         }
     };
     public async processMessage(message: Message<true>): Promise<any> {
-        if (this.isRatelimited(message.author.id)) return Log.info("bot", `Ignoring user ${message.author.username} as it's ratelimited.`)
+        if (this.isRatelimited(message.author.id)) return Log.info("bot", `Ignoring user ${message.author.username} as it's ratelimited.`);
+        const start = Date.now();
         const guilds: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
         const userLanguage: any = await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]);
         const parallelObject: any = {};
@@ -72,6 +73,7 @@ export default class ChatManager extends EventEmitter {
                         allowedMentions: { parse: [] },
                         files: message.attachments.map(a => a)
                     });
+                    done(null, true);
                 }
                 catch (err: any) {
                     Log.error("bot", `Couldn't send global message to guild ${g.name}`);
@@ -81,12 +83,20 @@ export default class ChatManager extends EventEmitter {
         const content = utils.encryptWithAES(data.bot.encryption_key, message.content);
         await db.query("INSERT INTO global_messages SET ?", [{ uid: message.author.id, content, language: userLanguage[0] ? userLanguage[0].lang : "es" }]);
         await utils.parallel(parallelObject);
+        const end = Date.now();
+        if ((end - start) >= 500) Log.info("chat-manager", `Slow dispatch of message with ID ${message.id} from author ${message.author.username} (${message.author.id}). Message dispatch took ${end - start} ms`, true);
+        else Log.info("chat-manager", `Message with ID ${message.id} from author ${message.author.username} (${message.author.id}) dispatched in ${end - start} ms`);
     };
     public async announce(message: string, language: string, attachments?: Collection<string, Attachment>): Promise<void> {
         const guilds: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
         const parallelObject: any = {};
         for (const graw of guilds) {
             const g = client.guilds.cache.get(graw.guild) as Guild;
+            if (!g) {
+                Log.info("chat-manager", `Couldn't find guild with ID ${graw.guild}, this guild entry has been deleted.`);
+                await db.query("DELETE FROM globalchats WHERE guild = ?", [graw.guild]);
+                continue;
+            }
             const wh = new WebhookClient({ id: graw.webhook_id, token: graw.webhook_token });
             parallelObject[g.id] = async (done: any): Promise<any> => {
                 if (graw.language !== language && graw.autotranslate) {

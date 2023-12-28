@@ -103,3 +103,24 @@ Update 4.3.8
   - Again, nothing...
 
 Lol.
+
+Update 4.4.8
+[!] Tags:
+ - ALPHA: It's in early usage, which means it's not completely done and bugs are expected.
+ - DEV: It's meant for developers and normal users should just ignore them.
+ - BETA: It's completely done but there are still bugs or could be bugs that are being fixed.
+
+ [/] Changes:
+  - The ChatManager now logs the time it takes for the messages to be dispatched to all active guilds. [DEV]
+  - IMPORTANT: Our privacy policy has been updated. We strongly recommend you to read it.
+
+ [+] New:
+  - Added 2 commands for owners that are guilds and invite. [DEV]
+  - Added a log channel property to the bot config data. This property does not break the bot if not provided, but the code actually expects a valid text channel ID for logging. (See the LogManager) [DEV]
+  - Added command privacy that sends the privacy policy.
+  - Added command messages to get the messages history of any user (From the global chat, messages sent from other channels are NOT stored) [DEV]
+
+ [-] Removed:
+  - Unnecesary interface 'ReplyFunction' and an unnecesary import. [DEV]
+
+What a beautiful day.

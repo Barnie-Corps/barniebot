@@ -1,5 +1,4 @@
 import { ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder, TimestampStyles, time } from "discord.js";
-import { ReplyFunction } from "../types/interfaces";
 import * as osu from "node-os-utils";
 import utils from "../utils";
 import * as disk from "node-disk-info";

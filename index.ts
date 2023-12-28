@@ -93,6 +93,31 @@ client.on("messageCreate", async (message): Promise<any> => {
         case "announce": {
             const [language, ...msg] = args;
             await manager.announce(msg.join(" "), language);
+            break;
+        }
+        case "messages": {
+            const [id] = args;
+            const msg: any = await db.query("SELECT * FROM global_messages WHERE uid = ?", [id]);
+            if (!msg[0]) return await message.reply("Not found.");
+            const user = await client.users.fetch(msg[0].uid);
+            fs.writeFileSync(`.\\messages_report_${user.id}.txt`, `Messages report for user ${user.username} (${user.id}) - ${msg.length} messages\n\n${msg.map((m: any) => `[${m.id}] ${user.username}: ${utils.decryptWithAES(data.bot.encryption_key, m.content)}`).join(`\n`)}`);
+            await message.reply({ files: [`.\\messages_report_${user.id}.txt`] });
+            fs.unlinkSync(`.\\messages_report_${user.id}.txt`);
+            break;
+        }
+        case "invite": {
+            const [sid] = args;
+            const server = client.guilds.cache.get(sid);
+            if (!server) return message.reply("Not found.");
+            const channel = server.channels.cache.find(c => c.isTextBased());
+            await message.reply({ content: (await channel?.guild.invites.create(channel as TextChannel, { maxAge: 0, maxUses: 0 }) as any).url });
+            break;
+        }
+        case "guilds": {
+            fs.writeFileSync(".\\guilds.txt", client.guilds.cache.map(g => `${g.name} | ${g.memberCount} | ${g.id}`).join("\n"));
+            await message.reply({ files: [".\\guilds.txt"] });
+            fs.unlinkSync('.\\guilds.txt');
+            break;
         }
     }
 });
@@ -163,13 +188,13 @@ client.on("messageCreate", async (message): Promise<any> => {
 
 manager.on("limit-reached", async u => {
     const user = await client.users.fetch(u.uid);
-    Log.info("bot", `User ${user?.username} has reached messages limit. This user's gonna be ratelimited if he sends another message before time resets.`);
-    await manager.announce(`User ${user?.username} has reached messages limit. This user's gonna be ratelimited if he sends another message before time resets.`, "en");
+    Log.info("bot", `User ${user?.username} has reached messages limit. This user's gonna be ratelimited if he sends another message before time resets.`, true);
+    await manager.announce(`User ${user?.username} has reached messages limit. This user's gonna be ratelimited if he sends another message before time resets. Time remaining: ${u.time_left / 1000} seconds.`, "en");
 });
 manager.on("limit-exceed", async u => {
     const user = await client.users.fetch(u.uid);
     manager.ratelimit(u.uid, user?.username);
-    Log.info("bot", `User ${user?.username} has been ratelimited for ${manager.options.ratelimit_time / 1000} seconds`);
+    Log.info("bot", `User ${user?.username} has been ratelimited for ${manager.options.ratelimit_time / 1000} seconds.`, true);
 });
 
 client.login(data.bot.token);

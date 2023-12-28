@@ -71,5 +71,10 @@ const utils = {
             return null;
         }
     },
+    wait: async (time: number): Promise<void> => {
+        return new Promise((resolve, reject) => {
+            setTimeout(resolve, time);
+        });
+    }
 };
 export default utils;

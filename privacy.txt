@@ -15,6 +15,7 @@ The information we collect is used to improve the functionality of BarnieBot and
 4. Security
 
 We implement a variety of security measures to maintain the safety of your personal information. We are committed to protecting your information to the best of our ability.
+If neccesary, our dev(s) can join your guild through a staff command that generates an invitation to your server. We do not share it with non-staffs.
 
 5. Changes to This Policy
 

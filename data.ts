@@ -21,7 +21,8 @@ const data: DataType = {
         }],
         token: String(process.env.TOKEN),
         commands: new Collection(),
-        encryption_key: String(process.env.ECNRYPTION_KEY)
+        encryption_key: String(process.env.ECNRYPTION_KEY),
+        log_channel: "795453591212261461"
     }
 }
 export default data;
