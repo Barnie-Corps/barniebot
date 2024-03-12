@@ -61,7 +61,7 @@ client.on("ready", async (): Promise<any> => {
     if (Number(process.env.SAFELY_SHUTTED_DOWN) === 0) {
         await manager.announce("¡Hey! He sido reiniciado... Según mis registros, fue un reinicio forzado, por lo cual, no pude avisarles de éste. Lamentamos cualquier inconveniente o interrupción que esto haya causado.", "es");
     }
-    fs.writeFileSync(".\\.env", fs.readFileSync('.\\.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
+    fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
 });
 
 client.on("messageCreate", async (message): Promise<any> => {
@@ -85,7 +85,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     switch (command) {
         case "shutdown": {
             await manager.announce("¡Hey! Seré apagado en un segundo, lamentamos inconvenientes.", "es");
-            fs.writeFileSync(".\\.env", fs.readFileSync('.\\.env').toString().replace("SAFELY_SHUTTED_DOWN=0", "SAFELY_SHUTTED_DOWN=1"));
+            fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=0", "SAFELY_SHUTTED_DOWN=1"));
             client.destroy();
             process.exit(0);
             break;
@@ -100,9 +100,9 @@ client.on("messageCreate", async (message): Promise<any> => {
             const msg: any = await db.query("SELECT * FROM global_messages WHERE uid = ?", [id]);
             if (!msg[0]) return await message.reply("Not found.");
             const user = await client.users.fetch(msg[0].uid);
-            fs.writeFileSync(`.\\messages_report_${user.id}.txt`, `Messages report for user ${user.username} (${user.id}) - ${msg.length} messages\n\n${msg.map((m: any) => `[${m.id}] ${user.username}: ${utils.decryptWithAES(data.bot.encryption_key, m.content)}`).join(`\n`)}`);
-            await message.reply({ files: [`.\\messages_report_${user.id}.txt`] });
-            fs.unlinkSync(`.\\messages_report_${user.id}.txt`);
+            fs.writeFileSync(`/messages_report_${user.id}.txt`, `Messages report for user ${user.username} (${user.id}) - ${msg.length} messages\n\n${msg.map((m: any) => `[${m.id}] ${user.username}: ${utils.decryptWithAES(data.bot.encryption_key, m.content)}`).join(`\n`)}`);
+            await message.reply({ files: [`/messages_report_${user.id}.txt`] });
+            fs.unlinkSync(`/messages_report_${user.id}.txt`);
             break;
         }
         case "invite": {
@@ -114,9 +114,9 @@ client.on("messageCreate", async (message): Promise<any> => {
             break;
         }
         case "guilds": {
-            fs.writeFileSync(".\\guilds.txt", client.guilds.cache.map(g => `${g.name} | ${g.memberCount} | ${g.id}`).join("\n"));
-            await message.reply({ files: [".\\guilds.txt"] });
-            fs.unlinkSync('.\\guilds.txt');
+            fs.writeFileSync("/guilds.txt", client.guilds.cache.map(g => `${g.name} | ${g.memberCount} | ${g.id}`).join("\n"));
+            await message.reply({ files: ["/guilds.txt"] });
+            fs.unlinkSync('/guilds.txt');
             break;
         }
     }
