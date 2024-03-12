@@ -1,6 +1,8 @@
 import translate from "google-translate-api-x";
 import Crypto from "crypto";
 import * as async from "async";
+import Workers from "./Workers";
+import path from "path";
 const utils = {
     createArrows: (length: number): string => {
         let arrows = "";
@@ -16,9 +18,23 @@ const utils = {
         }
         return spaces;
     },
+    createCensored: (length: number): string => {
+        let censor = "";
+        for (let i = 0; i < length; i++) {
+            censor += "*";
+        }
+        return censor;
+    },
     translate: async (text: string, from: string, target: string): Promise<any> => {
-        const result = await translate(text, { to: target, from });
-        return result;
+        return new Promise((resolve, reject) => {
+            const worker = Workers.getAvailableWorker("translate") ?? Workers.createWorker(path.join(__dirname, "workers/translate.js"), "translate");
+            const message = Workers.postMessage(worker.id, { text, from, to: target });
+            Workers.on("message", async data => {
+                if (data.id !== worker.id) return;
+                if (data.message.id !== message) return;
+                resolve({ text: data.message.translation });
+            });
+        });
     },
     parallel: (functions: any): Promise<any[]> => {
         return new Promise((resolve, reject) => {
@@ -46,8 +62,16 @@ const utils = {
         const translateObj: any = new Object;
         for (const vk of validKeys) {
             translateObj[vk] = async (done: any) => {
-                const translation = (await utils.translate(obj[vk], language, target)).text;
-                newObj[vk] = translation;
+                await new Promise(async (resolve, reject) => {
+                    const worker = Workers.getAvailableWorker("translate") ?? Workers.createWorker(path.join(__dirname, "workers/translate.js"), "translate");
+                    const message = Workers.postMessage(worker.id, { text: obj[vk], from: language, to: target });
+                    Workers.on("message", async data => {
+                        if (data.id !== worker.id) return;
+                        if (data.message.id !== message) return;
+                        newObj[vk] = data.message.translation;
+                        resolve(true);
+                    });
+                });
                 done(null, true);
             }
         }
@@ -71,10 +95,5 @@ const utils = {
             return null;
         }
     },
-    wait: async (time: number): Promise<void> => {
-        return new Promise((resolve, reject) => {
-            setTimeout(resolve, time);
-        });
-    }
 };
 export default utils;
