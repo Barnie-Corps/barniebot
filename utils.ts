@@ -27,7 +27,7 @@ const utils = {
     },
     translate: async (text: string, from: string, target: string): Promise<any> => {
         return new Promise((resolve, reject) => {
-            const worker = Workers.getAvailableWorker("translate") ?? Workers.createWorker(path.join(__dirname, "workers/translate.js"), "translate");
+            const worker = Workers.getAvailableWorker("translate") ?? (Workers.createWorker(path.join(__dirname, "workers/translate.js"), "translate") as unknown) as { type: string; worker: Worker; id: string; };
             const message = Workers.postMessage(worker.id, { text, from, to: target });
             Workers.on("message", async data => {
                 if (data.id !== worker.id) return;
@@ -63,7 +63,7 @@ const utils = {
         for (const vk of validKeys) {
             translateObj[vk] = async (done: any) => {
                 await new Promise(async (resolve, reject) => {
-                    const worker = Workers.getAvailableWorker("translate") ?? Workers.createWorker(path.join(__dirname, "workers/translate.js"), "translate");
+                    const worker = Workers.getAvailableWorker("translate") ?? (Workers.createWorker(path.join(__dirname, "workers/translate.js"), "translate") as unknown) as { type: string; worker: Worker; id: string; };
                     const message = Workers.postMessage(worker.id, { text: obj[vk], from: language, to: target });
                     Workers.on("message", async data => {
                         if (data.id !== worker.id) return;
@@ -95,5 +95,10 @@ const utils = {
             return null;
         }
     },
+    replaceNonLetters: (input: string): string => {
+        const regex = /\*\*(.*?)\*\*/g;
+        const result = input.replace(regex, '$1');
+        return result;
+    }
 };
 export default utils;
