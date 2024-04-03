@@ -1,9 +1,8 @@
 import { ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder, TimestampStyles, time } from "discord.js";
 import * as osu from "node-os-utils";
 import utils from "../utils";
-import * as disk from "node-disk-info";
 import db from "../mysql/database";
-const { mem, cpu } = osu;
+const { mem, cpu, drive } = osu;
 
 export default {
     data: new SlashCommandBuilder()
@@ -39,16 +38,21 @@ export default {
                 }
             }
         }
+        let needTranslation: boolean = false;
+        const Start = Date.now();
+        let ExecutionTime: number;
         if (lang !== "es") {
+            needTranslation = true;
             texts = await utils.autoTranslate(texts, "es", lang);
         }
+        ExecutionTime = needTranslation ? Date.now() - Start : 0;
         let totalUsers = 0;
         for (const guild of interaction.client.guilds.cache.values()) {
             totalUsers += guild.memberCount;
         }
         const cpuUsage = `${await cpu.usage()}%`;
         const memUsage = `${Math.floor(process.memoryUsage().heapUsed / 1000000)} MB / ${Math.round((await mem.info()).totalMemMb / 1024)} GB`;
-        const storage = `${byteToGB(disk.getDiskInfoSync()[0].available).toFixed(1)}/${byteToGB(disk.getDiskInfoSync()[0].blocks).toFixed(1)} GB (${disk.getDiskInfoSync()[0].capacity})`;
+        const storage = `${(await drive.info("/")).freeGb}/${(await drive.info("/")).totalGb} GB`;
         const last_command_executed: any = await db.query("SELECT * FROM executed_commands WHERE is_last = TRUE"); 
         const lastU = await interaction.client.users.fetch(last_command_executed[0].uid);
         const embed = new EmbedBuilder()
@@ -72,7 +76,7 @@ export default {
                     inline: true
                 }
             )
-            .setFooter({ text: texts.embed.footer })
+            .setFooter({ text: `${texts.embed.footer} ${needTranslation ? `Translation took ${ExecutionTime} ms` : ""}` })
             .setTimestamp()
             .setColor("Purple")
             await interaction.editReply({ embeds: [embed] });
