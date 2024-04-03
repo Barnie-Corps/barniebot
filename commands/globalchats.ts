@@ -59,7 +59,7 @@ export default {
                         await interaction.editReply(`${texts.success.first_time_enabled}`);
                         break;
                     }
-                    await db.query("UPDATE globalchats SET ? WHERE guild = ?", [{ channel: channel.id, enabled: true, webhook_id: wh.id, webhook_token: wh.token }, interaction.guildId]);
+                    await db.query("UPDATE globalchats SET ? WHERE guild = ?", [{ autotranslate: false, channel: channel.id, enabled: true, webhook_id: wh.id, webhook_token: wh.token }, interaction.guildId]);
                     await interaction.editReply(texts.success.set);
                     break;
                 }
