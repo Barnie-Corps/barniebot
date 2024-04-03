@@ -75,7 +75,7 @@
     "file-entry-cache": "^6.0.1",
     "flat-cache": "^3.0.4",
     "flatted": "^3.2.5",
-    "follow-redirects": "^1.15.4",
+    "follow-redirects": "^1.15.6",
     "form-data": "^4.0.0",
     "fs-extra": "^10.0.0",
     "fs.realpath": "^1.0.0",
