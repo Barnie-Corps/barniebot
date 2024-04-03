@@ -55,7 +55,7 @@ export default {
                         avatar: client.user?.displayAvatarURL()
                     });
                     if (!chatdb[0]) {
-                        await db.query("INSERT INTO globalchats SET ?", [{ guild: interaction.guildId, channel: channel.id, language: lang, webhook_id: wh.id, webhook_token: wh.token }]);
+                        await db.query("INSERT INTO globalchats SET ?", [{ autotranslate: false, guild: interaction.guildId, channel: channel.id, language: lang, webhook_id: wh.id, webhook_token: wh.token }]);
                         await interaction.editReply(`${texts.success.first_time_enabled}`);
                         break;
                     }
