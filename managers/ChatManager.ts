@@ -46,7 +46,7 @@ export default class ChatManager extends EventEmitter {
         if (this.isRatelimited(message.author.id)) return Log.info("bot", `Ignoring user ${message.author.username} as it's ratelimited.`);
         const start = Date.now();
         const guilds: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
-        let userLanguage: any = (await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as any)[0] ?? "es";
+        let userLanguage: any = (await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as any)[0]?.lang ?? "es";
         const parallelObject: any = {};
         for (const graw of guilds) {
             const g = client.guilds.cache.get(graw.guild) as Guild;
@@ -60,7 +60,8 @@ export default class ChatManager extends EventEmitter {
                     content = `> ${ref.content}\n\`@${ref.author.username}\` ${content}`;
                 }
                     if (userLanguage !== graw.language && graw.autotranslate) {
-                        content = `${(await utils.translate(content, userLanguage, graw.language)).text}\n*Translated from ${langs.where("1", userLanguage[0].lang)?.name}*`;
+                        let text = graw.language === "es" ? "Traducido del" : await utils.translate("Traducido del", "es", graw.language)
+                        content = `${(await utils.translate(content, userLanguage, graw.language)).text}\n*${text} ${langs.where("1", userLanguage)?.local}*`;
                     }
                 try {
                     content = content.replace(/(http|https):\/\/[\w-]+(\.[\w-]+)+([\w.,@?^=%&amp;:/~+#-]*[\w@?^=%&amp;/~+#-])?/g, "[LINK]");
@@ -79,7 +80,7 @@ export default class ChatManager extends EventEmitter {
             };
         }
         const content = utils.encryptWithAES(data.bot.encryption_key, message.content);
-        await db.query("INSERT INTO global_messages SET ?", [{ uid: message.author.id, content, language: userLanguage[0] ? userLanguage[0].lang : "es" }]);
+        await db.query("INSERT INTO global_messages SET ?", [{ uid: message.author.id, content, language: userLanguage }]);
         await utils.parallel(parallelObject);
         const end = Date.now();
         if ((end - start) >= 500) Log.info("chat-manager", `Slow dispatch of message with ID ${message.id} from author ${message.author.username} (${message.author.id}). Message dispatch took ${end - start} ms`, true);
