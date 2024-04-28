@@ -46,7 +46,7 @@ export default class ChatManager extends EventEmitter {
         if (this.isRatelimited(message.author.id)) return Log.info("bot", `Ignoring user ${message.author.username} as it's ratelimited.`);
         const start = Date.now();
         const guilds: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
-        const userLanguage: any = await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]);
+        let userLanguage: any = (await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as any)[0] ?? "es";
         const parallelObject: any = {};
         for (const graw of guilds) {
             const g = client.guilds.cache.get(graw.guild) as Guild;
@@ -59,11 +59,9 @@ export default class ChatManager extends EventEmitter {
                     const ref = await message.fetchReference();
                     content = `> ${ref.content}\n\`@${ref.author.username}\` ${content}`;
                 }
-                if (userLanguage[0]) {
-                    if (userLanguage[0].lang !== graw.language && graw.autotranslate) {
-                        content = `${(await utils.translate(content, userLanguage[0].lang, graw.language)).text}\n*Translated from ${langs.where("1", userLanguage[0].lang)?.name}*`;
+                    if (userLanguage !== graw.language && graw.autotranslate) {
+                        content = `${(await utils.translate(content, userLanguage, graw.language)).text}\n*Translated from ${langs.where("1", userLanguage[0].lang)?.name}*`;
                     }
-                }
                 try {
                     content = content.replace(/(http|https):\/\/[\w-]+(\.[\w-]+)+([\w.,@?^=%&amp;:/~+#-]*[\w@?^=%&amp;/~+#-])?/g, "[LINK]");
                     await wh.send({
