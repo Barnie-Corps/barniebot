@@ -1,6 +1,6 @@
 import { Collection } from "discord.js";
 import { EventEmitter } from "events";
-import { Worker } from "worker_threads";
+import { Worker, workerData } from "worker_threads";
 import Log from "../Log";
 
 export default class WorkerManager extends EventEmitter {
@@ -18,12 +18,12 @@ export default class WorkerManager extends EventEmitter {
         return this.Cache.find(w => w.type === type && !this.RunningCache.has(w.id));
     };
 
-    public createWorker(path: string, type: string, options?: WorkerOptions, data?: any) {
+    public createWorker(path: string, type: string, force: boolean = false, options?: WorkerOptions, data?: any) {
         const id = this.GenerateID(this.IDLength);
-        if (this.Cache.filter(w => w.type === type).size >= this.typeLimit) return this.getAvailableWorker(type);
+        if (this.Cache.filter(w => w.type === type).size >= this.typeLimit && !force) return this.getAvailableWorker(type);
         const worker = new Worker(path, { ...options, workerData: { id, data: data ?? undefined } });
         this.Cache.set(id, { type, worker, id });
-        worker.on("online", () => Log.info("workers", `Worker with ID ${id} and type ${type} online and running on ${path}${this.Cache.filter(w => w.type === type).size >= this.typeLimit ? ". This worker has exceeded the workers type limit." : ""}`));
+        worker.on("online", () => Log.info("workers", `Worker with ID ${id} and type ${type} online and running on ${path}${this.Cache.filter(w => w.type === type).size > this.typeLimit ? `. The workers type limit has been exceeded by the ${type} type..` : this.Cache.filter(w => w.type === type).size === this.typeLimit ? `. The workers type limit has been reached by the type ${type}` : ""}`));
         worker.on("message", message => {
             if (this.RunningCache.has(id)) this.RunningCache.delete(id);
             this.emit("message", { id, message });
@@ -90,4 +90,12 @@ export default class WorkerManager extends EventEmitter {
         }
         return result;
     };
+    public bulkCreateWorkers(path: string, type: string, amount: number, options?: WorkerOptions, data?: any) {
+        if (amount > this.typeLimit) amount = this.typeLimit;
+        const workers = [];
+        for (let i = 0; i < amount; i++) {
+            workers.push((this.createWorker(path, type, true, options, data) as unknown) as { type: string, worker: Worker, id: string });
+        }
+        return workers;
+    }
 }
