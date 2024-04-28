@@ -25,6 +25,8 @@ import db from "./mysql/database";
 import utils from "./utils";
 import load_slash from "./load_slash";
 import ChatManager from "./managers/ChatManager";
+import Workers from "./Workers";
+import path from "path";
 const manager = new ChatManager();
 process.on("uncaughtException", (err: any) => {
     console.log(`Unknown Error: ${err.stack}`);
@@ -58,9 +60,11 @@ client.on("ready", async (): Promise<any> => {
     Log.info("bot", `Current users cache size: ${client.users.cache.size}`);
     data.bot.owners.push(...String(process.env.OWNERS).trim().split(","));
     Log.info("bot", "Owners data loaded.");
+    Log.info("bot", "Loading translate workers...");
     if (Number(process.env.SAFELY_SHUTTED_DOWN) === 0) {
         await manager.announce("¡Hey! He sido reiniciado... Según mis registros, fue un reinicio forzado, por lo cual, no pude avisarles de éste. Lamentamos cualquier inconveniente o interrupción que esto haya causado.", "es");
     }
+    Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", Workers.typeLimit);
     fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
 });
 
@@ -69,7 +73,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (message.author.bot) return;
     let prefix = "b.";
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]);
-    const Lang = foundLang[0] ? foundLang[0].lang : "en";
+    const Lang = foundLang[0] ? foundLang[0].lang : "es";
     if (message.content.toLowerCase().startsWith("b.") && !data.bot.owners.includes(message.author.id)) {
         if (Lang === "es") {
             message.reply("Lo siento, los comandos de prefijo ya no son soportados.");
@@ -124,7 +128,7 @@ client.on("messageCreate", async (message): Promise<any> => {
 client.on("interactionCreate", async (interaction): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(interaction.user.id)) return;
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
-    const Lang = foundLang[0] ? foundLang[0].lang : "en";
+    const Lang = foundLang[0] ? foundLang[0].lang : "es";
     let texts = {
         new: "Hey! Veo que es la primera vez que utilizas uno de mis comandos, por lo menos en esta cuenta jaja. Quiero decirte que no te olvides de leer mi política de privacidad!",
         error: "Whoops... Ha ocurrido un error inesperado, ya he reportado el error pero si éste persiste, puedes notificarlo en el siguiente enlace:"
