@@ -12,6 +12,7 @@ const DefaultChatManagerOptions: ChatManagerOptions = {
     time: 10000,
     ratelimit_time: 60000
 }
+const blacklist: string[]  = ["1204899276229058625"];
 
 export default class ChatManager extends EventEmitter {
     private cache = new Collection<string, any>();
@@ -43,6 +44,7 @@ export default class ChatManager extends EventEmitter {
         }
     };
     public async processMessage(message: Message<true>): Promise<any> {
+        if (blacklist.includes(message.author.id)) { message.reply("No."); return Log.info("bot", "Ignoring blacklisted user.") }
         if (this.isRatelimited(message.author.id)) return Log.info("bot", `Ignoring user ${message.author.username} as it's ratelimited.`);
         const start = Date.now();
         const guilds: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
@@ -68,19 +70,19 @@ export default class ChatManager extends EventEmitter {
                     await wh.send({
                         username: data.bot.owners.includes(message.author.id) ? `[OWNER] ${message.author.username}` : message.author.username,
                         avatarURL: message.author.displayAvatarURL(),
-                        content,
+                        content: content || "*Attachment*",
                         allowedMentions: { parse: [] },
                         files: message.attachments.map(a => a)
                     });
                     done(null, true);
                 }
-                catch (err: any) {
+                catch (err: any) {6
                     Log.error("bot", `Couldn't send global message to guild ${g.name}`);
                 }
             };
         }
         const content = utils.encryptWithAES(data.bot.encryption_key, message.content);
-        await db.query("INSERT INTO global_messages SET ?", [{ uid: message.author.id, content, language: userLanguage }]);
+        await db.query("INSERT INTO global_messages SET ?", [{ uid: message.author.id, content: content || "[EMPTY MESSAGE]", language: userLanguage }]);
         await utils.parallel(parallelObject);
         const end = Date.now();
         if ((end - start) >= 500) Log.info("chat-manager", `Slow dispatch of message with ID ${message.id} from author ${message.author.username} (${message.author.id}). Message dispatch took ${end - start} ms`, true);
