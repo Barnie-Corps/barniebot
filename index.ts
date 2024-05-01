@@ -64,6 +64,7 @@ client.on("ready", async (): Promise<any> => {
     if (Number(process.env.SAFELY_SHUTTED_DOWN) === 0) {
         await manager.announce("¡Hey! He sido reiniciado... Según mis registros, fue un reinicio forzado, por lo cual, no pude avisarles de éste. Lamentamos cualquier inconveniente o interrupción que esto haya causado.", "es");
     }
+    else await manager.announce("¡He vuelto! El chat global está nuevamente en línea.", "es");
     Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", Workers.typeLimit);
     fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
 });
@@ -96,7 +97,7 @@ client.on("messageCreate", async (message): Promise<any> => {
         }
         case "announce": {
             const [language, ...msg] = args;
-            await manager.announce(msg.join(" "), language);
+            await manager.announce(msg.join(" "), language, message.attachments);
             break;
         }
         case "messages": {
