@@ -6,6 +6,9 @@ async function run(text, from, to) {
 }
 
 parentPort.on("message", async allData => {
+    if (allData.data === "ping") {
+        return parentPort.postMessage("pong");
+    };
     const { text, from, to } = allData.data;
     parentPort.postMessage({ translation: await run(text, from, to), id: allData.id });
 });
