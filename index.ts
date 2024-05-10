@@ -27,6 +27,8 @@ import load_slash from "./load_slash";
 import ChatManager from "./managers/ChatManager";
 import Workers from "./Workers";
 import path from "path";
+import { inspect } from "util";
+import langs from "langs";
 const manager = new ChatManager();
 process.on("uncaughtException", (err: any) => {
     console.log(`Unknown Error: ${err.stack}`);
@@ -61,10 +63,10 @@ client.on("ready", async (): Promise<any> => {
     data.bot.owners.push(...String(process.env.OWNERS).trim().split(","));
     Log.info("bot", "Owners data loaded.");
     Log.info("bot", "Loading translate workers...");
-    if (Number(process.env.SAFELY_SHUTTED_DOWN) === 0) {
+    if (Number(process.env.SAFELY_SHUTTED_DOWN) === 0 && Number(process.env.NOTIFY_STARTUP) === 1) {
         await manager.announce("¡Hey! He sido reiniciado... Según mis registros, fue un reinicio forzado, por lo cual, no pude avisarles de éste. Lamentamos cualquier inconveniente o interrupción que esto haya causado.", "es");
     }
-    else await manager.announce("¡He vuelto! El chat global está nuevamente en línea.", "es");
+    else if (Number(process.env.NOTIFY_STARTUP) === 1) await manager.announce("¡He vuelto! El chat global está nuevamente en línea.", "es");
     Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", Workers.typeLimit);
     fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
 });
@@ -123,6 +125,56 @@ client.on("messageCreate", async (message): Promise<any> => {
             await message.reply({ files: ["./guilds.txt"] });
             fs.unlinkSync('./guilds.txt');
             break;
+        }
+        case "eval": {
+            if (!data.bot.owners.includes(message.author.id)) return message.reply('no');
+            const targetCode = args.slice(0).join(' ');
+            if (!targetCode) return message.reply('You must provide a code to eval.');
+            try {
+                const start = Date.now();
+                const evalued = eval(targetCode);
+                const done = Date.now() - start;
+                const embed = new EmbedBuilder()
+                    .setColor("Green")
+                    .setTitle('Code evaluated')
+                    .addFields(
+                        {
+                            name: "**Output Type**:",
+                            value: `\`\`\`prolog\n${typeof (evalued)}\`\`\``,
+                            inline: true
+                        },
+                        {
+                            name: "**Evaluated in:**",
+                            value: `\`\`\`yaml\n${done}ms\`\`\``,
+                            inline: true
+                        },
+                        {
+                            name: "**Input**",
+                            value: `\`\`\`js\n${targetCode}\`\`\``
+                        },
+                        {
+                            name: "**Output**",
+                            value: `\`\`\`js\n${inspect(evalued, { depth: 0 })}\`\`\``
+                        }
+                    )
+                message.reply({ embeds: [embed] });
+            }
+            catch (error) {
+                const errorEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setTitle('ERROR')
+                    .addFields(
+                        {
+                            name: "Input",
+                            value: `\`\`\`js\n${targetCode}\`\`\``
+                        },
+                        {
+                            name: "Error",
+                            value: `\`\`\`js\n${error}\`\`\``
+                        }
+                    )
+                message.reply({ embeds: [errorEmbed] });
+            }
         }
     }
 });
