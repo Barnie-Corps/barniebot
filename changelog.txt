@@ -124,3 +124,27 @@ Update 4.4.8
   - Unnecesary interface 'ReplyFunction' and an unnecesary import. [DEV]
 
 What a beautiful day.
+
+ Update 4.5.8
+ [!] Tags:
+ - ALPHA: It's in early usage, which means it's not completely done and bugs are expected.
+ - DEV: It's meant for developers and normal users should just ignore them.
+ - BETA: It's completely done but there are still bugs or could be bugs that are being fixed.
+
+ [/] Changes:
+  - .env.example file has been updated. [DEV]
+  - Minor changes to index.ts [DEV]
+  - botinfo command doesn't actually displays disk info.
+  - Global chat now prioritizes guilds without the autotranslate option turned on.
+
+ [+] New:
+  - Added filter command -> /filter toggle to start
+  - Added ChatManager sorting to prioritize guilds with not auto translate [DEV]
+  - Added 3 tables: filter_configs, filter_words and filter_webhooks. See mysql/queries.ts [DEV]
+  - Added messageCreate event listener to handle the filter [DEV]
+  - Added filter function (see first addition). Members with ManageMessages permissions are ignored.
+
+  [-] Removed:
+   - Nothing this time...
+
+  Shouldn't y'all follow me on ig? [CENSORED INSTAGRAM LINK] lol just join the support guild: https://discord.gg/BKFa6tFYJx

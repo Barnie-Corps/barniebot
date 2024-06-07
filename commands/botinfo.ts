@@ -6,8 +6,8 @@ const { mem, cpu, drive } = osu;
 
 export default {
     data: new SlashCommandBuilder()
-    .setName("botinfo")
-    .setDescription("Shows bot's info"),
+        .setName("botinfo")
+        .setDescription("Shows bot's info"),
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         function byteToGB(b: number): number {
             return ((b / 1024) / 1024) / 1024;
@@ -52,8 +52,8 @@ export default {
         }
         const cpuUsage = `${await cpu.usage()}%`;
         const memUsage = `${Math.floor(process.memoryUsage().heapUsed / 1000000)} MB / ${Math.round((await mem.info()).totalMemMb / 1024)} GB`;
-        const storage = `${(await drive.info("/")).freeGb}/${(await drive.info("/")).totalGb} GB`;
-        const last_command_executed: any = await db.query("SELECT * FROM executed_commands WHERE is_last = TRUE"); 
+        const storage = /*`${(await drive.info("/")).freeGb}/${(await drive.info("/")).totalGb} GB`;*/ "Can't display";
+        const last_command_executed: any = await db.query("SELECT * FROM executed_commands WHERE is_last = TRUE");
         const lastU = await interaction.client.users.fetch(last_command_executed[0].uid);
         const embed = new EmbedBuilder()
             .setAuthor({ iconURL: interaction.user.displayAvatarURL(), name: interaction.user.tag })
@@ -79,7 +79,7 @@ export default {
             .setFooter({ text: `${texts.embed.footer} ${needTranslation ? `Translation took ${ExecutionTime} ms` : ""}` })
             .setTimestamp()
             .setColor("Purple")
-            await interaction.editReply({ embeds: [embed] });
+        await interaction.editReply({ embeds: [embed] });
     },
     epehemeral: false
 }

@@ -62,12 +62,12 @@ client.on("ready", async (): Promise<any> => {
     Log.info("bot", `Current users cache size: ${client.users.cache.size}`);
     data.bot.owners.push(...String(process.env.OWNERS).trim().split(","));
     Log.info("bot", "Owners data loaded.");
-    Log.info("bot", "Loading translate workers...");
+    Log.info("bot", "Loading workers...");
     if (Number(process.env.SAFELY_SHUTTED_DOWN) === 0 && Number(process.env.NOTIFY_STARTUP) === 1) {
         await manager.announce("¡Hey! He sido reiniciado... Según mis registros, fue un reinicio forzado, por lo cual, no pude avisarles de éste. Lamentamos cualquier inconveniente o interrupción que esto haya causado.", "es");
     }
     else if (Number(process.env.NOTIFY_STARTUP) === 1) await manager.announce("¡He vuelto! El chat global está nuevamente en línea.", "es");
-    Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", Workers.typeLimit);
+    Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", 5);
     fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
 });
 
@@ -88,6 +88,7 @@ client.on("messageCreate", async (message): Promise<any> => {
             return;
         }
     }
+    if (!message.content.toLowerCase().startsWith("b.")) return;
     const [command, ...args] = message.content.slice(prefix.length).trim().split(" ");
     switch (command) {
         case "shutdown": {
@@ -195,7 +196,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             return await interaction.reply({ content: "```\n" + `/${interaction.commandName}\n ${utils.createArrows(`${interaction.command?.name}`.length)}\n\nERR: Unknown slash command` + "\n```", ephemeral: true });
         }
         try {
-            await interaction.deferReply({ ephemeral: cmd.ephemeral as boolean });
+            await interaction.reply({ ephemeral: cmd.ephemeral as boolean, content: "<a:discordproloading:875107406462472212>" });
             await cmd.execute(interaction, Lang);
             await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE");
             await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]);
@@ -234,6 +235,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
 client.on("messageCreate", async (message): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(message.author.id)) return;
     if (!message.inGuild()) return;
+    if (Number(process.env.INGORE_GLOBAL_CHAT) === 1) return;
     const chatdb: any = await db.query("SELECT * FROM globalchats WHERE guild = ?", [message.guildId]);
     if (!chatdb[0]) return;
     if (message.channelId !== chatdb[0].channel) return;
@@ -241,6 +243,37 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (author.bot) return;
     await manager.processUser(author);
     await manager.processMessage(message);
+});
+
+client.on("messageCreate", async (message): Promise<any> => {
+    if (!message.inGuild()) return;
+    let filterConfig: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [message.guildId]);
+    if (!filterConfig[0]) return;
+    filterConfig = filterConfig[0];
+    if (!Boolean(filterConfig.enabled)) return;
+    const wordList: any = await db.query("SELECT * FROM filter_words");
+    if (!wordList.some((w: any) => message.content.toLowerCase().includes(w.content))) return;
+    if (message.member?.permissions.has(PermissionFlagsBits.ManageMessages)) return;
+    const webHookData: any = await db.query("SELECT * FROM filter_webhooks WHERE channel = ?", [message.channel.id]);
+    const webhook = webHookData[0] ? new WebhookClient({ id: webHookData[0].id, token: webHookData[0].token }) : await (message.channel as TextChannel).createWebhook({ name: "Filter WebHook", avatar: client.user?.displayAvatarURL() });
+    if (!webHookData[0]) {
+        await db.query("INSERT INTO filter_webhooks SET ?", [{ id: webhook.id, token: webhook.token, channel: message.channel.id }]);
+    }
+    if (wordList.length < 1) return;
+    const badWords = wordList.filter((w: any) => message.content.toLowerCase().includes(w.content));
+    let content = message.content;
+    if (badWords.length > 0) for (const word of badWords) { const reg = new RegExp(word.content, "ig"); content = content.replace(reg, `\`${utils.createCensored(word.content.length)}\``).replace(new RegExp(/[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi), "[LINK]"); continue }
+    const { author } = message;
+    await message.delete();
+    let reference: any;
+    if (message.reference) reference = await message.fetchReference();
+    const msg = await webhook.send({
+        content: message.reference ? `> ${reference.content}\n<@${reference.author.id}> ${content}` : content,
+        avatarURL: author.displayAvatarURL(),
+        allowedMentions: { parse: [] },
+        username: message.member?.nickname ?? author.displayName,
+        files: message.attachments.map(a => a),
+    });
 });
 
 manager.on("limit-reached", async u => {

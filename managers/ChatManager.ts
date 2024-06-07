@@ -47,9 +47,14 @@ export default class ChatManager extends EventEmitter {
         if (blacklist.includes(message.author.id)) { message.reply("No."); return Log.info("bot", "Ignoring blacklisted user.") }
         if (this.isRatelimited(message.author.id)) return Log.info("bot", `Ignoring user ${message.author.username} as they're ratelimited.`);
         const start = Date.now();
-        const guilds: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
+        let guilds: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
         let userLanguage: any = (await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as any)[0]?.lang ?? "es";
         const parallelObject: any = {};
+        guilds = guilds.sort((g1: any, g2: any) => {
+            if (Number(g1.autotranslate) === 1 && Number(g2.autotranslate) !== 1) return 1;
+            else if (Number(g2.autotranslate) === 1 && Number(g1.autotranslate) !== 1) return -1;
+            else return 0;
+        });
         await message.react("875107406462472212");
         for (const graw of guilds) {
             const g = client.guilds.cache.get(graw.guild) as Guild;
@@ -75,7 +80,7 @@ export default class ChatManager extends EventEmitter {
                 }
                 try {
                     content = content.replace(/(http|https):\/\/[\w-]+(\.[\w-]+)+([\w.,@?^=%&amp;:/~+#-]*[\w@?^=%&amp;/~+#-])?/g, "[LINK]");
-                    const msg = await wh.send({
+                    await wh.send({
                         username: data.bot.owners.includes(message.author.id) ? `[OWNER] ${message.author.username}` : message.author.username,
                         avatarURL: message.author.displayAvatarURL(),
                         content: content || "*Attachment*",
@@ -98,7 +103,7 @@ export default class ChatManager extends EventEmitter {
         await utils.parallel(parallelObject);
         const end = Date.now();
         await message.reactions.removeAll();
-        if ((end - start) >= 600) Log.info("chat-manager", `Slow dispatch of message with ID ${message.id} from author ${message.author.username} (${message.author.id}). Message dispatch took ${end - start} ms`, true);
+        if ((end - start) >= 900) Log.info("chat-manager", `Slow dispatch of message with ID ${message.id} from author ${message.author.username} (${message.author.id}). Message dispatch took ${end - start} ms`, true);
         else Log.info("chat-manager", `Message with ID ${message.id} from author ${message.author.username} (${message.author.id}) dispatched in ${end - start} ms`);
     };
     public async announce(message: string, language: string, attachments?: Collection<string, Attachment>): Promise<void> {
