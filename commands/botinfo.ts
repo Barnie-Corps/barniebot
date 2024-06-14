@@ -79,7 +79,7 @@ export default {
             .setFooter({ text: `${texts.embed.footer} ${needTranslation ? `Translation took ${ExecutionTime} ms` : ""}` })
             .setTimestamp()
             .setColor("Purple")
-        await interaction.editReply({ embeds: [embed] });
+        await interaction.editReply({ embeds: [embed], content: "" });
     },
     epehemeral: false
 }

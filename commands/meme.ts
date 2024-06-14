@@ -37,7 +37,7 @@ export default {
         .setColor("Purple")
         .setTimestamp()
         .setFooter({ text: `${data.bot.emojis[0].emoji} ${meme.ups}` })
-        await interaction.editReply({ embeds: [embed], components: [row as any] });
+        await interaction.editReply({ embeds: [embed], components: [row as any], content: "" });
     },
     ephemeral: false
 }

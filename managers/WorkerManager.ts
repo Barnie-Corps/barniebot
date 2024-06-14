@@ -45,7 +45,7 @@ export default class WorkerManager extends EventEmitter {
         return new Promise((resolve, reject) => {
             this.on("message", data => {
                 if (data.id !== id) return;
-                if (data.message.id !== id) return;
+                if (data.message.id !== message) return;
                 resolve({ id: data.id, message: data.message });
             });
         });

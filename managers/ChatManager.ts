@@ -70,7 +70,7 @@ export default class ChatManager extends EventEmitter {
                 }
                 if (message.reference) {
                     const ref = await message.fetchReference();
-                    content = `> ${ref.content}\n\`@${ref.author.username}\` ${content}`;
+                    content = `> ${ref.content}\n\`@${ref.author.displayName}\` ${content}`;
                 }
                 if (userLanguage !== graw.language && graw.autotranslate) {
                     if (graw.language !== "es") {
@@ -81,7 +81,7 @@ export default class ChatManager extends EventEmitter {
                 try {
                     content = content.replace(/(http|https):\/\/[\w-]+(\.[\w-]+)+([\w.,@?^=%&amp;:/~+#-]*[\w@?^=%&amp;/~+#-])?/g, "[LINK]");
                     await wh.send({
-                        username: data.bot.owners.includes(message.author.id) ? `[OWNER] ${message.author.username}` : message.author.username,
+                        username: data.bot.owners.includes(message.author.id) ? `[OWNER] ${message.author.displayName}` : message.author.displayName,
                         avatarURL: message.author.displayAvatarURL(),
                         content: content || "*Attachment*",
                         allowedMentions: { parse: [] },

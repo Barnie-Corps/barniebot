@@ -56,7 +56,7 @@ export default {
                 .setDescription("Displays filter content that matches a given search query")
                 .addStringOption(o =>
                     o.setName("query")
-                        .setDescription("Search query for the filter (Can include multiple queries, separated by commas)")
+                        .setDescription("Search query for the filter (Can include multiple queries, separated by commas without spaces)")
                         .setRequired(true)
                 )
                 .addStringOption(o =>
@@ -98,7 +98,7 @@ export default {
                 was_forced: "Esta eliminación fue forzada.",
                 protected_text: "Protegida",
                 filter_content_text: "Palabras en el filtro",
-                results: "Resultados de "
+                results: "Resultados de"
             }
         };
         if (lang !== "es") {
@@ -150,7 +150,7 @@ export default {
                     switch (format) {
                         case "file": {
                             const filePath = path.join(__dirname, `filter_content_${interaction.guildId}.txt`);
-                            fs.writeFileSync(filePath, `${texts.common.filter_content_text} [${words.length}]\n\n${mapped.join("\n")}`, { encoding: "utf8"});
+                            fs.writeFileSync(filePath, `${texts.common.filter_content_text} [${words.length}]\n\n${mapped.join("\n")}`, { encoding: "utf-8"});
                             await interaction.editReply({ content: "<a:marcano:800125893892505662>", files: [filePath] });
                             fs.unlinkSync(filePath);
                             break;
@@ -176,13 +176,13 @@ export default {
                     switch (format) {
                         case "file": {
                             const filePath = path.join(__dirname, `filter_content_${interaction.guildId}.txt`);
-                            fs.writeFileSync(filePath, `${texts.common.results} [${words.length}]\n\n${mapped.join("\n")}`, { encoding: "utf8" });
+                            fs.writeFileSync(filePath, `${texts.common.results}: ${queries.trim().split(",").join(", ")} [${words.length}]\n\n${mapped.join("\n")}`, { encoding: "utf-8" });
                             await interaction.editReply({ content: "<a:marcano:800125893892505662>", files: [filePath] });
                             fs.unlinkSync(filePath);
                             break;
                         }
                         case "message": {
-                            const finalText = "```\n" + `${texts.common.results} [${filtered.length}]\n${mapped.join("\n")}` + "\n```";
+                            const finalText = "```\n" + `${texts.common.results}: ${queries.trim().split(",").join(", ")} [${filtered.length}]\n${mapped.join("\n")}` + "\n```";
                             if (finalText.length > 2000) return await interaction.editReply(texts.errors.too_long);
                             await interaction.editReply(finalText);
                             break;
@@ -199,7 +199,7 @@ export default {
                     if (!word[0]) return await interaction.editReply(texts.errors.invalid_id);
                     if (Boolean(word[0].protected) && !force) return await interaction.editReply(`${texts.common.protected_word} ${texts.errors.missing_force}`);
                     await db.query("DELETE FROM filter_words WHERE guild = ? AND id = ?", [interaction.guildId, wid]);
-                    await interaction.editReply(`${texts.success.removed_word} -> \`${word[0].content}\``);
+                    await interaction.editReply(`${texts.success.removed_word} -> \`${word[0].content}\`${Boolean(word[0]) && force ? `. ${texts.common.was_forced}` : ""}`);
                     break;
                 }
             }

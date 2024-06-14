@@ -13,7 +13,7 @@ export default {
         .setTitle(target.username)
         .setImage(target.displayAvatarURL({ size: 1024 }))
         .setColor("Purple")
-        await interaction.editReply({ embeds: [embed] });
+        await interaction.editReply({ embeds: [embed], content: "" });
     },
     ephemeral: false
 }
