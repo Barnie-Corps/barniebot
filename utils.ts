@@ -66,8 +66,7 @@ const utils = {
   ): Promise<typeof obj> => {
     if (typeof obj !== "object" || Array.isArray(obj))
       throw new TypeError(
-        `The autoTranslate function takes as first argument an object, got ${
-          Array.isArray(obj) ? "Array" : typeof obj
+        `The autoTranslate function takes as first argument an object, got ${Array.isArray(obj) ? "Array" : typeof obj
         }`
       );
     if (typeof language !== "string")
