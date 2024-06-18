@@ -74,10 +74,10 @@ client.on("ready", async (): Promise<any> => {
 client.on("messageCreate", async (message): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(message.author.id)) return;
     if (message.author.bot) return;
-    let prefix = "b.";
+    const prefix = "b.";
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]);
     const Lang = foundLang[0] ? foundLang[0].lang : "es";
-    if (message.content.toLowerCase().startsWith("b.") && !data.bot.owners.includes(message.author.id)) {
+    if (message.content.toLowerCase().startsWith(prefix) && !data.bot.owners.includes(message.author.id)) {
         if (Lang === "es") {
             message.reply("Lo siento, los comandos de prefijo ya no son soportados.");
             return;
@@ -88,7 +88,7 @@ client.on("messageCreate", async (message): Promise<any> => {
             return;
         }
     }
-    if (!message.content.toLowerCase().startsWith("b.")) return;
+    if (!message.content.toLowerCase().startsWith(prefix)) return;
     const [command, ...args] = message.content.slice(prefix.length).trim().split(" ");
     switch (command) {
         case "shutdown": {
@@ -96,7 +96,6 @@ client.on("messageCreate", async (message): Promise<any> => {
             fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=0", "SAFELY_SHUTTED_DOWN=1"));
             client.destroy();
             process.exit(0);
-            break;
         }
         case "announce": {
             const [language, ...msg] = args;

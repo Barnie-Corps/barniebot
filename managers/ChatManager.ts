@@ -92,6 +92,7 @@ export default class ChatManager extends EventEmitter {
                 }
                 catch (err: any) {
                     Log.error("bot", `Couldn't send global message to guild ${g.name}`);
+                    console.log(err.stack);
                     await message.reactions.removeAll();
                     message.react("800125816633557043");
                     message.react("869607044892741743");
