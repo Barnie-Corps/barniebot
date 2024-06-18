@@ -202,7 +202,7 @@
     "word-wrap": "^1.2.3",
     "wrappy": "^1.0.2",
     "write-file-atomic": "^3.0.3",
-    "ws": "^8.5.0",
+    "ws": "^8.17.1",
     "xdg-basedir": "^4.0.0",
     "yallist": "^4.0.0",
     "zod": "^3.13.4"
