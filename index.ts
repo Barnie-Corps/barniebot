@@ -257,7 +257,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         invalid_rsp: "Respuesta inválida."
                     },
                     success: {
-                        done: "¡Hemos terminado el setup básico para tu servidor! Abajo está como quedó la establecida la configuración."
+                        done: "¡Hemos terminado el setup básico para tu servidor! Abajo está cómo quedó establecida la configuración."
                     },
                     common: {
                         ask_enable: "¿Deseas que al momento de terminar el setup, el filtro se active automáticamente? Responde con un 0 para indiciar que no deseas eso o con un 1 para indicar que sí deseas eso.",
