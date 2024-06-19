@@ -16,7 +16,7 @@ import fetch from "node-fetch";
 globalThis.fetch = fetch as any;
 import * as dotenv from "dotenv";
 dotenv.config();
-import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, MessagePayload, WebhookClient, TextChannel, Message, time, TimestampStyles, ButtonInteraction, CacheType, Embed } from "discord.js";
+import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, MessagePayload, WebhookClient, TextChannel, Message, time, TimestampStyles, ButtonInteraction, CacheType, TimestampStylesString } from "discord.js";
 import * as fs from "fs";
 import data from "./data";
 import Log from "./Log";
@@ -175,6 +175,39 @@ client.on("messageCreate", async (message): Promise<any> => {
                         }
                     )
                 message.reply({ embeds: [errorEmbed] });
+                break;
+            }
+        }
+        case "add_vip": {
+            if (!args[1]) return await message.reply("You must provide the user ID.");
+            const [uid, newTime, timeType] = args;
+            const multiply = {
+                seconds: 1,
+                minutes: 60,
+                hours: 3600,
+                days: 86400,
+            }
+            const u = await client.users.fetch(uid);
+            if (!u) return await message.reply("Unknown user.");
+            if (isNaN(parseInt(newTime))) return await message.reply("Invalid time provided.");
+            if (Object.keys(multiply).some(m => m === timeType.toLowerCase())) return await message.reply(`Invalid time type provided. Supported types: \`${Object.keys(multiply).join(", ")}.\``);
+            const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [uid]);
+            const totalTime = (1000 * multiply[timeType as keyof typeof multiply]) * parseInt(newTime);
+            const now = Date.now();
+            const end = now + totalTime;
+            if (foundVip[0]) {
+                await db.query("UPDATE vip_users SET end_date = ? WHERE id = ?", [end, uid]);
+                await message.reply(`VIP has been updated to ${newTime} ${timeType} for user with ID ${uid}. ${time(Math.round(foundVip[0].end_date / 1000), TimestampStyles.ShortDate)} -> ${time(Math.round(end / 1000), TimestampStyles.ShortDate)} (Ends in ${time(Math.round(end / 1000), TimestampStyles.RelativeTime)})`);
+                break;
+            }
+            else {
+                await db.query("INSERT INTO vip_users SET ?", [{
+                    id: uid,
+                    start_date: now,
+                    end_date: end,
+                }]);
+                await message.reply(`VIP has been added to user with ID ${uid} for ${newTime} ${timeType} -> ${time(Math.round(foundVip[0].end_date / 1000), TimestampStyles.ShortDate)} (${time(Math.round(foundVip[0].end_date / 1000), TimestampStyles.RelativeTime)})`);
+                break;
             }
         }
     }
@@ -186,7 +219,9 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
     let texts = {
         new: "Hey! Veo que es la primera vez que utilizas uno de mis comandos, por lo menos en esta cuenta jaja. Quiero decirte que no te olvides de leer mi política de privacidad!",
         error: "Whoops... Ha ocurrido un error inesperado, ya he reportado el error pero si éste persiste, puedes notificarlo en el siguiente enlace:",
-        loading: "Traduciendo textos (puede tardar un tiempo)..."
+        loading: "Traduciendo textos (puede tardar un tiempo)...",
+        not_vip: "Hmm... No puedes ejecutar este comando si no eres VIP.",
+        expired_vip: "¡Vaya! Al parecer tu suscripción VIP ha terminado. He revocado tu acceso VIP."
     }
     if (Lang !== "es") {
         texts = await utils.autoTranslate(texts, "es", Lang);
@@ -202,12 +237,18 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE");
             await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]);
             const foundU: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [interaction.user.id]);
+            const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [interaction.user.id]);
+            if (foundVip[0] && foundVip[0].end_date <= Date.now()) {
+                await db.query("DELETE FROM vip_users WHERE id = ?", [interaction.user.id]);
+                await interaction.followUp({ content: texts.expired_vip, ephemeral: true });
+            }
             if (foundU[0]) {
                 await db.query("UPDATE discord_users SET command_executions = command_executions + 1, pfp = ?, username = ? WHERE id = ?", [interaction.user.displayAvatarURL({ size: 1024 }), interaction.user.username, interaction.user.id]);
             }
             else {
                 await db.query("INSERT INTO discord_users SET ?", { id: interaction.user.id, pfp: interaction.user.displayAvatarURL({ size: 1024 }), username: interaction.user.username });
-                await interaction.channel?.send(`<@${interaction.user.id}>, ${texts.new}: [privacy.txt](https://github.com/Barnie-Corps/barniebot/blob/master/privacy.txt)`);
+                const msg = await interaction.followUp({ content: `<@${interaction.user.id}>, ${texts.new}: [privacy.txt](https://github.com/Barnie-Corps/barniebot/blob/master/privacy.txt)`, ephemeral: true });
+                await msg.removeAttachments();
             }
         }
         catch (err: any) {

@@ -4,6 +4,7 @@ import * as async from "async";
 import Workers from "./Workers";
 import path from "path";
 import langs from "langs";
+import db from "./mysql/database";
 const utils = {
   createArrows: (length: number): string => {
     let arrows = "";
@@ -205,6 +206,11 @@ const utils = {
       }
     };
     return await sendRequest(text) as string;
+  },
+  isVIP: async (id: string) => {
+    const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [id]);
+    if (!foundVip[0]) return false;
+    else return true;
   }
 };
 export default utils;
