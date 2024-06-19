@@ -88,12 +88,7 @@ const utils = {
     for (const vk of validKeys) {
       translateObj[vk] = async (done: any) => {
         await new Promise(async (resolve, reject) => {
-          const worker =
-            Workers.getAvailableWorker("translate") ??
-            (Workers.createWorker(
-              path.join(__dirname, "workers/translate.js"),
-              "translate"
-            ) as unknown as { type: string; worker: Worker; id: string });
+          const worker = Workers.getAvailableWorker("translate") ?? (Workers.createWorker(path.join(__dirname, "workers/translate.js"), "translate", true) as unknown as { type: string; worker: Worker; id: string });
           const message = Workers.postMessage(worker.id, {
             text: obj[vk],
             from: language,

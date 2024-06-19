@@ -185,7 +185,8 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
     const Lang = foundLang[0] ? foundLang[0].lang : "es";
     let texts = {
         new: "Hey! Veo que es la primera vez que utilizas uno de mis comandos, por lo menos en esta cuenta jaja. Quiero decirte que no te olvides de leer mi política de privacidad!",
-        error: "Whoops... Ha ocurrido un error inesperado, ya he reportado el error pero si éste persiste, puedes notificarlo en el siguiente enlace:"
+        error: "Whoops... Ha ocurrido un error inesperado, ya he reportado el error pero si éste persiste, puedes notificarlo en el siguiente enlace:",
+        loading: "Traduciendo textos (puede tardar un tiempo)..."
     }
     if (Lang !== "es") {
         texts = await utils.autoTranslate(texts, "es", Lang);
@@ -196,7 +197,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             return await interaction.reply({ content: "```\n" + `/${interaction.commandName}\n ${utils.createArrows(`${interaction.command?.name}`.length)}\n\nERR: Unknown slash command` + "\n```", ephemeral: true });
         }
         try {
-            await interaction.reply({ ephemeral: cmd.ephemeral as boolean, content: "<a:discordproloading:875107406462472212>" });
+            await interaction.reply({ ephemeral: cmd.ephemeral as boolean, content: `${texts.loading} <a:discordproloading:875107406462472212>` });
             await cmd.execute(interaction, Lang);
             await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE");
             await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]);
@@ -243,7 +244,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     text = await utils.autoTranslate(text, "es", Lang);
                 }
                 if (interaction.isRepliable() && uid !== interaction.user.id) return await interaction.reply({ content: text.not_author, ephemeral: true });
-                await interaction.deferUpdate();
+                if (interaction.isRepliable()) await interaction.deferUpdate();
                 await interaction.message.edit({ components: [], content: text.value });
                 break;
             }
@@ -256,10 +257,10 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         invalid_rsp: "Respuesta inválida."
                     },
                     success: {
-                        done: "¡Hemos terminado el setup básico para tu servidor! Abajo está como quedó la configuración."
+                        done: "¡Hemos terminado el setup básico para tu servidor! Abajo está como quedó la establecida la configuración."
                     },
                     common: {
-                        ask_enable: "¿Deseas que al momento de terminar el filtro se active automáticamente? Responde con 0 para no y 1 para sí.",
+                        ask_enable: "¿Deseas que al momento de terminar el setup, el filtro se active automáticamente? Responde con un 0 para indiciar que no deseas eso o con un 1 para indicar que sí deseas eso.",
                         loaded_data: "Datos establecidos",
                         yes: "Sí",
                         no: "No",
@@ -268,15 +269,18 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         logs_enabled: "Logística habilitada",
                         not_set: "No configurado",
                         set: "Configurado",
+                        langtxt: "Idioma",
                         log_channel: "Canal de logística",
                         ask_enabled_logs: "¿Deseas habilitar los registros?",
-                        ask_logs_channel: "Activaste los registros, ¿En qué canal los quieres?"
+                        ask_logs_channel: "Activaste los registros, ¿En qué canal los quieres?",
+                        ask_lang: "¿Qué idioma quieres para el filtro? Utiliza el código del idioma. Por ejemplo:"
                     }
                 };
                 const values = {
                     enabled: false,
                     logs_enabled: false,
-                    logs_channel: "0"
+                    logs_channel: "0",
+                    lang: "en"
                 }
                 if (Lang !== "es") {
                     stexts = await utils.autoTranslate(stexts, "es", Lang);
@@ -287,7 +291,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     .setTitle(stexts.common.loaded_data)
                     .setDescription(EmbedDescription())
                     .setColor("Purple")
-                await interaction.deferUpdate();
+                if (interaction.isRepliable()) await interaction.deferUpdate();
                 await imessage.edit({ components: [], embeds: [embed], content: "" });
                 // Function to ask for input
                 async function GetResponse(msg: string): Promise<Message<boolean>> {
@@ -302,7 +306,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     const enabledValue = values["enabled"] ? stexts.common.yes : stexts.common.no;
                     const enabledLogs = values["logs_enabled"] ? stexts.common.yes : stexts.common.no;
                     const lChannelSet = values["logs_channel"] === "0" ? stexts.common.not_set : `#${interaction.guild?.channels.cache.get(values["logs_channel"])?.name}`;
-                    return "```\n" + `${stexts.common.enabled}: ${enabledValue}\n${stexts.common.logs_enabled}: ${enabledLogs}\n${stexts.common.log_channel}: ${lChannelSet}` + "\n```";
+                    return "```\n" + `${stexts.common.enabled}: ${enabledValue}\n${stexts.common.logs_enabled}: ${enabledLogs}\n${stexts.common.log_channel}: ${lChannelSet}\n${stexts.common.langtxt}: ${values["lang"]}` + "\n```";
                 }
                 // Ask to enable
                 values["enabled"] = await new Promise(async (resolve, reject) => {
@@ -343,17 +347,29 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     embed.setDescription(EmbedDescription());
                     await imessage.edit({ embeds: [embed] });
                 }
+                values["lang"] = await new Promise(async (resolve, reject) => {
+                    let err = false;
+                    do {
+                        const input = await GetResponse(err ? `${stexts.errors.invalid_rsp}\n${stexts.common.ask_lang} Español -> es || English -> en` : `${stexts.common.ask_lang} Español -> es || English -> en`);
+                        if (input.content.length > 2 || ["br", "ch"].some(v => input.content.toLowerCase() === v) || !langs.has(1, input.content.toLowerCase())) { err = true; continue; };
+                        resolve(input.content.toLowerCase());
+                        break;
+                    }
+                    while (true);
+                });
                 if (!Boolean(parseInt(args[1]))) await db.query("INSERT INTO filter_configs SET ?", [{
                     enabled: values["enabled"],
                     guild: interaction.guildId,
                     log_channel: values["logs_channel"],
-                    enabled_logs: values["logs_enabled"]
+                    enabled_logs: values["logs_enabled"],
+                    lang: values["lang"]
                 }]);
                 else await db.query("UPDATE filter_configs SET ? WHERE guild = ?", [{
                     enabled: values["enabled"],
                     guild: interaction.guildId,
                     log_channel: values["logs_channel"],
-                    enabled_logs: values["logs_enabled"]
+                    enabled_logs: values["logs_enabled"],
+                    lang: values["lang"]
                 }, interaction.guildId]);
                 embed.setDescription(EmbedDescription());
                 await imessage.edit({ embeds: [embed], content: stexts.success.done });
@@ -384,7 +400,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (!Boolean(filterConfig.enabled)) return;
     const wordList: any = await db.query("SELECT * FROM filter_words");
     if (!wordList.some((w: any) => message.content.toLowerCase().includes(w.content))) return;
-    if (message.member?.permissions.has(PermissionFlagsBits.ManageMessages)) return;
+    //if (message.member?.permissions.has(PermissionFlagsBits.ManageMessages)) return;
     const webHookData: any = await db.query("SELECT * FROM filter_webhooks WHERE channel = ?", [message.channel.id]);
     const webhook = webHookData[0] ? new WebhookClient({ id: webHookData[0].id, token: webHookData[0].token }) : await (message.channel as TextChannel).createWebhook({ name: "Filter WebHook", avatar: client.user?.displayAvatarURL() });
     if (!webHookData[0]) {
@@ -428,19 +444,19 @@ client.on("messageCreate", async (message): Promise<any> => {
                 texts = await utils.autoTranslate(texts, "en", filterConfig.lang);
             }
             const embed = new EmbedBuilder()
-            .setTitle(texts.title)
-            .setDescription(texts.description.replace("r3tr0", `<@${message.author.id}>`).replace("xdss", `<#${filterConfig.log_channel}>`))
-            .addFields(
-                {
-                    name: texts.original_content,
-                    value: message.content
-                },
-                {
-                    name: texts.filtered,
-                    value: badWords.map((w: any) => w.content).join(", ")
-                }
-            )
-            .setColor("Purple");
+                .setTitle(texts.title)
+                .setDescription(texts.description.replace(new RegExp("r3tr0", "ig"), `<@${message.author.id}>`).replace(new RegExp("xdss", "ig"), `<#${filterConfig.log_channel}>`))
+                .addFields(
+                    {
+                        name: texts.original_content,
+                        value: message.content
+                    },
+                    {
+                        name: texts.filtered,
+                        value: badWords.map((w: any) => w.content).join(", ")
+                    }
+                )
+                .setColor("Purple");
             await channel.send({ embeds: [embed] });
         }
     }
