@@ -6,13 +6,24 @@ import Log from "../Log";
 export default class WorkerManager extends EventEmitter {
     private Cache: Collection<string, { type: string, worker: Worker, id: string }> = new Collection();
     private RunningCache: Collection<string, { type: string, worker: Worker, id: string }> = new Collection();
-    constructor(public IDLength: number = 10, private cachePublic: boolean = false, public readonly typeLimit = 10) {
+    constructor(public IDLength: number = 20, private cachePublic: boolean = false, public readonly typeLimit = 10) {
         super();
     }
     public getWorker(id: string): { id: string, workerData: { type: string, worker: Worker } } | null {
         const worker = this.Cache.get(id);
         return worker ? { id, workerData: worker } : null;
     };
+
+    public async AwaitAvailableWorker(type: string) {
+        return new Promise((resolve, reject) => {
+            do {
+                const foundWorker = this.getAvailableWorker(type);
+                if (!foundWorker) continue;
+                else { resolve(foundWorker); break; }
+            }
+            while (true)
+        });
+    }
 
     public getAvailableWorker(type: string) {
         return this.Cache.find(w => w.type === type && !this.RunningCache.has(w.id));
