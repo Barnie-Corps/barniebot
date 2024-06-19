@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, EmbedBuilder, PermissionFlagsBits, SlashCommandBuilder, TimestampStyles, time } from "discord.js";
+import { ActionRow, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChatInputCommandInteraction, Embed, EmbedBuilder, PermissionFlagsBits, SlashCommandBuilder, TimestampStyles, time } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
 import data from "../data";
@@ -69,6 +69,10 @@ export default {
         .addSubcommand(s =>
             s.setName("toggle")
                 .setDescription("Toggles filter status. On -> Off / Off -> On")
+        )
+        .addSubcommand(s => 
+            s.setName("setup")
+            .setDescription("Initializes the filter setup wizard (Can't be executed twice)")
         ),
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
@@ -83,7 +87,8 @@ export default {
                 no_words: "El contenido del filtro de este servidor está vacío.",
                 too_long: "Hay demasiadas palabras en el filtro de este servidor, no puedo mostrarlas en formato de mensaje de discord.",
                 invalid_id: "La ID que has proporcionado no es válida.",
-                no_results: "No hubo resultados."
+                no_results: "No hubo resultados.",
+                already_registered: "Este servidor ya está registrado en mi base de datos."
             },
             success: {
                 registered: "Este servidor no se encontraba en la base de datos, por lo tanto, ha sido añadido. Por defecto, el filtro estará activo en el momento que el servidor se registra por primera vez.",
@@ -98,7 +103,12 @@ export default {
                 was_forced: "Esta eliminación fue forzada.",
                 protected_text: "Protegida",
                 filter_content_text: "Palabras en el filtro",
-                results: "Resultados de"
+                results: "Resultados de",
+            },
+            setup: {
+                msg: "Estás a punto de inicializar el setup del filtro, ¿Deseas continuar?",
+                continue_btn: "Continuar",
+                cancel_btn: "Cancelar"
             }
         };
         if (lang !== "es") {
@@ -127,7 +137,7 @@ export default {
                     }
                 }
                 case "add": {
-                    if (!filterMain) return await interaction.editReply(`${texts.errors.not_setup} /filter toggle`);
+                    if (!filterMain) return await interaction.editReply(`${texts.errors.not_setup} /filter setup`);
                     const word = interaction.options.getString("word") as string;
                     const allow_repeat = interaction.options.getBoolean("allow_repeat") as boolean;
                     const isProtected = interaction.options.getBoolean("protected") as boolean;
@@ -142,7 +152,7 @@ export default {
                     break;
                 }
                 case "view": {
-                    if (!filterMain) return await interaction.editReply(`${texts.errors.not_setup} /filter toggle`);
+                    if (!filterMain) return await interaction.editReply(`${texts.errors.not_setup} /filter setup`);
                     const format = interaction.options.getString("format") as string;
                     const words: any = await db.query("SELECT * FROM filter_words WHERE guild = ?", [interaction.guildId]);
                     if (words.length < 1) return await interaction.editReply(texts.errors.no_words);
@@ -165,7 +175,7 @@ export default {
                     break;
                 }
                 case "search": {
-                    if (!filterMain) return await interaction.editReply(`${texts.errors.not_setup} /filter toggle`);
+                    if (!filterMain) return await interaction.editReply(`${texts.errors.not_setup} /filter setup`);
                     const queries = interaction.options.getString("query") as string;
                     const format = interaction.options.getString("format") as string;
                     const words: any = await db.query("SELECT * FROM filter_words WHERE guild = ?", [interaction.guildId]);
@@ -191,7 +201,7 @@ export default {
                     break;
                 }
                 case "remove": {
-                    if (!filterMain) return await interaction.editReply(`${texts.errors.not_setup} /filter toggle`);
+                    if (!filterMain) return await interaction.editReply(`${texts.errors.not_setup} /filter setup`);
                     const wid = interaction.options.getInteger("id") as number;
                     const force = interaction.options.getBoolean("force") as boolean;
                     if (force && !interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) return await interaction.editReply(texts.errors.not_admin_delete);
@@ -201,6 +211,20 @@ export default {
                     await db.query("DELETE FROM filter_words WHERE guild = ? AND id = ?", [interaction.guildId, wid]);
                     await interaction.editReply(`${texts.success.removed_word} -> \`${word[0].content}\`${Boolean(word[0]) && force ? `. ${texts.common.was_forced}` : ""}`);
                     break;
+                }
+                case "setup": {
+                    const row = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                        .setLabel("Continuar")
+                        .setCustomId(`continue_setup-${interaction.user.id}-${!filterMain ? "0" : "1"}`)
+                        .setStyle(ButtonStyle.Success),
+                        new ButtonBuilder()
+                        .setCustomId("cancel_setup")
+                        .setLabel(texts.setup.cancel_btn)
+                        .setStyle(ButtonStyle.Danger)
+                    )
+                    await interaction.editReply({ content: texts.setup.msg, components: [row as any] });
                 }
             }
             return;

@@ -16,7 +16,7 @@ import fetch from "node-fetch";
 globalThis.fetch = fetch as any;
 import * as dotenv from "dotenv";
 dotenv.config();
-import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, MessagePayload, WebhookClient, TextChannel, Message, time, TimestampStyles } from "discord.js";
+import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, MessagePayload, WebhookClient, TextChannel, Message, time, TimestampStyles, ButtonInteraction, CacheType, Embed } from "discord.js";
 import * as fs from "fs";
 import data from "./data";
 import Log from "./Log";
@@ -29,6 +29,7 @@ import Workers from "./Workers";
 import path from "path";
 import { inspect } from "util";
 import langs from "langs";
+import { Channel } from "diagnostics_channel";
 const manager = new ChatManager();
 process.on("uncaughtException", (err: any) => {
     console.log(`Unknown Error: ${err.stack}`);
@@ -229,6 +230,137 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             Log.error("bot", `Error executing slash command ${cmd.data.name}\n${err.stack}`);
         }
     }
+    else if (interaction.isButton()) {
+        const [event, ...args] = interaction.customId.trim().split("-");
+        switch (event) {
+            case "cancel_setup": {
+                const [uid] = args;
+                let text = {
+                    value: "Vale, he cancelado el setup.",
+                    not_author: "No eres quien ejecutó el comando originalmente."
+                }
+                if (Lang !== "es") {
+                    text = await utils.autoTranslate(text, "es", Lang);
+                }
+                if (interaction.isRepliable() && uid !== interaction.user.id) return await interaction.reply({ content: text.not_author, ephemeral: true });
+                await interaction.deferUpdate();
+                await interaction.message.edit({ components: [], content: text.value });
+                break;
+            }
+            case "continue_setup": {
+                const [uid] = args;
+                const foundConfig: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [interaction.guildId]);
+                let stexts = {
+                    errors: {
+                        not_author: "No eres quien ejecutó el comando originalmente.",
+                        invalid_rsp: "Respuesta inválida."
+                    },
+                    success: {
+                        done: "¡Hemos terminado el setup básico para tu servidor! Abajo está como quedó la configuración."
+                    },
+                    common: {
+                        ask_enable: "¿Deseas que al momento de terminar el filtro se active automáticamente? Responde con 0 para no y 1 para sí.",
+                        loaded_data: "Datos establecidos",
+                        yes: "Sí",
+                        no: "No",
+                        enabled: "Habilitado",
+                        init_msg: "Bien. Empezaré con algunas preguntas.",
+                        logs_enabled: "Logística habilitada",
+                        not_set: "No configurado",
+                        set: "Configurado",
+                        log_channel: "Canal de logística",
+                        ask_enabled_logs: "¿Deseas habilitar los registros?",
+                        ask_logs_channel: "Activaste los registros, ¿En qué canal los quieres?"
+                    }
+                };
+                const values = {
+                    enabled: false,
+                    logs_enabled: false,
+                    logs_channel: "0"
+                }
+                if (Lang !== "es") {
+                    stexts = await utils.autoTranslate(stexts, "es", Lang);
+                }
+                if (interaction.isRepliable() && uid !== interaction.user.id) return await interaction.reply({ content: stexts.errors.not_author, ephemeral: true });
+                const imessage = interaction.message;
+                const embed = new EmbedBuilder()
+                    .setTitle(stexts.common.loaded_data)
+                    .setDescription(EmbedDescription())
+                    .setColor("Purple")
+                await interaction.deferUpdate();
+                await imessage.edit({ components: [], embeds: [embed], content: "" });
+                // Function to ask for input
+                async function GetResponse(msg: string): Promise<Message<boolean>> {
+                    const temp_msg = await interaction.channel?.send(msg);
+                    const collected = await interaction.channel?.awaitMessages({ filter: m => m.author.id === uid, max: 1 });
+                    await temp_msg?.delete();
+                    await collected?.first()?.delete();
+                    return collected?.first() as Message<boolean>;
+                }
+                // Function to create embed description
+                function EmbedDescription(): string {
+                    const enabledValue = values["enabled"] ? stexts.common.yes : stexts.common.no;
+                    const enabledLogs = values["logs_enabled"] ? stexts.common.yes : stexts.common.no;
+                    const lChannelSet = values["logs_channel"] === "0" ? stexts.common.not_set : `#${interaction.guild?.channels.cache.get(values["logs_channel"])?.name}`;
+                    return "```\n" + `${stexts.common.enabled}: ${enabledValue}\n${stexts.common.logs_enabled}: ${enabledLogs}\n${stexts.common.log_channel}: ${lChannelSet}` + "\n```";
+                }
+                // Ask to enable
+                values["enabled"] = await new Promise(async (resolve, reject) => {
+                    let err = false;
+                    do {
+                        const input = await GetResponse(err ? `${stexts.errors.invalid_rsp}\n${stexts.common.ask_enable}` : `${stexts.common.init_msg}\n${stexts.common.ask_enable}`);
+                        if (!["0", "1"].some(v => v === input.content)) { err = true; continue; };
+                        resolve(Boolean(parseInt(input.content)));
+                        break;
+                    }
+                    while (true);
+                });
+                embed.setDescription(EmbedDescription());
+                await imessage.edit({ embeds: [embed] });
+                values["logs_enabled"] = await new Promise(async (resolve, reject) => {
+                    let err = false;
+                    do {
+                        const input = await GetResponse(err ? `${stexts.errors.invalid_rsp}\n${stexts.common.ask_enabled_logs}` : stexts.common.ask_enabled_logs);
+                        if (!["0", "1"].some(v => v === input.content)) { err = true; continue; };
+                        resolve(Boolean(parseInt(input.content)));
+                        break;
+                    }
+                    while (true);
+                });
+                embed.setDescription(EmbedDescription());
+                await imessage.edit({ embeds: [embed] });
+                if (values["logs_enabled"]) {
+                    values["logs_channel"] = await new Promise(async (resolve, reject) => {
+                        let err = false;
+                        do {
+                            const input = await GetResponse(err ? `${stexts.errors.invalid_rsp}\n${stexts.common.ask_logs_channel}` : stexts.common.ask_logs_channel);
+                            if (!input.mentions.channels.first() || (input.mentions.channels.first() && !input.mentions.channels.first()?.isTextBased())) { err = true; continue; };
+                            resolve((input.mentions.channels.first() as unknown as TextChannel).id);
+                            break;
+                        }
+                        while (true);
+                    });
+                    embed.setDescription(EmbedDescription());
+                    await imessage.edit({ embeds: [embed] });
+                }
+                if (!Boolean(parseInt(args[1]))) await db.query("INSERT INTO filter_configs SET ?", [{
+                    enabled: values["enabled"],
+                    guild: interaction.guildId,
+                    log_channel: values["logs_channel"],
+                    enabled_logs: values["logs_enabled"]
+                }]);
+                else await db.query("UPDATE filter_configs SET ? WHERE guild = ?", [{
+                    enabled: values["enabled"],
+                    guild: interaction.guildId,
+                    log_channel: values["logs_channel"],
+                    enabled_logs: values["logs_enabled"]
+                }, interaction.guildId]);
+                embed.setDescription(EmbedDescription());
+                await imessage.edit({ embeds: [embed], content: stexts.success.done });
+            }
+        }
+        return;
+    }
 });
 
 client.on("messageCreate", async (message): Promise<any> => {
@@ -273,6 +405,45 @@ client.on("messageCreate", async (message): Promise<any> => {
         username: message.member?.nickname ?? author.displayName,
         files: message.attachments.map(a => a),
     });
+    if (filterConfig.enabled_logs) {
+        const channel = message.guild.channels.cache.get(filterConfig.log_channel) as TextChannel;
+        if (!channel) return;
+        let canSend = false;
+        try {
+            const tmpmsg = await channel.send(".");
+            canSend = true;
+            await tmpmsg.delete();
+        }
+        catch (e: any) {
+            Log.warn("bot", `Can't send filter log to set channel in guild ${message.guild.name}`);
+        }
+        if (canSend) {
+            let texts = {
+                title: "Filtered message",
+                description: "A message from author r3tr0 has been filtered on xdss",
+                original_content: "Original content",
+                filtered: "Filtered words"
+            };
+            if (filterConfig.lang !== "en") {
+                texts = await utils.autoTranslate(texts, "en", filterConfig.lang);
+            }
+            const embed = new EmbedBuilder()
+            .setTitle(texts.title)
+            .setDescription(texts.description.replace("r3tr0", `<@${message.author.id}>`).replace("xdss", `<#${filterConfig.log_channel}>`))
+            .addFields(
+                {
+                    name: texts.original_content,
+                    value: message.content
+                },
+                {
+                    name: texts.filtered,
+                    value: badWords.map((w: any) => w.content).join(", ")
+                }
+            )
+            .setColor("Purple");
+            await channel.send({ embeds: [embed] });
+        }
+    }
 });
 
 manager.on("limit-reached", async u => {
