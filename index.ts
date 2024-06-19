@@ -400,7 +400,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (!Boolean(filterConfig.enabled)) return;
     const wordList: any = await db.query("SELECT * FROM filter_words");
     if (!wordList.some((w: any) => message.content.toLowerCase().includes(w.content))) return;
-    //if (message.member?.permissions.has(PermissionFlagsBits.ManageMessages)) return;
+    if (message.member?.permissions.has(PermissionFlagsBits.ManageMessages)) return;
     const webHookData: any = await db.query("SELECT * FROM filter_webhooks WHERE channel = ?", [message.channel.id]);
     const webhook = webHookData[0] ? new WebhookClient({ id: webHookData[0].id, token: webHookData[0].token }) : await (message.channel as TextChannel).createWebhook({ name: "Filter WebHook", avatar: client.user?.displayAvatarURL() });
     if (!webHookData[0]) {
