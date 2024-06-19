@@ -156,7 +156,6 @@ const utils = {
         t[6] = langs.where(1, lang)?.local as string;
         return t.join(" ");
       })();
-      console.log(texts);
     }
     const url = "https://www.blackbox.ai/api/chat";
 
