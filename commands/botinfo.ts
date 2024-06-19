@@ -52,7 +52,7 @@ export default {
         }
         const cpuUsage = `${await cpu.usage()}%`;
         const memUsage = `${Math.floor(process.memoryUsage().heapUsed / 1000000)} MB / ${Math.round((await mem.info()).totalMemMb / 1024)} GB`;
-        const storage = /*`${(await drive.info("/")).freeGb}/${(await drive.info("/")).totalGb} GB`;*/ "Can't display";
+        const storage = `${(await drive.info("/")).freeGb}/${(await drive.info("/")).totalGb} GB`;
         const last_command_executed: any = await db.query("SELECT * FROM executed_commands WHERE is_last = TRUE");
         const lastU = await interaction.client.users.fetch(last_command_executed[0].uid);
         const embed = new EmbedBuilder()
