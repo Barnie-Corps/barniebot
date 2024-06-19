@@ -179,7 +179,7 @@ client.on("messageCreate", async (message): Promise<any> => {
             }
         }
         case "add_vip": {
-            if (!args[1]) return await message.reply("You must provide the user ID.");
+            if (!args[0]) return await message.reply("You must provide the user ID.");
             const [uid, newTime, timeType] = args;
             const multiply = {
                 seconds: 1,
