@@ -3,6 +3,7 @@ import * as crypto from "crypto";
 import * as async from "async";
 import Workers from "./Workers";
 import path from "path";
+import langs from "langs";
 const utils = {
   createArrows: (length: number): string => {
     let arrows = "";
@@ -136,5 +137,74 @@ const utils = {
     const result = input.replace(regex, "$1");
     return result;
   },
+  getAiResponse: async (text: string, lang: string, id: string): Promise<string> => {
+    const modelId = "ChitChatterLdJSpZu";
+    let texts = {
+      mainMessage: "Habla en español",
+      mainReply: "Ok, voy a hablar en español"
+    }
+    if (lang !== "es") {
+      texts = await utils.autoTranslate(texts, "es", lang);
+      texts.mainMessage = (function () {
+        const t = texts.mainMessage.trim().split(" ");
+        t[2] = langs.where(1, lang)?.local as string;
+        return t.join(" ");
+      })();
+      texts.mainReply = (function () {
+        const t = texts.mainReply.trim().split(" ");
+        t[6] = langs.where(1, lang)?.local as string;
+        return t.join(" ");
+      })();
+      console.log(texts);
+    }
+    const url = "https://www.blackbox.ai/api/chat";
+
+    const getMessage = (content: string, role: string = "user") => {
+      return {
+        content: content,
+        id,
+        role: role,
+        createdAt: new Date().toISOString()
+      };
+    };
+    const sendRequest = async (args: string) => {
+      const agentMode = {
+        mode: true,
+        id: modelId
+      };
+
+      const messages = [
+        getMessage(texts.mainMessage),
+        getMessage(texts.mainReply, "assistant"),
+        getMessage(args)
+      ];
+
+      const responsePayload = {
+        messages: messages,
+        previewToken: null,
+        codeModelMode: true,
+        agentMode: agentMode,
+        trendingAgentMode: {},
+        isMicMode: false,
+        maxTokens: 1024 / 2
+      };
+
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 OPR/105.0.0.0'
+          },
+          body: JSON.stringify(responsePayload)
+        });
+        const result = (await response.text()).split("$@$")[2]
+        return result;
+      } catch (error: any) {
+        console.error('Error sending request:', error.stack);
+      }
+    };
+    return await sendRequest(text) as string;
+  }
 };
 export default utils;
