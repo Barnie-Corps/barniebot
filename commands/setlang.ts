@@ -17,7 +17,7 @@ export default {
         newLang = newLang.toLowerCase();
         if (newLang === lang) return reply("```\n" + `/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Cannot set same language twice.` + "\n```");
         if (newLang.length > 2) return reply("```\n" + `/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Language code cannot have more than 2 characters.` + "\n```");
-        if (!langs.has(1, newLang) || newLang === "br" || newLang === "ch") return reply("```\n" + `/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Invalid language code.` + "\n```");
+        if (!langs.has(1, newLang) || ["ch", "br", "wa"].some(v => newLang === v)) return reply("```\n" + `/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Invalid language code.` + "\n```");
         const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
         if (foundLang[0]) {
             await db.query("UPDATE languages SET ? WHERE userid = ?", [{ lang: newLang }, interaction.user.id]);

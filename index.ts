@@ -351,7 +351,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     let err = false;
                     do {
                         const input = await GetResponse(err ? `${stexts.errors.invalid_rsp}\n${stexts.common.ask_lang} Español -> es || English -> en` : `${stexts.common.ask_lang} Español -> es || English -> en`);
-                        if (input.content.length > 2 || ["br", "ch"].some(v => input.content.toLowerCase() === v) || !langs.has(1, input.content.toLowerCase())) { err = true; continue; };
+                        if (input.content.length > 2 || ["br", "ch", "wa"].some(v => input.content.toLowerCase() === v) || !langs.has(1, input.content.toLowerCase())) { err = true; continue; };
                         resolve(input.content.toLowerCase());
                         break;
                     }
