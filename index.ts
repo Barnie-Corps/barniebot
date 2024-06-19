@@ -181,6 +181,7 @@ client.on("messageCreate", async (message): Promise<any> => {
         case "add_vip": {
             if (!args[0]) return await message.reply("You must provide the user ID.");
             const [uid, newTime, timeType] = args;
+            if ([uid, newTime, timeType].some(v => !v)) return await message.reply("Missing arguments. Required arguments: ID TIME TIME_TYPE");
             const multiply = {
                 seconds: 1,
                 minutes: 60,
@@ -188,17 +189,24 @@ client.on("messageCreate", async (message): Promise<any> => {
                 days: 86400,
             }
             if (isNaN(parseInt(uid))) return await message.reply("Invalid ID.");
-            const u = await client.users.fetch(uid);
-            if (!u) return await message.reply("Unknown user.");
+            let validUser = false;
+            try {
+                await client.users.fetch(uid);
+                validUser = true;
+            }
+            catch (error) {
+                await message.reply("Invalid ID.");
+                break;
+            }
             if (isNaN(parseInt(newTime))) return await message.reply("Invalid time provided.");
-            if (Object.keys(multiply).some(m => m === timeType.toLowerCase())) return await message.reply(`Invalid time type provided. Supported types: \`${Object.keys(multiply).join(", ")}.\``);
+            if (!Object.keys(multiply).some(m => m === timeType.toLowerCase())) return await message.reply(`Invalid time type provided. Supported types: \`${Object.keys(multiply).join(", ")}.\``);
             const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [uid]);
             const totalTime = (1000 * multiply[timeType as keyof typeof multiply]) * parseInt(newTime);
             const now = Date.now();
             const end = now + totalTime;
             if (foundVip[0]) {
                 await db.query("UPDATE vip_users SET end_date = ? WHERE id = ?", [end, uid]);
-                await message.reply(`VIP has been updated to ${newTime} ${timeType} for user with ID ${uid}. ${time(Math.round(foundVip[0].end_date / 1000), TimestampStyles.ShortDate)} -> ${time(Math.round(end / 1000), TimestampStyles.ShortDate)} (Ends in ${time(Math.round(end / 1000), TimestampStyles.RelativeTime)})`);
+                await message.reply(`VIP time has been updated to ${newTime} ${timeType} for user with ID ${uid}. ${time(Math.round(foundVip[0].end_date / 1000), TimestampStyles.ShortDate)} -> ${time(Math.round(end / 1000), TimestampStyles.ShortDate)} (Ends in ${time(Math.round(end / 1000), TimestampStyles.RelativeTime)})`);
                 break;
             }
             else {
@@ -207,7 +215,7 @@ client.on("messageCreate", async (message): Promise<any> => {
                     start_date: now,
                     end_date: end,
                 }]);
-                await message.reply(`VIP has been added to user with ID ${uid} for ${newTime} ${timeType} -> ${time(Math.round(foundVip[0].end_date / 1000), TimestampStyles.ShortDate)} (${time(Math.round(foundVip[0].end_date / 1000), TimestampStyles.RelativeTime)})`);
+                await message.reply(`VIP has been added to user with ID ${uid} for ${newTime} ${timeType} -> ${time(Math.round(end / 1000), TimestampStyles.ShortDate)} (${time(Math.round(end / 1000), TimestampStyles.RelativeTime)})`);
                 break;
             }
         }
