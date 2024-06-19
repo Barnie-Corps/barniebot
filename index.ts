@@ -495,7 +495,7 @@ client.on("messageCreate", async (message): Promise<any> => {
             }
             const embed = new EmbedBuilder()
                 .setTitle(texts.title)
-                .setDescription(texts.description.replace(new RegExp("r3tr0", "ig"), `<@${message.author.id}>`).replace(new RegExp("xdss", "ig"), `<#${filterConfig.log_channel}>`))
+                .setDescription(texts.description.replace(new RegExp("r3tr0", "ig"), `<@${message.author.id}>`).replace(new RegExp("xdss", "ig"), `<#${message.channel.id}>`))
                 .addFields(
                     {
                         name: texts.original_content,
