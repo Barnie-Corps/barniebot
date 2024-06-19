@@ -187,6 +187,7 @@ client.on("messageCreate", async (message): Promise<any> => {
                 hours: 3600,
                 days: 86400,
             }
+            if (isNaN(parseInt(uid))) return await message.reply("Invalid ID.");
             const u = await client.users.fetch(uid);
             if (!u) return await message.reply("Unknown user.");
             if (isNaN(parseInt(newTime))) return await message.reply("Invalid time provided.");
