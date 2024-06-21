@@ -16,7 +16,7 @@ import fetch from "node-fetch";
 globalThis.fetch = fetch as any;
 import * as dotenv from "dotenv";
 dotenv.config();
-import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, MessagePayload, WebhookClient, TextChannel, Message, time, TimestampStyles, ButtonInteraction, CacheType, TimestampStylesString } from "discord.js";
+import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, MessagePayload, WebhookClient, TextChannel, Message, time, TimestampStyles, ButtonInteraction, CacheType, TimestampStylesString, Collection } from "discord.js";
 import * as fs from "fs";
 import data from "./data";
 import Log from "./Log";
@@ -72,9 +72,21 @@ client.on("ready", async (): Promise<any> => {
     fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
 });
 
+const activeGuilds: Collection<string, number> = new Collection();
+
 client.on("messageCreate", async (message): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(message.author.id)) return;
     if (message.author.bot) return;
+    if (!message.inGuild()) return;
+    if (activeGuilds.has(message.guildId as string)) {
+        const agValue = activeGuilds.get(message.guildId as string);
+        activeGuilds.set(message.guildId as string, (agValue as number) + 1);
+        Log.info("bot", `Received messageCreate. Guild: ${message.guild?.name} | Author: ${message.author.displayName} (${message.author.username}).`);
+    }
+    else {
+        activeGuilds.set(message.guildId as string, 1);
+        Log.info("bot", `Received messageCreate. Guild: ${message.guild?.name} | Author: ${message.author.displayName} (${message.author.username}). [GUILD WAS NOT REGISTERED]`);
+    }
     const prefix = "b.";
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]);
     const Lang = foundLang[0] ? foundLang[0].lang : "es";
@@ -177,6 +189,19 @@ client.on("messageCreate", async (message): Promise<any> => {
                 message.reply({ embeds: [errorEmbed] });
                 break;
             }
+        }
+        case "active_guilds": {
+            const guilds = [...(function () {
+                let guilds = [];
+                for (const guildId of activeGuilds.keys()) {
+                    guilds.push({ id: guildId, value: activeGuilds.get(guildId), name: client.guilds.cache.get(guildId)?.name });
+                }
+                return guilds;
+            })()];
+            const sliced = guilds.slice(0, 19);
+            if (sliced.length < 1) return await message.reply("No active guilds.");
+            await message.reply("```\n" + `${guilds.length} Guilds. Showing ${sliced.length} (Max 20)\n\n${sliced.map(g => `${g.name} (${g.id}) -> ${g.value}`).join("\n")}` + "\n```");
+            break
         }
         case "add_vip": {
             if (!args[0]) return await message.reply("You must provide the user ID.");
