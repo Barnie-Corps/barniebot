@@ -138,11 +138,12 @@ const utils = {
     const result = input.replace(regex, "$1");
     return result;
   },
-  getAiResponse: async (text: string, lang: string, id: string): Promise<string> => {
+  getAiResponse: async (text: string, lang: string, id: string, isStart: boolean): Promise<string> => {
     const modelId = "ChitChatterLdJSpZu";
     let texts = {
       mainMessage: "Habla en español",
-      mainReply: "Ok, voy a hablar en español"
+      mainReply: "Ok, voy a hablar en español",
+      instruction: "RECUERDA: No generes una respuesta que supere los 1800 caracteres"
     }
     if (lang !== "es") {
       texts = await utils.autoTranslate(texts, "es", lang);
@@ -176,8 +177,9 @@ const utils = {
       const messages = [
         getMessage(texts.mainMessage),
         getMessage(texts.mainReply, "assistant"),
-        getMessage(args)
+        getMessage(`${args}\n${texts.instruction}`)
       ];
+      if (!isStart) messages.splice(0, 2);
 
       const responsePayload = {
         messages: messages,
