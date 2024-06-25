@@ -171,6 +171,7 @@ client.on("messageCreate", async (message): Promise<any> => {
                         }
                     )
                 message.reply({ embeds: [embed] });
+                break;
             }
             catch (error) {
                 const errorEmbed = new EmbedBuilder()
@@ -189,6 +190,7 @@ client.on("messageCreate", async (message): Promise<any> => {
                 message.reply({ embeds: [errorEmbed] });
                 break;
             }
+            break;
         }
         case "active_guilds": {
             const guilds = [...(function () {
@@ -201,7 +203,7 @@ client.on("messageCreate", async (message): Promise<any> => {
             const sliced = guilds.slice(0, 19);
             if (sliced.length < 1) return await message.reply("No active guilds.");
             await message.reply("```\n" + `${guilds.length} Guilds. Showing ${sliced.length} (Max 20)\n\n${sliced.map(g => `${g.name} (${g.id}) -> ${g.value}`).join("\n")}` + "\n```");
-            break
+            break;
         }
         case "add_vip": {
             if (!args[0]) return await message.reply("You must provide the user ID.");
