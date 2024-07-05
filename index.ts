@@ -484,7 +484,11 @@ client.on("messageCreate", async (message): Promise<any> => {
         await db.query("INSERT INTO filter_webhooks SET ?", [{ id: webhook.id, token: webhook.token, channel: message.channel.id }]);
     }
     if (wordList.length < 1) return;
-    const badWords = wordList.filter((w: any) => message.content.toLowerCase().includes(w.content));
+    const badWords = wordList.filter((w: any) => message.content.toLowerCase().includes(w.content)).sort((w1: any, w2: any) => {
+        if (w1.content.length > w2.content.length) return -1;
+        else if (w2.content.length > w1.content.length) return 1;
+        else return 0;
+    });
     let content = message.content;
     if (badWords.length > 0) for (const word of badWords) { const reg = new RegExp(word.content, "ig"); content = content.replace(reg, `\`${utils.createCensored(word.content.length)}\``).replace(new RegExp(/[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi), "[LINK]"); continue }
     const { author } = message;
