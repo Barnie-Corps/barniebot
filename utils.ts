@@ -123,7 +123,6 @@ const utils = {
   decryptWithAES: (key: string, data: string): string | null => {
     const textParts = data.split(":");
     const iv = Buffer.from(textParts.shift() as string, "hex");
-    console.log(iv);
     const encrypted = textParts.join(":");
     const decipher = crypto.createDecipheriv(
       "aes-256-cbc",
