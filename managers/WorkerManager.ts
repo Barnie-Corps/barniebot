@@ -1,7 +1,7 @@
 import { Collection } from "discord.js";
-import { EventEmitter } from "events";
 import { Worker, workerData } from "worker_threads";
 import Log from "../Log";
+import EventEmitter from "events";
 
 export default class WorkerManager extends EventEmitter {
     private Cache: Collection<string, { type: string, worker: Worker, id: string }> = new Collection();
