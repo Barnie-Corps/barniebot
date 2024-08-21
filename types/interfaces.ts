@@ -27,3 +27,8 @@ export interface ChatManagerOptions {
     messages_limit: number;
     time: number
 }
+export interface Ratelimit {
+    id: string;
+    time: number;
+    messages: number;
+}
