@@ -5,6 +5,7 @@
   "main": "index.ts",
   "dependencies": {
     "@discordjs/rest": "^1.1.0",
+    "@google/generative-ai": "^0.17.0",
     "@types/async": "^3.2.21",
     "@types/langs": "^2.0.1",
     "@types/mysql": "^2.15.21",
