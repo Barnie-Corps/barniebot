@@ -2,6 +2,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChatInputCommandInteracti
 import db from "../mysql/database";
 import utils from "../utils";
 import data from "../data";
+import ai from "../Ai";
 
 export default {
     data: new SlashCommandBuilder()
@@ -43,9 +44,9 @@ export default {
             case "ask": {
                 await interaction.editReply(texts.common.thinking);
                 const question = interaction.options.getString("question") as string;
-                const response = await utils.getAiResponse(question, lang, interaction.user.id, true);
+                const response = await ai.GetResponse(interaction.user.id, question);
                 if (response.length < 1) return await interaction.editReply(texts.errors.no_response);
-                await interaction.editReply(`${texts.common.question} ${question}\n\n${texts.common.answer}\n ${response}`);
+                await interaction.editReply(response);
                 break;
             }
             case "chat": {
@@ -60,9 +61,8 @@ export default {
                         collector?.stop();
                         return;
                     }
-                    const response = await utils.getAiResponse(message.content, lang, interaction.user.id, firstMsg);
+                    const response = await ai.GetResponse(interaction.user.id, message.content);
                     if (response.length < 1) return await message.reply(texts.errors.no_response);
-                    if (firstMsg) firstMsg = false;
                     await message.reply(response);
                 });
             }

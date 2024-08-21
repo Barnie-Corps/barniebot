@@ -10,8 +10,8 @@ class AiManager extends EventEmitter {
     private ratelimits: Map<string, Ratelimit> = new Map();
     private chats: Map<string, ChatSession> = new Map();
     constructor(private ratelimit: number, private max: number, private timeout: number) {
-        if (!Log.sources.includes("AI")) Log.sources.push("AI");
-        Log.info("AI", "AI Manager initialized");
+        if (!Log.sources.includes("ai")) Log.sources.push("ai");
+        Log.info("ai", "AI Manager initialized");
         setInterval(() => this.ClearTimeouts(), 1000);
         super();
     }
@@ -45,14 +45,17 @@ class AiManager extends EventEmitter {
     public async GetResponse(id: string, text: string): Promise<string> {
         if (await this.RatelimitUser(id)) return "You are sending too many messages, please wait a few seconds before sending another message.";
         const chat = await this.GetChat(id, text);
-        const response = await utils.getAiResponsee(text, chat);
-        await this.RemoveRatelimit(id);
+        const response = await utils.getAiResponse(text, chat);
+        const hdata = await this.GetHistory(id);
+        hdata.push({ parts: [{ text }], role: "user" });
+        hdata.push({ parts: [{ text: response }], role: "model" });
+        await this.UpdateHistory(id, hdata);
         return response;
     }
     // text param is used in case the user has no history
     private async GetChat(id: string, text: string): Promise<ChatSession> {
         let chat = this.chats.get(id);
-        const hdata = await this.GetHistory(id);
+        let hdata = await this.GetHistory(id);
         if (!hdata) {
             db.query("INSERT INTO ai_history SET ? ", [{
                 content: JSON.stringify({ data: [{ parts: [{ text }], role: "user" }] }),
@@ -64,7 +67,10 @@ class AiManager extends EventEmitter {
             chat = model.startChat({
                 history: hdata,
                 generationConfig: {
-                    maxOutputTokens: 2048
+                    maxOutputTokens: 1024,
+                    temperature: 0.9,
+                    topP: 0.9,
+                    topK: 40,
                 }
             });
             this.chats.set(id, chat);
@@ -75,6 +81,11 @@ class AiManager extends EventEmitter {
         this.ratelimits.forEach((ratelimit) => {
             if (Date.now() - ratelimit.time > this.timeout) this.ratelimits.delete(ratelimit.id);
         });
+    }
+    private async UpdateHistory(id: string, data: any): Promise<void> {
+        db.query("UPDATE ai_history SET ? WHERE uid = ?", [{
+            content: JSON.stringify({ data }),
+        }, id]);
     }
 }
 export default AiManager;

@@ -139,82 +139,82 @@ const utils = {
     const result = input.replace(regex, "$1");
     return result;
   },
-  getAiResponse: async (text: string, lang: string, id: string, isStart: boolean): Promise<string> => {
-    const modelId = "ChitChatterLdJSpZu";
-    let texts = {
-      mainMessage: "Habla en español",
-      mainReply: "Ok, voy a hablar en español",
-      instruction: "RECUERDA: No generes una respuesta que supere los 1800 caracteres"
-    }
-    if (lang !== "es") {
-      texts = await utils.autoTranslate(texts, "es", lang);
-      texts.mainMessage = (function () {
-        const t = texts.mainMessage.trim().split(" ");
-        t[2] = langs.where(1, lang)?.local as string;
-        return t.join(" ");
-      })();
-      texts.mainReply = (function () {
-        const t = texts.mainReply.trim().split(" ");
-        t[6] = langs.where(1, lang)?.local as string;
-        return t.join(" ");
-      })();
-    }
-    const url = "https://www.blackbox.ai/api/chat";
+  // getAiResponse: async (text: string, lang: string, id: string, isStart: boolean): Promise<string> => {
+  //   const modelId = "ChitChatterLdJSpZu";
+  //   let texts = {
+  //     mainMessage: "Habla en español",
+  //     mainReply: "Ok, voy a hablar en español",
+  //     instruction: "RECUERDA: No generes una respuesta que supere los 1800 caracteres"
+  //   }
+  //   if (lang !== "es") {
+  //     texts = await utils.autoTranslate(texts, "es", lang);
+  //     texts.mainMessage = (function () {
+  //       const t = texts.mainMessage.trim().split(" ");
+  //       t[2] = langs.where(1, lang)?.local as string;
+  //       return t.join(" ");
+  //     })();
+  //     texts.mainReply = (function () {
+  //       const t = texts.mainReply.trim().split(" ");
+  //       t[6] = langs.where(1, lang)?.local as string;
+  //       return t.join(" ");
+  //     })();
+  //   }
+  //   const url = "https://www.blackbox.ai/api/chat";
 
-    const getMessage = (content: string, role: string = "user") => {
-      return {
-        content: content,
-        id,
-        role: role,
-        createdAt: new Date().toISOString()
-      };
-    };
-    const sendRequest = async (args: string) => {
-      const agentMode = {
-        mode: true,
-        id: modelId
-      };
+  //   const getMessage = (content: string, role: string = "user") => {
+  //     return {
+  //       content: content,
+  //       id,
+  //       role: role,
+  //       createdAt: new Date().toISOString()
+  //     };
+  //   };
+  //   const sendRequest = async (args: string) => {
+  //     const agentMode = {
+  //       mode: true,
+  //       id: modelId
+  //     };
 
-      const messages = [
-        getMessage(texts.mainMessage),
-        getMessage(texts.mainReply, "assistant"),
-        getMessage(`${args}\n${texts.instruction}`)
-      ];
-      if (!isStart) messages.splice(0, 2);
+  //     const messages = [
+  //       getMessage(texts.mainMessage),
+  //       getMessage(texts.mainReply, "assistant"),
+  //       getMessage(`${args}\n${texts.instruction}`)
+  //     ];
+  //     if (!isStart) messages.splice(0, 2);
 
-      const responsePayload = {
-        messages: messages,
-        previewToken: null,
-        codeModelMode: true,
-        agentMode: agentMode,
-        trendingAgentMode: {},
-        isMicMode: false,
-        maxTokens: 1024 / 2
-      };
+  //     const responsePayload = {
+  //       messages: messages,
+  //       previewToken: null,
+  //       codeModelMode: true,
+  //       agentMode: agentMode,
+  //       trendingAgentMode: {},
+  //       isMicMode: false,
+  //       maxTokens: 1024 / 2
+  //     };
 
-      try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 OPR/105.0.0.0'
-          },
-          body: JSON.stringify(responsePayload)
-        });
-        const result = (await response.text()).split("$@$")[2]
-        return result;
-      } catch (error: any) {
-        console.error('Error sending request:', error.stack);
-      }
-    };
-    return await sendRequest(text) as string;
-  },
+  //     try {
+  //       const response = await fetch(url, {
+  //         method: 'POST',
+  //         headers: {
+  //           'Content-Type': 'application/json',
+  //           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 OPR/105.0.0.0'
+  //         },
+  //         body: JSON.stringify(responsePayload)
+  //       });
+  //       const result = (await response.text()).split("$@$")[2]
+  //       return result;
+  //     } catch (error: any) {
+  //       console.error('Error sending request:', error.stack);
+  //     }
+  //   };
+  //   return await sendRequest(text) as string;
+  // },
   isVIP: async (id: string) => {
     const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [id]);
     if (!foundVip[0]) return false;
     else return true;
   },
-  getAiResponsee: async (prompt: string, chat: ChatSession) => {
+  getAiResponse: async (prompt: string, chat: ChatSession) => {
     const result = await chat.sendMessage(prompt);
     const response = await result.response;
     const text = response.text();

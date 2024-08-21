@@ -29,7 +29,6 @@ import Workers from "./Workers";
 import path from "path";
 import { inspect } from "util";
 import langs from "langs";
-import { Channel } from "diagnostics_channel";
 const manager = new ChatManager();
 process.on("uncaughtException", (err: any) => {
     console.log(`Unknown Error: ${err.stack}`);
@@ -70,6 +69,19 @@ client.on("ready", async (): Promise<any> => {
     else if (Number(process.env.NOTIFY_STARTUP) === 1) await manager.announce("¡He vuelto! El chat global está nuevamente en línea.", "es");
     Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", 5);
     fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
+    Log.info("bot", "Workers loaded.");
+    Log.info("bot", "Bot is ready.");
+    Log.info("bot", "Checking for AI history entries with a length of over 60,000 characters...");
+    const filterAiHistory = (await db.query("SELECT * FROM ai_history") as any).filter((h: any) => h.content.length >= 60000);
+    if (filterAiHistory.length > 0) {
+        let deletedHistory = 0;
+        filterAiHistory.forEach(async (h: any) => {
+            await db.query("DELETE FROM ai_history WHERE id = ?", [h.id]);
+            deletedHistory++;
+        });
+        Log.warn("bot", `[!] Deleted ${deletedHistory} AI history entries due to a length of over 60,000 characters`);
+    }
+    Log.info("bot", "AI history entries checked.");
 });
 
 const activeGuilds: Collection<string, number> = new Collection();
@@ -245,6 +257,27 @@ client.on("messageCreate", async (message): Promise<any> => {
                 await message.reply(`VIP has been added to user with ID ${uid} for ${newTime} ${timeType} -> ${time(Math.round(end / 1000), TimestampStyles.ShortDate)} (${time(Math.round(end / 1000), TimestampStyles.RelativeTime)})`);
                 break;
             }
+        }
+        case "remove_vip": {
+            if (!args[0]) return await message.reply("You must provide the user ID.");
+            const [uid] = args;
+            if (!uid) return await message.reply("Missing arguments. Required arguments: ID");
+            if (isNaN(parseInt(uid))) return await message.reply("Invalid ID.");
+            let validUser = false;
+            try {
+                await client.users.fetch(uid);
+                validUser = true;
+            }
+            catch (error) {
+                await message.reply("Invalid ID.");
+                break;
+            }
+            const user = await client.users.fetch(uid);
+            const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [uid]);
+            if (!foundVip[0]) return await message.reply("User is not VIP.");
+            await db.query("DELETE FROM vip_users WHERE id = ?", [uid]);
+            await message.reply(`VIP has been removed from user with ID ${uid} [@${user.username} / ${user.displayName}].`);
+            break;
         }
     }
 });
