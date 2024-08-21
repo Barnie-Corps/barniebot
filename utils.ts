@@ -5,6 +5,7 @@ import Workers from "./Workers";
 import path from "path";
 import langs from "langs";
 import db from "./mysql/database";
+import { ChatSession } from "@google/generative-ai";
 const utils = {
   createArrows: (length: number): string => {
     let arrows = "";
@@ -212,6 +213,12 @@ const utils = {
     const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [id]);
     if (!foundVip[0]) return false;
     else return true;
+  },
+  getAiResponsee: async (prompt: string, chat: ChatSession) => {
+    const result = await chat.sendMessage(prompt);
+    const response = await result.response;
+    const text = response.text();
+    return text;
   }
 };
 export default utils;
