@@ -2,7 +2,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChatInputCommandInteracti
 import db from "../mysql/database";
 import utils from "../utils";
 import data from "../data";
-import ai from "../Ai";
+import ai from "../ai";
 
 export default {
     data: new SlashCommandBuilder()
