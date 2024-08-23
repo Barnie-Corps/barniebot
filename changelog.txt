@@ -138,7 +138,7 @@ What a beautiful day.
   - Global chat now prioritizes guilds without the autotranslate option turned on.
 
  [+] New:
-  - Added filter command -> /filter toggle to start
+  - Added filter command -> /filter setup to start
   - Added ChatManager sorting to prioritize guilds with not auto translate [DEV]
   - Added 3 tables: filter_configs, filter_words and filter_webhooks. See mysql/queries.ts [DEV]
   - Added messageCreate event listener to handle the filter [DEV]
