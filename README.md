@@ -1,4 +1,25 @@
-# BarnieBot
-This is the official github repository of BarnieBot's source code. You can add the official bot [here](https://discord.com/api/oauth2/authorize?client_id=900723711840251924&permissions=8&scope=bot%20applications.commands) which will be always updated with the latest version.
-You can also join the official discord server [here](https://discord.gg/z5NwZqJs7k).
-Changelogs will now be announced in the official server.
+## Getting Started
+
+Welcome to the official GitHub repository of BarnieBot's source code! BarnieBot is a powerful Discord bot that offers a wide range of features to enhance your server experience. This repository contains the source code for BarnieBot, including the bot's core functionality, commands, and modules. This bot is not fully completed yet, but it is in a working state.
+
+To get started, you can add the official bot to your server by clicking [here](https://discord.com/api/oauth2/authorize?client_id=900723711840251924&permissions=8&scope=bot%20applications.commands). Make sure to grant the necessary permissions for the bot to function properly. You can also join our official Discord server by clicking [here](https://discord.gg/z5NwZqJs7k) to stay updated on the latest developments and interact with the community.
+
+## Features
+
+- **Command-based**: BarnieBot utilizes a command-based system, allowing you to easily interact with the bot using simple commands.
+- **Customizable**: The bot offers various customization options, allowing you to tailor its behavior to suit your server's needs.
+- **Developer friendly**: The bot's source code is well-documented and easy to understand, making it easy for developers to contribute and extend its functionality.
+
+## Contributing
+
+We welcome contributions from the community to help improve BarnieBot. If you have any ideas, bug reports, or feature requests, please feel free to open an issue or submit a pull request on our GitHub repository.
+
+Before contributing, please make sure to read our [contribution guidelines](CONTRIBUTING.md) to ensure a smooth collaboration process.
+
+## Support
+
+If you encounter any issues or have any questions regarding BarnieBot, please join our official Discord server by clicking [here](https://discord.gg/z5NwZqJs7k). Our friendly community and dedicated support team will be happy to assist you. You can also reach out to us via email at barniecorps@gmail.com
+
+## License
+
+BarnieBot is released under the [MIT License](LICENSE). Feel free to use, modify, and distribute the code as per the terms of the license. We appreciate your support and contributions to the project!
