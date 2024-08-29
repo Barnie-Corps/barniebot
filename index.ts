@@ -17,7 +17,7 @@ import fetch from "node-fetch";
 globalThis.fetch = fetch as any;
 import * as dotenv from "dotenv";
 dotenv.config();
-import { EmbedBuilder, ActionRow, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, MessagePayload, WebhookClient, TextChannel, Message, time, TimestampStyles, ButtonInteraction, CacheType, TimestampStylesString, Collection } from "discord.js";
+import { EmbedBuilder, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, WebhookClient, TextChannel, Message, time, TimestampStyles, Collection } from "discord.js";
 import * as fs from "fs";
 import data from "./data";
 import Log from "./Log";
