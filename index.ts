@@ -19,18 +19,19 @@ import * as dotenv from "dotenv";
 dotenv.config();
 import { EmbedBuilder, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, WebhookClient, TextChannel, Message, time, TimestampStyles, Collection } from "discord.js";
 import * as fs from "fs";
-import data from "./data";
-import Log from "./Log";
-import queries from "./mysql/queries";
-import db from "./mysql/database";
-import utils from "./utils";
-import load_slash from "./load_slash";
-import ChatManager from "./managers/ChatManager";
-import Workers from "./Workers";
+import data from "./data"; // Data file for storing bot data
+import Log from "./Log"; // Log object for logging
+import queries from "./mysql/queries"; // This file is used to create the tables if they don't exist
+import db from "./mysql/database"; // Database connection
+import utils from "./utils"; // Utils file for utility functions
+import load_slash from "./load_slash"; // Load slash commands
+import ChatManager from "./managers/ChatManager"; // Chat manager for global chat
+import Workers from "./Workers"; // Workers for background tasks
 import path from "path";
-import { inspect } from "util";
-import langs from "langs";
+import { inspect } from "util"; // Used for eval command
+import langs from "langs"; // Used for language codes
 const manager = new ChatManager();
+// Catch unhandled errors
 process.on("uncaughtException", (err: any) => {
     console.log(`Unknown Error: ${err.stack}`);
 });
@@ -41,17 +42,22 @@ const client = new Client({
     intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.GuildMessageTyping, GatewayIntentBits.GuildEmojisAndStickers, GatewayIntentBits.DirectMessages, GatewayIntentBits.DirectMessageTyping, GatewayIntentBits.DirectMessageReactions],
     partials: [Partials.Channel, Partials.GuildMember, Partials.Message, Partials.User]
 });
+// Load commands
 (async function () {
+    // Get command file names
     const commandsDir = fs.readdirSync("./commands").filter(f => f.endsWith(".ts"));
+    // Iterate over each command file and load it
     for (const cmdFile of commandsDir) {
         try {
             const command = (await import(`./commands/${cmdFile.trim().split(".")[0]}`)).default;
             data.bot.commands.set(command.data.name, command);
         }
+        // Catch any errors that may occur while loading the command file
         catch (err: any) {
             Log.error("commands", `Couldn't load command file '${cmdFile}' properly due to an unexpected error:\n${err.stack}`);
         }
     }
+    // Log the amount of commands loaded
     Log.success("commands", `Successfully loaded ${data.bot.commands.size}/${commandsDir.length} commands.`);
 })();
 
@@ -59,20 +65,22 @@ client.on("ready", async (): Promise<any> => {
     Log.success("bot", `Successfully logged in at discord as ${client.user?.tag}`);
     queries();
     client.user?.setPresence({ activities: [{ name: `V ${String(process.env.VERSION)}`, type: ActivityType.Playing }] });
-    await load_slash();
+    await load_slash(); // Load slash commands
     Log.info("bot", `Current users cache size: ${client.users.cache.size}`);
-    data.bot.owners.push(...String(process.env.OWNERS).trim().split(","));
+    data.bot.owners.push(...String(process.env.OWNERS).trim().split(",")); // Load owners from .env
     Log.info("bot", "Owners data loaded.");
     Log.info("bot", "Loading workers...");
+    // Check if the bot was safely shutted down or not
     if (Number(process.env.SAFELY_SHUTTED_DOWN) === 0 && Number(process.env.NOTIFY_STARTUP) === 1) {
         await manager.announce("¡Hey! He sido reiniciado... Según mis registros, fue un reinicio forzado, por lo cual, no pude avisarles de éste. Lamentamos cualquier inconveniente o interrupción que esto haya causado.", "es");
     }
     else if (Number(process.env.NOTIFY_STARTUP) === 1) await manager.announce("¡He vuelto! El chat global está nuevamente en línea.", "es");
-    Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", 5);
+    Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", 5); // Create 5 workers for translation tasks
     fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
     Log.info("bot", "Workers loaded.");
     Log.info("bot", "Bot is ready.");
     Log.info("bot", "Checking for AI history entries with a length of over 60,000 characters...");
+    // Check for AI history entries with a length of over 60,000 characters and delete them
     const filterAiHistory = (await db.query("SELECT * FROM ai_history") as any).filter((h: any) => h.content.length >= 60000);
     if (filterAiHistory.length > 0) {
         let deletedHistory = 0;
@@ -85,24 +93,28 @@ client.on("ready", async (): Promise<any> => {
     Log.info("bot", "AI history entries checked.");
 });
 
-const activeGuilds: Collection<string, number> = new Collection();
+const activeGuilds: Collection<string, number> = new Collection(); // Active guilds collection for active guilds tracking (messageCreate event)
 
 client.on("messageCreate", async (message): Promise<any> => {
+    // Check if the bot is in test mode and if the user is not an owner
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(message.author.id)) return;
     if (message.author.bot) return;
     if (!message.inGuild()) return;
+    // Check if the guild is already in the activeGuilds collection
     if (activeGuilds.has(message.guildId as string)) {
         const agValue = activeGuilds.get(message.guildId as string);
         activeGuilds.set(message.guildId as string, (agValue as number) + 1);
         Log.info("bot", `Received messageCreate. Guild: ${message.guild?.name} | Author: ${message.author.displayName} (${message.author.username}).`);
     }
     else {
+        // If the guild is not in the activeGuilds collection, add it
         activeGuilds.set(message.guildId as string, 1);
         Log.info("bot", `Received messageCreate. Guild: ${message.guild?.name} | Author: ${message.author.displayName} (${message.author.username}). [GUILD WAS NOT REGISTERED]`);
     }
     const prefix = "b.";
-    const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]);
-    const Lang = foundLang[0] ? foundLang[0].lang : "es";
+    const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]); // Get user language
+    const Lang = foundLang[0] ? foundLang[0].lang : "es"; // If the user has a language set, use it, otherwise use Spanish
+    // Check if the message starts with the prefix and if the user is not an owner
     if (message.content.toLowerCase().startsWith(prefix) && !data.bot.owners.includes(message.author.id)) {
         if (Lang === "es") {
             message.reply("Lo siento, los comandos de prefijo ya no son soportados.");
@@ -115,6 +127,7 @@ client.on("messageCreate", async (message): Promise<any> => {
         }
     }
     if (!message.content.toLowerCase().startsWith(prefix)) return;
+    // Split the message content and get the command and arguments
     const [command, ...args] = message.content.slice(prefix.length).trim().split(" ");
     switch (command) {
         case "shutdown": {
@@ -122,12 +135,12 @@ client.on("messageCreate", async (message): Promise<any> => {
             fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=0", "SAFELY_SHUTTED_DOWN=1"));
             client.destroy();
             process.exit(0);
-        }
+        } // Shutdown the bot
         case "announce": {
             const [language, ...msg] = args;
             await manager.announce(msg.join(" "), language, message.attachments);
             break;
-        }
+        } // Announce a message to all users through the global chat
         case "messages": {
             const [id] = args;
             const msg: any = await db.query("SELECT * FROM global_messages WHERE uid = ?", [id]);
@@ -137,7 +150,7 @@ client.on("messageCreate", async (message): Promise<any> => {
             await message.reply({ files: [`./messages_report_${user.id}.txt`] });
             fs.unlinkSync(`./messages_report_${user.id}.txt`);
             break;
-        }
+        } // Get global chat messages report for a user by ID
         case "invite": {
             const [sid] = args;
             const server = client.guilds.cache.get(sid);
@@ -145,18 +158,20 @@ client.on("messageCreate", async (message): Promise<any> => {
             const channel = server.channels.cache.find(c => c.isTextBased());
             await message.reply({ content: (await channel?.guild.invites.create(channel as TextChannel, { maxAge: 0, maxUses: 0 }) as any).url });
             break;
-        }
+        } // Get an invite for a server (first text channel found)
         case "guilds": {
             fs.writeFileSync("./guilds.txt", client.guilds.cache.map(g => `${g.name} | ${g.memberCount} | ${g.id}`).join("\n"));
             await message.reply({ files: ["./guilds.txt"] });
             fs.unlinkSync('./guilds.txt');
             break;
-        }
+        } // Get a list of guilds the bot is in (name, member count, id)
         case "eval": {
+            // Check if the user is an owner
             if (!data.bot.owners.includes(message.author.id)) return message.reply('no');
-            const targetCode = args.slice(0).join(' ');
+            const targetCode = args.slice(0).join(' '); // Get the code to eval from the message content
             if (!targetCode) return message.reply('You must provide a code to eval.');
             try {
+                // Evaluate the code
                 const start = Date.now();
                 const evalued = eval(targetCode);
                 const done = Date.now() - start;
@@ -182,10 +197,11 @@ client.on("messageCreate", async (message): Promise<any> => {
                             name: "**Output**",
                             value: `\`\`\`js\n${inspect(evalued, { depth: 0 })}\`\`\``
                         }
-                    )
-                message.reply({ embeds: [embed] });
+                    ) // Create an embed with the evaluation results
+                message.reply({ embeds: [embed] }); // Reply with the embed
                 break;
             }
+            // Catch any errors that may occur while evaluating the code and reply with the error
             catch (error) {
                 const errorEmbed = new EmbedBuilder()
                     .setColor('Red')
@@ -212,44 +228,50 @@ client.on("messageCreate", async (message): Promise<any> => {
                     guilds.push({ id: guildId, value: activeGuilds.get(guildId), name: client.guilds.cache.get(guildId)?.name });
                 }
                 return guilds;
-            })()];
-            const sliced = guilds.slice(0, 19);
+            })()]; // Get active guilds and their message count (value)
+            const sliced = guilds.slice(0, 19); // Slice the array to get the first 20 guilds
             if (sliced.length < 1) return await message.reply("No active guilds.");
-            await message.reply("```\n" + `${guilds.length} Guilds. Showing ${sliced.length} (Max 20)\n\n${sliced.map(g => `${g.name} (${g.id}) -> ${g.value}`).join("\n")}` + "\n```");
+            await message.reply("```\n" + `${guilds.length} Guilds. Showing ${sliced.length} (Max 20)\n\n${sliced.map(g => `${g.name} (${g.id}) -> ${g.value}`).join("\n")}` + "\n```"); // Reply with the active guilds
             break;
-        }
+        } // Get active guilds
         case "add_vip": {
             if (!args[0]) return await message.reply("You must provide the user ID.");
+            // Get the arguments from the message content
             const [uid, newTime, timeType] = args;
+            // Check if the arguments are missing and reply with a message if they are missing
             if ([uid, newTime, timeType].some(v => !v)) return await message.reply("Missing arguments. Required arguments: ID TIME TIME_TYPE");
             const multiply = {
                 seconds: 1,
                 minutes: 60,
                 hours: 3600,
                 days: 86400,
-            }
+            } // Time types and their multipliers
             if (isNaN(parseInt(uid))) return await message.reply("Invalid ID.");
             let validUser = false;
             try {
+                // Check if the user exists and if it does, set validUser to true
                 await client.users.fetch(uid);
                 validUser = true;
             }
             catch (error) {
+                // If the user does not exist, reply with a message and break the switch statement
                 await message.reply("Invalid ID.");
                 break;
             }
-            if (isNaN(parseInt(newTime))) return await message.reply("Invalid time provided.");
-            if (!Object.keys(multiply).some(m => m === timeType.toLowerCase())) return await message.reply(`Invalid time type provided. Supported types: \`${Object.keys(multiply).join(", ")}.\``);
-            const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [uid]);
-            const totalTime = (1000 * multiply[timeType as keyof typeof multiply]) * parseInt(newTime);
+            if (isNaN(parseInt(newTime))) return await message.reply("Invalid time provided."); // Check if the time is a number and if it is not, reply with a message and break the switch statement
+            if (!Object.keys(multiply).some(m => m === timeType.toLowerCase())) return await message.reply(`Invalid time type provided. Supported types: \`${Object.keys(multiply).join(", ")}.\``); // Check if the time type is valid and if it is not, reply with a message and break the switch statement
+            const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [uid]); // Check if the user is already VIP
+            const totalTime = (1000 * multiply[timeType as keyof typeof multiply]) * parseInt(newTime); // Calculate the total time in milliseconds
             const now = Date.now();
             const end = now + totalTime;
             if (foundVip[0]) {
+                // If the user is already VIP, update the VIP time
                 await db.query("UPDATE vip_users SET end_date = ? WHERE id = ?", [end, uid]);
                 await message.reply(`VIP time has been updated to ${newTime} ${timeType} for user with ID ${uid}. ${time(Math.round(foundVip[0].end_date / 1000), TimestampStyles.ShortDate)} -> ${time(Math.round(end / 1000), TimestampStyles.ShortDate)} (Ends in ${time(Math.round(end / 1000), TimestampStyles.RelativeTime)})`);
                 break;
             }
             else {
+                // If the user is not VIP, add VIP to the user
                 await db.query("INSERT INTO vip_users SET ?", [{
                     id: uid,
                     start_date: now,
@@ -258,7 +280,7 @@ client.on("messageCreate", async (message): Promise<any> => {
                 await message.reply(`VIP has been added to user with ID ${uid} for ${newTime} ${timeType} -> ${time(Math.round(end / 1000), TimestampStyles.ShortDate)} (${time(Math.round(end / 1000), TimestampStyles.RelativeTime)})`);
                 break;
             }
-        }
+        } // Add VIP to a user
         case "remove_vip": {
             if (!args[0]) return await message.reply("You must provide the user ID.");
             const [uid] = args;
@@ -279,49 +301,52 @@ client.on("messageCreate", async (message): Promise<any> => {
             await db.query("DELETE FROM vip_users WHERE id = ?", [uid]);
             await message.reply(`VIP has been removed from user with ID ${uid} [@${user.username} / ${user.displayName}].`);
             break;
-        }
+        } // Remove VIP from a user
     }
 });
 client.on("interactionCreate", async (interaction): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(interaction.user.id)) return;
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
-    const Lang = foundLang[0] ? foundLang[0].lang : "es";
+    const Lang = foundLang[0] ? foundLang[0].lang : "es"; // If the user has a language set, use it, otherwise use Spanish
     let texts = {
         new: "Hey! Veo que es la primera vez que utilizas uno de mis comandos, por lo menos en esta cuenta jaja. Quiero decirte que no te olvides de leer mi política de privacidad!",
         error: "Whoops... Ha ocurrido un error inesperado, ya he reportado el error pero si éste persiste, puedes notificarlo en el siguiente enlace:",
         loading: "Traduciendo textos (puede tardar un tiempo)...",
         not_vip: "Hmm... No puedes ejecutar este comando si no eres VIP.",
         expired_vip: "¡Vaya! Al parecer tu suscripción VIP ha terminado. He revocado tu acceso VIP."
-    }
+    } // Texts for the interactionCreate event
     if (Lang !== "es") {
-        texts = await utils.autoTranslate(texts, "es", Lang);
+        texts = await utils.autoTranslate(texts, "es", Lang); // Translate the texts to the user's language if it is not Spanish
     }
     if (interaction.isCommand()) {
         const cmd = data.bot.commands.get(interaction.commandName as string);
         if (!cmd) {
+            // If the command is not found, reply with an error message
             return await interaction.reply({ content: "```\n" + `/${interaction.commandName}\n ${utils.createArrows(`${interaction.command?.name}`.length)}\n\nERR: Unknown slash command` + "\n```", ephemeral: true });
         }
         try {
-            await interaction.reply({ ephemeral: cmd.ephemeral as boolean, content: Lang !== "es" ? `${texts.loading} <a:discordproloading:875107406462472212>` : `<a:discordproloading:875107406462472212>` });
+            await interaction.reply({ ephemeral: cmd.ephemeral as boolean, content: Lang !== "es" ? `${texts.loading} <a:discordproloading:875107406462472212>` : `<a:discordproloading:875107406462472212>` }); // Reply with a loading message
             await cmd.execute(interaction, Lang);
-            await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE");
-            await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]);
-            const foundU: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [interaction.user.id]);
-            const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [interaction.user.id]);
+            await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE"); // Update the last command executed
+            await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]); // Insert the executed command into the executed_commands table
+            const foundU: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [interaction.user.id]); // Check if the user exists in the database
+            const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [interaction.user.id]); // Check if the user is VIP
             if (foundVip[0] && foundVip[0].end_date <= Date.now()) {
                 await db.query("DELETE FROM vip_users WHERE id = ?", [interaction.user.id]);
                 await interaction.followUp({ content: texts.expired_vip, ephemeral: true });
-            }
+            } // If the user is VIP and the VIP time has expired, remove the VIP from the user
             if (foundU[0]) {
                 await db.query("UPDATE discord_users SET command_executions = command_executions + 1, pfp = ?, username = ? WHERE id = ?", [interaction.user.displayAvatarURL({ size: 1024 }), interaction.user.username, interaction.user.id]);
-            }
+            } // If the user exists in the database, update the user's data
             else {
+                // If the user does not exist in the database, insert the user into the database
                 await db.query("INSERT INTO discord_users SET ?", { id: interaction.user.id, pfp: interaction.user.displayAvatarURL({ size: 1024 }), username: interaction.user.username });
                 const msg = await interaction.followUp({ content: `<@${interaction.user.id}>, ${texts.new}: [privacy.txt](https://github.com/Barnie-Corps/barniebot/blob/master/privacy.txt)`, ephemeral: true });
                 await msg.removeAttachments();
             }
         }
         catch (err: any) {
+            // If an error occurs while executing the command, reply with an error message
             if (interaction.deferred || interaction.replied) {
                 try {
                     await interaction.editReply(`${texts.error} https://discord.gg/BKFa6tFYJx`);
@@ -343,20 +368,22 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
         }
     }
     else if (interaction.isButton()) {
+        // If the interaction is a button interaction, split the customId and get the event and arguments
         const [event, ...args] = interaction.customId.trim().split("-");
         switch (event) {
             case "cancel_setup": {
+                // If the event is cancel_setup, cancel the setup
                 const [uid] = args;
                 let text = {
                     value: "Vale, he cancelado el setup.",
                     not_author: "No eres quien ejecutó el comando originalmente."
-                }
+                } // Texts for the cancel_setup event
                 if (Lang !== "es") {
-                    text = await utils.autoTranslate(text, "es", Lang);
+                    text = await utils.autoTranslate(text, "es", Lang); // Translate the texts to the user's language if it is not Spanish
                 }
-                if (interaction.isRepliable() && uid !== interaction.user.id) return await interaction.reply({ content: text.not_author, ephemeral: true });
-                if (interaction.isRepliable()) await interaction.deferUpdate();
-                await interaction.message.edit({ components: [], content: text.value });
+                if (interaction.isRepliable() && uid !== interaction.user.id) return await interaction.reply({ content: text.not_author, ephemeral: true }); // Check if the user is the author of the original command and if not, reply with a message
+                if (interaction.isRepliable()) await interaction.deferUpdate(); // Defer the interaction if it is repliable
+                await interaction.message.edit({ components: [], content: text.value }); // Edit the message to remove the components and reply with a message
                 break;
             }
             case "continue_setup": {
