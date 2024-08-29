@@ -2,6 +2,7 @@ import { ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder, Timesta
 import * as osu from "node-os-utils";
 import utils from "../utils";
 import db from "../mysql/database";
+import * as nodeDiskInfo from "node-disk-info";
 const { mem, cpu, drive } = osu;
 
 export default {
@@ -52,7 +53,13 @@ export default {
         }
         const cpuUsage = `${await cpu.usage()}%`;
         const memUsage = `${Math.floor(process.memoryUsage().heapUsed / 1000000)} MB / ${Math.round((await mem.info()).totalMemMb / 1024)} GB`;
-        const storage = `${(await drive.info("/")).freeGb}/${(await drive.info("/")).totalGb} GB`;
+        let storage;
+        if (process.platform !== "win32") {
+            storage = `${(await drive.info("/")).freeGb}/${(await drive.info("/")).totalGb} GB`;
+        }
+        else {
+            storage = `${byteToGB(nodeDiskInfo.getDiskInfoSync()[0].available)} GB / ${byteToGB(nodeDiskInfo.getDiskInfoSync()[0].used + nodeDiskInfo.getDiskInfoSync()[0].available)} GB`;
+        }
         const last_command_executed: any = await db.query("SELECT * FROM executed_commands WHERE is_last = TRUE");
         const lastU = await interaction.client.users.fetch(last_command_executed[0].uid);
         const embed = new EmbedBuilder()

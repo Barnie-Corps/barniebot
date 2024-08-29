@@ -12,6 +12,7 @@
  * See based.txt to get comments to put in your discord bot based on BarnieBot, you should put 'em but it's not completely necessary.
  * Certificate of registration: https://www.copyrighted.com/work/23e3X3GmrHeYiS1d
  */
+global.ReadableStream = require('web-streams-polyfill').ReadableStream;
 import fetch from "node-fetch";
 globalThis.fetch = fetch as any;
 import * as dotenv from "dotenv";

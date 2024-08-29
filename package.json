@@ -198,6 +198,7 @@
     "util": "^0.10.4",
     "util-deprecate": "^1.0.2",
     "v8-compile-cache": "^2.3.0",
+    "web-streams-polyfill": "^4.0.0",
     "webidl-conversions": "^3.0.1",
     "whatwg-url": "^5.0.0",
     "which": "^2.0.2",
