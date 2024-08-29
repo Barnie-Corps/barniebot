@@ -9,6 +9,8 @@ To get started, you can add the official bot to your server by clicking [here](h
 - **Command-based**: BarnieBot utilizes a command-based system, allowing you to easily interact with the bot using simple commands.
 - **Customizable**: The bot offers various customization options, allowing you to tailor its behavior to suit your server's needs.
 - **Developer friendly**: The bot's source code is well-documented and easy to understand, making it easy for developers to contribute and extend its functionality.
+- **AI Chat**: The bot has an AI chat feature that allows you to have conversations with it. It can remember the chat history and you can delete it at any time.
+- **Global Chat**: The bot has a global chat feature that allows you to chat with users from other servers that have the bot installed and enabled.
 
 ## Contributing
 
