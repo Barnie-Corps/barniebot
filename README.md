@@ -2,7 +2,7 @@
 
 Welcome to the official GitHub repository of BarnieBot's source code! BarnieBot is a powerful Discord bot that offers a wide range of features to enhance your server experience. This repository contains the source code for BarnieBot, including the bot's core functionality, commands, and modules. This bot is not fully completed yet, but it is in a working state.
 
-To get started, you can add the official bot to your server by clicking [here](https://discord.com/api/oauth2/authorize?client_id=900723711840251924&permissions=8&scope=bot%20applications.commands). Make sure to grant the necessary permissions for the bot to function properly. You can also join our official Discord server by clicking [here](https://discord.gg/z5NwZqJs7k) to stay updated on the latest developments and interact with the community.
+To get started, you can add the official bot to your server by clicking [here](https://discord.com/api/oauth2/authorize?client_id=900723711840251924&permissions=8&scope=bot%20applications.commands). Make sure to grant the necessary permissions for the bot to function properly. You can also join our official Discord server by clicking [here](https://discord.com/invite/58Tt83kX9K) to stay updated on the latest developments and interact with the community.
 
 ## Features
 
@@ -20,7 +20,7 @@ Before contributing, please make sure to read our [contribution guidelines](CONT
 
 ## Support
 
-If you encounter any issues or have any questions regarding BarnieBot, please join our official Discord server by clicking [here](https://discord.gg/z5NwZqJs7k). Our friendly community and dedicated support team will be happy to assist you. You can also reach out to us via email at barniecorps@gmail.com
+If you encounter any issues or have any questions regarding BarnieBot, please join our official Discord server by clicking [here](https://discord.com/invite/58Tt83kX9K). Our friendly community and dedicated support team will be happy to assist you. You can also reach out to us via email at barniecorps@gmail.com
 
 ## License
 
