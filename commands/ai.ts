@@ -20,6 +20,10 @@ export default {
         .addSubcommand(s =>
             s.setName("chat")
                 .setDescription("Starts a chat with the AI.")
+        )
+        .addSubcommand(s =>
+            s.setName("clear_history")
+                .setDescription("Clears the chat history.")
         ),
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
@@ -34,6 +38,9 @@ export default {
                 started_chat: "El chat con la Inteligencia Artificial se ha iniciado, puedes decir una de las siguientes frases para detenerla:",
                 stopped_ai: "El chat con la Inteligencia Artificial ha sido detenido.",
                 can_take_time: "Recuerda que la respuesta de la IA puede tomar tiempo, si envías varios mensajes antes de recibir respuesta o empiezas a enviar demasiados mensajes juntos, se te prohibirá el acceso a este comando indefinidamente."
+            },
+            success: {
+                cleared_history: "Historial de chat limpiado."
             }
         }
         if (lang !== "es") {
@@ -52,7 +59,6 @@ export default {
             case "chat": {
                 if (!await utils.isVIP(interaction.user.id) && !data.bot.owners.includes(interaction.user.id)) return await interaction.editReply(texts.errors.not_vip);
                 const collector = interaction.channel?.createMessageCollector({ filter: m => m.author.id === interaction.user.id });
-                let firstMsg = true;
                 await interaction.editReply(`${texts.common.started_chat} \`stop ai, ai stop, detener ia, detener ai\`\n${texts.common.can_take_time}`);
                 collector?.on("collect", async (message): Promise<any> => {
                     await interaction.channel?.sendTyping();
@@ -65,6 +71,11 @@ export default {
                     if (response.length < 1) return await message.reply(texts.errors.no_response);
                     await message.reply(response);
                 });
+            }
+            case "clear_history": {
+                await ai.ClearHistory(interaction.user.id);
+                await interaction.editReply(texts.success.cleared_history);
+                break;
             }
         }
     }
