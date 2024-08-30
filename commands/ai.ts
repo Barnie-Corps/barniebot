@@ -71,6 +71,7 @@ export default {
                     if (response.length < 1) return await message.reply(texts.errors.no_response);
                     await message.reply(response);
                 });
+                break;
             }
             case "clear_history": {
                 await ai.ClearHistory(interaction.user.id);
