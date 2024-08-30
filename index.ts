@@ -364,7 +364,8 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     Log.error("bot", `Couldn't send error message to user ${interaction.user.username}`);
                 }
             }
-            Log.error("bot", `Error executing slash command ${cmd.data.name}\n${err.stack}`);
+            Log.error("bot", `Error executing slash command ${cmd.data.name}`);
+            console.error(err.stack, err);
         }
     }
     else if (interaction.isButton()) {
