@@ -87,5 +87,10 @@ class AiManager extends EventEmitter {
             content: JSON.stringify({ data }),
         }, id]);
     }
+    public async ClearHistory(id: string): Promise<void> {
+        await db.query("DELETE FROM ai_history WHERE uid = ?", [{
+            content: JSON.stringify({ data: [] }),
+        }, id]);
+    }
 }
 export default AiManager;
