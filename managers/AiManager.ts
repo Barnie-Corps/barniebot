@@ -67,7 +67,7 @@ class AiManager extends EventEmitter {
             chat = model.startChat({
                 history: hdata,
                 generationConfig: {
-                    maxOutputTokens: 1024,
+                    maxOutputTokens: 512,
                     temperature: 0.9,
                     topP: 0.9,
                     topK: 40,
