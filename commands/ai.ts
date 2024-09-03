@@ -51,7 +51,7 @@ export default {
             case "ask": {
                 await interaction.editReply(texts.common.thinking);
                 const question = interaction.options.getString("question") as string;
-                const response = await ai.GetResponse(interaction.user.id, question);
+                const response = await ai.GetResponse(interaction.user.id, `Responde a la siguiente pregunta de la forma más corta posible y en el idioma de la pregunta: ${question}`);
                 if (response.length < 1) return await interaction.editReply(texts.errors.no_response);
                 await interaction.editReply(response);
                 break;
