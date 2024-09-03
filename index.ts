@@ -533,6 +533,7 @@ client.on("messageCreate", async (message): Promise<any> => {
 
 client.on("messageCreate", async (message): Promise<any> => {
     if (!message.inGuild()) return;
+    if (message.author.bot) return;
     let filterConfig: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [message.guildId]);
     if (!filterConfig[0]) return;
     filterConfig = filterConfig[0];
@@ -562,6 +563,7 @@ client.on("messageCreate", async (message): Promise<any> => {
         content = content.replace(reg, `\`${utils.createCensored(word.content.length)}\``).replace(new RegExp(/[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi), "[LINK]");
         continue;
     }
+    if (content === message.content) return;
     const { author } = message;
     await message.delete();
     let reference: any;
