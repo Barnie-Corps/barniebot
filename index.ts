@@ -537,7 +537,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (!filterConfig[0]) return;
     filterConfig = filterConfig[0];
     if (!Boolean(filterConfig.enabled)) return;
-    const wordList: any = await db.query("SELECT * FROM filter_words");
+    const wordList: any = await db.query("SELECT * FROM filter_words WHERE guild = ?", [message.guildId]);
     if (!wordList.some((w: any) => message.content.toLowerCase().includes(w.content))) return;
     if (message.member?.permissions.has(PermissionFlagsBits.ManageMessages)) return;
     const webHookData: any = await db.query("SELECT * FROM filter_webhooks WHERE channel = ?", [message.channel.id]);
