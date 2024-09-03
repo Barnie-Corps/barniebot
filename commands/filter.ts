@@ -33,13 +33,13 @@ export default {
                         .setRequired(true)
                 )
                 .addBooleanOption(o =>
-                    o.setName("protected")
-                        .setDescription(`If set true, this word will be added as "protected".`)
-                )
-                .addBooleanOption(o =>
                     o.setName("single")
                         .setDescription("If set true, this word will be considered as a single word (Not part of another word)")
                         .setRequired(true)
+                )
+                .addBooleanOption(o =>
+                    o.setName("protected")
+                        .setDescription(`If set true, this word will be added as "protected".`)
                 )
         )
         .addSubcommand(s =>
