@@ -39,6 +39,7 @@ export default {
                 .addBooleanOption(o =>
                     o.setName("single")
                         .setDescription("If set true, this word will be considered as a single word (Not part of another word)")
+                        .setRequired(true)
                 )
         )
         .addSubcommand(s =>
