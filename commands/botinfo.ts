@@ -58,7 +58,7 @@ export default {
             storage = `${(await drive.info("/")).freeGb}/${(await drive.info("/")).totalGb} GB`;
         }
         else {
-            storage = `${byteToGB(nodeDiskInfo.getDiskInfoSync()[0].available)} GB / ${byteToGB(nodeDiskInfo.getDiskInfoSync()[0].used + nodeDiskInfo.getDiskInfoSync()[0].available)} GB`;
+            storage = `${byteToGB(nodeDiskInfo.getDiskInfoSync()[0].available).toFixed(1)} GB / ${byteToGB(nodeDiskInfo.getDiskInfoSync()[0].used + nodeDiskInfo.getDiskInfoSync()[0].available).toFixed(1)} GB`;
         }
         const last_command_executed: any = await db.query("SELECT * FROM executed_commands WHERE is_last = TRUE");
         const lastU = await interaction.client.users.fetch(last_command_executed[0].uid);
