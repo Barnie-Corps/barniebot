@@ -2,7 +2,7 @@
 
 Welcome to the official GitHub repository of BarnieBot's source code! BarnieBot is a powerful Discord bot that offers a wide range of features to enhance your server experience. This repository contains the source code for BarnieBot, including the bot's core functionality, commands, and modules. This bot is not fully completed yet, but it is in a working state.
 
-To get started, you can add the official bot to your server by clicking [here](https://discord.com/api/oauth2/authorize?client_id=900723711840251924&permissions=8&scope=bot%20applications.commands). Make sure to grant the necessary permissions for the bot to function properly. You can also join our official Discord server by clicking [here](https://discord.com/invite/58Tt83kX9K) to stay updated on the latest developments and interact with the community.
+To get started, you can add the official bot to your server by clicking [here](https://discord.com/oauth2/authorize?client_id=900723711840251924&permissions=564583047949559&integration_type=0&scope=applications.commands+bot). Make sure to grant the necessary permissions for the bot to function properly. You can also join our official Discord server by clicking [here](https://discord.com/invite/58Tt83kX9K) to stay updated on the latest developments and interact with the community.
 
 ## Features
 
