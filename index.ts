@@ -552,7 +552,16 @@ client.on("messageCreate", async (message): Promise<any> => {
         else return 0;
     });
     let content = message.content;
-    if (badWords.length > 0) for (const word of badWords) { const reg = new RegExp(word.content, "ig"); content = content.replace(reg, `\`${utils.createCensored(word.content.length)}\``).replace(new RegExp(/[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi), "[LINK]"); continue }
+    if (badWords.length > 0) for (const word of badWords) {
+        if (word.single) {
+            const reg = new RegExp(`\\b${word.content}\\b`, "ig");
+            content = content.replace(reg, `\`${utils.createCensored(word.content.length)}\``).replace(new RegExp(/[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi), "[LINK]");
+            continue;
+        }
+        const reg = new RegExp(word.content, "ig");
+        content = content.replace(reg, `\`${utils.createCensored(word.content.length)}\``).replace(new RegExp(/[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi), "[LINK]");
+        continue;
+    }
     const { author } = message;
     await message.delete();
     let reference: any;

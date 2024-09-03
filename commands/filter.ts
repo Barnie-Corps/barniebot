@@ -36,6 +36,10 @@ export default {
                     o.setName("protected")
                         .setDescription(`If set true, this word will be added as "protected".`)
                 )
+                .addBooleanOption(o =>
+                    o.setName("single")
+                        .setDescription("If set true, this word will be considered as a single word (Not part of another word)")
+                )
         )
         .addSubcommand(s =>
             s.setName("remove")
@@ -70,9 +74,9 @@ export default {
             s.setName("toggle")
                 .setDescription("Toggles filter status. On -> Off / Off -> On")
         )
-        .addSubcommand(s => 
+        .addSubcommand(s =>
             s.setName("setup")
-            .setDescription("Initializes the filter setup wizard (Can't be executed twice)")
+                .setDescription("Initializes the filter setup wizard (Can't be executed twice)")
         ),
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
@@ -104,6 +108,7 @@ export default {
                 protected_text: "Protegida",
                 filter_content_text: "Palabras en el filtro",
                 results: "Resultados de",
+                single_word: "Esta palabra está marcada como palabra única. (No puede ser parte de otra palabra)"
             },
             setup: {
                 msg: "Estás a punto de inicializar el setup del filtro, ¿Deseas continuar?",
@@ -141,14 +146,15 @@ export default {
                     const word = interaction.options.getString("word") as string;
                     const allow_repeat = interaction.options.getBoolean("allow_repeat") as boolean;
                     const isProtected = interaction.options.getBoolean("protected") as boolean;
+                    const isSingle = interaction.options.getBoolean("single") as boolean;
                     if (!allow_repeat) {
                         const foundWord: any = await db.query("SELECT * FROM filter_words WHERE guild = ? AND content = ?", [interaction.guildId, word.toLowerCase()]);
                         if (foundWord[0]) return await interaction.editReply(texts.errors.repeated);
                         if (isProtected && !interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) return await interaction.editReply(texts.errors.not_admin_add);
-                        await db.query("INSERT INTO filter_words SET ?", [{ guild: interaction.guildId, content: word.toLowerCase(), protected: isProtected ? true : false }]);
+                        await db.query("INSERT INTO filter_words SET ?", [{ guild: interaction.guildId, content: word.toLowerCase(), protected: isProtected ? true : false, single: isSingle ? true : false }]);
                     }
                     if (!Boolean(filterMain.enabled)) await interaction.editReply(`${texts.success.added_word} ${isProtected ? ` ${texts.common.protected_word}` : ""}\n${texts.common.turned_off}`);
-                    else await interaction.editReply(`${texts.success.added_word} ${isProtected ? ` ${texts.common.protected_word}` : ""}`);
+                    else await interaction.editReply(`${texts.success.added_word} ${isProtected ? ` ${texts.common.protected_word}` : ""}${isSingle ? ` ${texts.common.single_word}` : ""}`);
                     break;
                 }
                 case "view": {
@@ -160,7 +166,7 @@ export default {
                     switch (format) {
                         case "file": {
                             const filePath = path.join(__dirname, `filter_content_${interaction.guildId}.txt`);
-                            fs.writeFileSync(filePath, `${texts.common.filter_content_text} [${words.length}]\n\n${mapped.join("\n")}`, { encoding: "utf-8"});
+                            fs.writeFileSync(filePath, `${texts.common.filter_content_text} [${words.length}]\n\n${mapped.join("\n")}`, { encoding: "utf-8" });
                             await interaction.editReply({ content: "<a:marcano:800125893892505662>", files: [filePath] });
                             fs.unlinkSync(filePath);
                             break;
@@ -214,16 +220,16 @@ export default {
                 }
                 case "setup": {
                     const row = new ActionRowBuilder()
-                    .addComponents(
-                        new ButtonBuilder()
-                        .setLabel("Continuar")
-                        .setCustomId(`continue_setup-${interaction.user.id}-${!filterMain ? "0" : "1"}`)
-                        .setStyle(ButtonStyle.Success),
-                        new ButtonBuilder()
-                        .setCustomId("cancel_setup")
-                        .setLabel(texts.setup.cancel_btn)
-                        .setStyle(ButtonStyle.Danger)
-                    )
+                        .addComponents(
+                            new ButtonBuilder()
+                                .setLabel("Continuar")
+                                .setCustomId(`continue_setup-${interaction.user.id}-${!filterMain ? "0" : "1"}`)
+                                .setStyle(ButtonStyle.Success),
+                            new ButtonBuilder()
+                                .setCustomId("cancel_setup")
+                                .setLabel(texts.setup.cancel_btn)
+                                .setStyle(ButtonStyle.Danger)
+                        )
                     await interaction.editReply({ content: texts.setup.msg, components: [row as any] });
                 }
             }
