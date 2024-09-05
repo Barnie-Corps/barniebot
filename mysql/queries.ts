@@ -14,4 +14,6 @@ export default function queries(): void {
     db.query("CREATE TABLE IF NOT EXISTS filter_webhooks (id VARCHAR(255) NOT NULL, token VARCHAR(255) NOT NULL, channel VARCHAR(255) NOT NULL)");
     db.query("CREATE TABLE IF NOT EXISTS vip_users (id VARCHAR(255) NOT NULL, start_date BIGINT(255) NOT NULL, end_date BIGINT(255) NOT NULL)");
     db.query("CREATE TABLE IF NOT EXISTS ai_history (id INT PRIMARY KEY AUTO_INCREMENT, content TEXT NOT NULL, uid VARCHAR(255) NOT NULL)");
+    db.query("CREATE TABLE IF NOT EXISTS registered_accounts (id VARCHAR(255) NOT NULL, email VARCHAR(255) NOT NULL, password TEXT NOT NULL, verified BOOLEAN NOT NULL DEFAULT FALSE, verification_code VARCHAR(255) NOT NULL, verified_at BIGINT(255) NOT NULL DEFAULT 0, created_at BIGINT(255) NOT NULL, last_login BIGINT(255) NOT NULL DEFAULT 0, last_user_logged VARCHAR(255) NOT NULL DEFAULT '0', token VARCHAR(255) NOT NULL DEFAULT '0')");
+    db.query("CREATE TABLE IF NOT EXISTS logins (id INT PRIMARY KEY AUTO_INCREMENT, uid VARCHAR(255) NOT NULL, at BIGINT(255) NOT NULL, status BOOLEAN NOT NULL DEFAULT TRUE)");
 };
