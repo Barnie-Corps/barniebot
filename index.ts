@@ -13,8 +13,7 @@
  * Certificate of registration: https://www.copyrighted.com/work/23e3X3GmrHeYiS1d
  */
 global.ReadableStream = require('web-streams-polyfill').ReadableStream;
-import fetch from "node-fetch";
-globalThis.fetch = fetch as any;
+globalThis.fetch = require("node-fetch");
 import * as dotenv from "dotenv";
 dotenv.config();
 import { EmbedBuilder, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, WebhookClient, TextChannel, Message, time, TimestampStyles, Collection } from "discord.js";
