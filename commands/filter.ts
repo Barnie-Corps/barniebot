@@ -229,6 +229,7 @@ export default {
                             new ButtonBuilder()
                                 .setCustomId("cancel_setup")
                                 .setLabel(texts.setup.cancel_btn)
+                                .setCustomId(`continue_setup-${interaction.user.id}-${!filterMain ? "0" : "1"}`)
                                 .setStyle(ButtonStyle.Danger)
                         )
                     await interaction.editReply({ content: texts.setup.msg, components: [row as any] });
