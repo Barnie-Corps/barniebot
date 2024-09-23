@@ -1,9 +1,7 @@
-import translate from "google-translate-api-x";
 import * as crypto from "crypto";
 import * as async from "async";
 import Workers from "./Workers";
 import path from "path";
-import langs from "langs";
 import db from "./mysql/database";
 import { ChatSession } from "@google/generative-ai";
 const utils = {
