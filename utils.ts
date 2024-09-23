@@ -4,6 +4,17 @@ import Workers from "./Workers";
 import path from "path";
 import db from "./mysql/database";
 import { ChatSession } from "@google/generative-ai";
+import * as nodemailer from "nodemailer";
+import Log from "./Log";
+const transporter = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
+  auth: {
+    user: "santiadjmc@gmail.com",
+    pass: process.env.EMAIL_PASSWORD
+  },
+});
 const utils = {
   createArrows: (length: number): string => {
     let arrows = "";
@@ -217,6 +228,19 @@ const utils = {
     const response = await result.response;
     const text = response.text();
     return text;
+  },
+  sendEmail: async (to: string, subject: string, text: string, html?: string) => {
+    if (!to || !subject || !text) throw new Error("Missing important data in utils.sendEmail");
+    const data = await transporter.sendMail({
+      from: '"BarnieCorps" <santiadjmc@gmail.com>',
+      to,
+      subject,
+      text,
+      html
+    });
+    if (data.rejected.length > 0) {
+      Log.error("system", `${data.rejected.length}/${data.rejected.length + data.accepted.length} couldn't receive the email due to an unknown rejection by the SMTP server.`);
+    }
   }
 };
 export default utils;
