@@ -517,6 +517,35 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
     }
 });
 
+client.on("guildCreate", async (guild): Promise<any> => {
+    const owner = await client.users.fetch(guild.ownerId);
+    const embed = new EmbedBuilder()
+        .setTitle("New guild")
+        .setDescription(`Joined a new guild: ${guild.name} (${guild.id})`)
+        .setColor("Purple")
+        .setFooter({ text: `Owner: ${owner.username} (${owner.id})`, iconURL: owner.displayAvatarURL({ size: 1024 }) })
+    const channel = client.channels.cache.get("876614690658822676") as TextChannel;
+    if (!channel) return;
+    await channel.send({ embeds: [embed] });
+    Log.info("bot", `Joined a new guild: ${guild.name} (${guild.id})`);
+});
+
+client.on("guildDelete", async (guild): Promise<any> => {
+    const owner = await client.users.fetch(guild.ownerId);
+    const embed = new EmbedBuilder()
+        .setTitle("Left guild")
+        .setDescription(`Left a guild: ${guild.name} (${guild.id})`)
+        .setColor("Red")
+        .setFooter({ text: `Owner: ${owner.username} (${owner.id})`, iconURL: owner.displayAvatarURL({ size: 1024 }) })
+    const channel = client.channels.cache.get("876614690658822676") as TextChannel;
+    if (!channel) return;
+    await channel.send({ embeds: [embed] });
+    Log.info("bot", `Left a guild: ${guild.name} (${guild.id})`);
+    db.query("DELETE FROM filter_configs WHERE guild = ?", [guild.id]);
+    db.query("DELETE FROM filter_words WHERE guild = ?", [guild.id]);
+    Log.info("bot", `Deleted filter configs and words for guild ${guild.name} (${guild.id})`);
+});
+
 client.on("messageCreate", async (message): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(message.author.id)) return;
     if (!message.inGuild()) return;
