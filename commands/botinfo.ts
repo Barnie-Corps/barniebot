@@ -18,13 +18,15 @@ export default {
             embed: {
                 title: "Información general",
                 description: "Aquí verás estadísticas generales del bot.",
-                footer: "Santiago Morales © 2020 - 2025 All rights reserved.",
+                footer: "Santiago Morales © 2020 - 2025 Todos los derechos reservados.",
             },
             fields: {
                 database: {
                     users: "Usuarios",
                     title: "Base de datos",
-                    last_command: "Último comando ejecutado"
+                    last_command: "Último comando ejecutado",
+                    normal_messages: "Mensajes normales",
+                    global_messages: "Mensajes globales"
                 },
                 system: {
                     cpu: "Carga de la CPU",
@@ -61,6 +63,8 @@ export default {
             storage = `${byteToGB(nodeDiskInfo.getDiskInfoSync()[0].available).toFixed(1)} GB / ${byteToGB(nodeDiskInfo.getDiskInfoSync()[0].used + nodeDiskInfo.getDiskInfoSync()[0].available).toFixed(1)} GB`;
         }
         const last_command_executed: any = await db.query("SELECT * FROM executed_commands WHERE is_last = TRUE");
+        const totalNormalMessages = utils.sumNumbers((await db.query("SELECT * FROM message_count") as any).map((m: any) => m.count));
+        const totalGlobalMessages = utils.sumNumbers((await db.query("SELECT * FROM global_messages") as any).map((m: any) => m.count));
         const lastU = await interaction.client.users.fetch(last_command_executed[0].uid);
         const embed = new EmbedBuilder()
             .setAuthor({ iconURL: interaction.user.displayAvatarURL(), name: interaction.user.tag })
@@ -80,6 +84,11 @@ export default {
                 {
                     name: texts.fields.system.title,
                     value: `${texts.fields.system.cpu}: ${cpuUsage}\n${texts.fields.system.storage}: ${storage}\nRAM (app): ${memUsage}`,
+                    inline: true
+                },
+                {
+                    name: "Mensajes",
+                    value: `${texts.fields.database.normal_messages}: ${totalNormalMessages}\n${texts.fields.database.global_messages}: ${totalGlobalMessages}`,
                     inline: true
                 }
             )
