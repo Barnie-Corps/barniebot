@@ -562,6 +562,7 @@ client.on("messageCreate", async (message): Promise<any> => {
 client.on("messageCreate", async (message): Promise<any> => {
     if (!message.inGuild()) return;
     if (message.author.bot) return;
+    if (!message.channel.isTextBased()) return;
     let filterConfig: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [message.guildId]);
     if (!filterConfig[0]) return;
     filterConfig = filterConfig[0];
@@ -570,11 +571,15 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (!wordList.some((w: any) => message.content.toLowerCase().includes(w.content))) return;
     if (message.member?.permissions.has(PermissionFlagsBits.ManageMessages)) return;
     const webHookData: any = await db.query("SELECT * FROM filter_webhooks WHERE channel = ?", [message.channel.id]);
-    const webhook = webHookData[0] ? new WebhookClient({ id: webHookData[0].id, token: webHookData[0].token }) : await (message.channel as TextChannel).createWebhook({ name: "Filter WebHook", avatar: client.user?.displayAvatarURL() });
-    if (!webHookData[0]) {
+    let webhook: any;
+    if (webHookData[0]) {
+        webhook = (await (message.channel as TextChannel).fetchWebhooks()).find((h: any) => h.id === webHookData[0].id);
+    }
+    else {
+        webhook = await (message.channel as TextChannel).createWebhook({ name: "Filter Webhook", reason: "Filter webhook" });
         await db.query("INSERT INTO filter_webhooks SET ?", [{ id: webhook.id, token: webhook.token, channel: message.channel.id }]);
     }
-    if (wordList.length < 1) return;
+    if (wordList.length < 1) { console.log("No words found."); return; }
     const badWords = wordList.filter((w: any) => message.content.toLowerCase().includes(w.content)).sort((w1: any, w2: any) => {
         if (w1.content.length > w2.content.length) return -1;
         else if (w2.content.length > w1.content.length) return 1;
@@ -583,8 +588,10 @@ client.on("messageCreate", async (message): Promise<any> => {
     let content = message.content;
     if (badWords.length > 0) for (const word of badWords) {
         if (word.single) {
-            const reg = new RegExp(`\\b${word.content}\\b`, "ig");
-            content = content.replace(reg, `\`${utils.createCensored(word.content.length)}\``).replace(new RegExp(/[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi), "[LINK]");
+            content = content.trim().split(" ").map((w: string) => {
+                if ((new RegExp(word.content, "ig")).test(w)) return `\`${utils.createCensored(word.content.length)}\``;
+                return w;
+            }).join(" ");
             continue;
         }
         const reg = new RegExp(word.content, "ig");
