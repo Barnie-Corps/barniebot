@@ -51,8 +51,7 @@ export default {
                     if (channel.type !== ChannelType.GuildText) return await interaction.editReply(texts.errors.not_valid);
                     let chatdb: any = await db.query("SELECT * FROM globalchats WHERE guild = ?", [interaction.guildId]);
                     const wh = await channel.createWebhook({
-                        name: "GlobalHook",
-                        avatar: client.user?.displayAvatarURL()
+                        name: "GlobalHook"
                     });
                     if (!chatdb[0]) {
                         await db.query("INSERT INTO globalchats SET ?", [{ autotranslate: false, guild: interaction.guildId, channel: channel.id, language: lang, webhook_id: wh.id, webhook_token: wh.token }]);
