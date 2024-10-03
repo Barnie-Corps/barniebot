@@ -24,6 +24,7 @@ The information we collect is used to improve the functionality of BarnieBot and
 - Personalize your experience
 - Improve our services
 - Respond to your inquiries
+Also, some public data as your username can be displayed in some features like the messages top command, but we do not store any other personal information. We may also use your information to contact you with important updates or information about our services. We will not send you any promotional or marketing emails. We may also use your information to investigate and prevent fraud, abuse, or other illegal activities. We may also use your information to comply with applicable laws, regulations, or legal processes.
 
 ## 4. Security
 
@@ -31,7 +32,7 @@ We implement a variety of security measures to maintain the safety of your perso
 
 ## 5. Changes to This Policy
 
-We may update our Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page. We advise you to review this Privacy Policy periodically for any changes, as continued use of BarnieBot constitutes acceptance of the updated policy. This policy was last updated on August 29th, 2024.
+We may update our Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page. We advise you to review this Privacy Policy periodically for any changes, as continued use of BarnieBot constitutes acceptance of the updated policy. This policy was last updated on October 3rd, 2024.
 
 By using BarnieBot, you consent to our Privacy Policy. If you have any questions or concerns about this policy, please contact us at our support server linked in the repository README or via email at barniecorps@gmail.com.
 
