@@ -99,6 +99,16 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(message.author.id)) return;
     if (message.author.bot) return;
     if (!message.inGuild()) return;
+    // Check if user message counter is not in the database
+    const foundCount: any = await db.query("SELECT * FROM message_count WHERE uid = ?", [message.author.id]);
+    if (!foundCount[0]) {
+        // If it is not in the database, add it
+        await db.query("INSERT INTO message_count SET ?", [{ uid: message.author.id }]);
+    }
+    else {
+        // If it is in the database, increment the message count
+        await db.query("UPDATE message_count SET count = ? WHERE uid = ?", [(foundCount[0].count as number) + 1, message.author.id]);
+    }
     // Check if the guild is already in the activeGuilds collection
     if (activeGuilds.has(message.guildId as string)) {
         const agValue = activeGuilds.get(message.guildId as string);
@@ -524,7 +534,7 @@ client.on("guildCreate", async (guild): Promise<any> => {
         .setDescription(`Joined a new guild: ${guild.name} (${guild.id})`)
         .setColor("Purple")
         .setFooter({ text: `Owner: ${owner.username} (${owner.id})`, iconURL: owner.displayAvatarURL({ size: 1024 }) })
-    const channel = client.channels.cache.get("876614690658822676") as TextChannel;
+    const channel = client.channels.cache.get(data.bot.log_channel) as TextChannel;
     if (!channel) return;
     await channel.send({ embeds: [embed] });
     Log.info("bot", `Joined a new guild: ${guild.name} (${guild.id})`);
@@ -537,7 +547,7 @@ client.on("guildDelete", async (guild): Promise<any> => {
         .setDescription(`Left a guild: ${guild.name} (${guild.id})`)
         .setColor("Red")
         .setFooter({ text: `Owner: ${owner.username} (${owner.id})`, iconURL: owner.displayAvatarURL({ size: 1024 }) })
-    const channel = client.channels.cache.get("876614690658822676") as TextChannel;
+    const channel = client.channels.cache.get(data.bot.log_channel) as TextChannel;
     if (!channel) return;
     await channel.send({ embeds: [embed] });
     Log.info("bot", `Left a guild: ${guild.name} (${guild.id})`);
