@@ -241,6 +241,13 @@ const utils = {
     if (data.rejected.length > 0) {
       Log.error("system", `${data.rejected.length}/${data.rejected.length + data.accepted.length} couldn't receive the email due to an unknown rejection by the SMTP server.`);
     }
+  },
+  sumNumbers: (numbers: number[]): number => {
+    let sum = 0;
+    for (const n of numbers) {
+      sum += n;
+    }
+    return sum;
   }
 };
 export default utils;
