@@ -13,6 +13,7 @@
  * Certificate of registration: https://www.copyrighted.com/work/23e3X3GmrHeYiS1d
  */
 global.ReadableStream = require('web-streams-polyfill').ReadableStream;
+global.Headers = require("node-fetch").Headers;
 globalThis.fetch = require("node-fetch");
 import * as dotenv from "dotenv";
 dotenv.config();
