@@ -3,6 +3,7 @@ import db from "../mysql/database";
 import utils from "../utils";
 import data from "../data";
 import ai from "../ai";
+import * as fs from "fs";
 
 export default {
     data: new SlashCommandBuilder()
@@ -29,11 +30,11 @@ export default {
         let texts = {
             errors: {
                 not_vip: "Debes ser VIP para usar esta función.",
-                no_response: "¡Oh no! No pude generar una respuesta, prueba repitiendo lo que dijiste, tal vez cambiando un par de palabras."
+                no_response: "¡Oh no! No pude generar una respuesta, prueba repitiendo lo que dijiste, tal vez cambiando un par de palabras.",
+                long_response: "¡Oh no! La respuesta es demasiado larga, enviaré la respuesta como archivo de texto con formato Markdown.",
             },
             common: {
                 question: "Tu pregunta fue:",
-                answer: "Aquí está mi respuesta a tu pregunta:",
                 thinking: "Pensando...",
                 started_chat: "El chat con la Inteligencia Artificial se ha iniciado, puedes decir una de las siguientes frases para detenerla:",
                 stopped_ai: "El chat con la Inteligencia Artificial ha sido detenido.",
@@ -53,6 +54,13 @@ export default {
                 const question = interaction.options.getString("question") as string;
                 const response = await ai.GetResponse(interaction.user.id, `Responde a la siguiente pregunta de la forma más corta posible y en el idioma de la pregunta: ${question}`);
                 if (response.length < 1) return await interaction.editReply(texts.errors.no_response);
+                if (response.length > 2000) {
+                    const filename = `./ai-response-${Date.now()}.md`;
+                    fs.writeFileSync(filename, response, "utf-8");
+                    await interaction.editReply({ content: texts.errors.long_response, files: [filename] });
+                    fs.unlinkSync(filename);
+                    return;
+                }
                 await interaction.editReply(response);
                 break;
             }
@@ -69,6 +77,13 @@ export default {
                     }
                     const response = await ai.GetResponse(interaction.user.id, message.content);
                     if (response.length < 1) return await message.reply(texts.errors.no_response);
+                    if (response.length > 2000) {
+                        const filename = `./ai-response-${Date.now()}.md`;
+                        fs.writeFileSync(filename, response, "utf-8");
+                        await message.reply({ content: texts.errors.long_response, files: [filename] });
+                        fs.unlinkSync(filename);
+                        return;
+                    }
                     await message.reply(response);
                 });
                 break;
