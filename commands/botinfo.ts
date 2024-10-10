@@ -38,7 +38,8 @@ export default {
                     totalUsers: "Usuarios totales",
                     guilds: "Servidores",
                     channels: "Canales"
-                }
+                },
+                messages: "Mensajes"
             }
         }
         let needTranslation: boolean = false;
@@ -87,7 +88,7 @@ export default {
                     inline: true
                 },
                 {
-                    name: "Mensajes",
+                    name: texts.fields.messages,
                     value: `${texts.fields.database.normal_messages}: ${totalNormalMessages}\n${texts.fields.database.global_messages}: ${totalGlobalMessages}`,
                     inline: true
                 }
