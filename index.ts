@@ -600,7 +600,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (badWords.length > 0) for (const word of badWords) {
         if (word.single) {
             content = content.trim().split(" ").map((w: string) => {
-                if ((new RegExp(word.content, "ig")).test(w)) return `\`${utils.createCensored(word.content.length)}\``;
+                if (new RegExp(`\\b${word.content}\\b`, "ig").test(w)) return `\`${utils.createCensored(word.content.length)}\``;
                 return w;
             }).join(" ");
             continue;
