@@ -37,23 +37,10 @@ const utils = {
     }
     return censor;
   },
-  translate: async (
-    text: string,
-    from: string,
-    target: string
-  ): Promise<any> => {
+  translate: async (text: string, from: string, target: string): Promise<any> => {
     return new Promise((resolve, reject) => {
-      const worker =
-        Workers.getAvailableWorker("translate") ??
-        (Workers.createWorker(
-          path.join(__dirname, "workers/translate.js"),
-          "translate"
-        ) as unknown as { type: string; worker: Worker; id: string });
-      const message = Workers.postMessage(worker.id, {
-        text,
-        from,
-        to: target,
-      });
+      const worker = Workers.getAvailableWorker("translate") ?? (Workers.createWorker(path.join(__dirname, "workers/translate.js"), "translate") as unknown as { type: string; worker: Worker; id: string });
+      const message = Workers.postMessage(worker.id, {text, from, to: target});
       Workers.on("message", async (data) => {
         if (data.id !== worker.id) return;
         if (data.message.id !== message) return;
@@ -71,20 +58,9 @@ const utils = {
       });
     });
   },
-  autoTranslate: async (
-    obj: any,
-    language: string,
-    target: string
-  ): Promise<typeof obj> => {
-    if (typeof obj !== "object" || Array.isArray(obj))
-      throw new TypeError(
-        `The autoTranslate function takes as first argument an object, got ${Array.isArray(obj) ? "Array" : typeof obj
-        }`
-      );
-    if (typeof language !== "string")
-      throw new TypeError(
-        `The autoTranslate function takes as second argument a string, got ${typeof language}`
-      );
+  autoTranslate: async (obj: any, language: string, target: string): Promise<typeof obj> => {
+    if (typeof obj !== "object" || Array.isArray(obj)) throw new TypeError(`The autoTranslate function takes as first argument an object, got ${Array.isArray(obj) ? "Array" : typeof obj}`);
+    if (typeof language !== "string") throw new TypeError(`The autoTranslate function takes as second argument a string, got ${typeof language}`);
     const keys = Object.keys(obj);
     const newObj = obj;
     const validKeys: string[] = [];
@@ -94,6 +70,7 @@ const utils = {
         newObj[k] = newProperty;
         continue;
       }
+      if (typeof obj[k] !== "string") continue;
       validKeys.push(k);
     }
     const translateObj: any = new Object();
