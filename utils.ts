@@ -216,7 +216,7 @@ const utils = {
       html
     });
     if (data.rejected.length > 0) {
-      Log.error("system", `${data.rejected.length}/${data.rejected.length + data.accepted.length} couldn't receive the email due to an unknown rejection by the SMTP server.`);
+      Log.error(`${data.rejected.length}/${data.rejected.length + data.accepted.length} couldn't receive the email due to an unknown rejection by the SMTP server.`);
     }
   },
   sumNumbers: (numbers: number[]): number => {

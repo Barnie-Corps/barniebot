@@ -1,4 +1,4 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder, } from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder, TextChannel, } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
 import data from "../data";
@@ -66,10 +66,12 @@ export default {
             }
             case "chat": {
                 if (!await utils.isVIP(interaction.user.id) && !data.bot.owners.includes(interaction.user.id)) return await interaction.editReply(texts.errors.not_vip);
-                const collector = interaction.channel?.createMessageCollector({ filter: m => m.author.id === interaction.user.id });
+                const collector = (interaction.channel as any).createMessageCollector({ 
+                    filter: (m: { author: { id: string } }) => m.author.id === interaction.user.id 
+                });
                 await interaction.editReply(`${texts.common.started_chat} \`stop ai, ai stop, detener ia, detener ai\`\n${texts.common.can_take_time}`);
-                collector?.on("collect", async (message): Promise<any> => {
-                    await interaction.channel?.sendTyping();
+                collector?.on("collect", async (message: any): Promise<any> => {
+                    await (interaction.channel as TextChannel).sendTyping?.();
                     if (["stop ai", "detener ai", "detener ia", "ai stop"].some(stop => message.content.toLowerCase().includes(stop))) {
                         await interaction.followUp(texts.common.stopped_ai);
                         collector?.stop();

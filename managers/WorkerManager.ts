@@ -94,12 +94,16 @@ export default class WorkerManager extends EventEmitter {
         if (this.Cache.filter(w => w.type === type).size >= this.typeLimit && !force) return this.getAvailableWorker(type);
         const worker = new Worker(path, { ...options, workerData: { id, data: data ?? undefined } });
         this.Cache.set(id, { type, worker, id });
-        worker.on("online", () => Log.info("workers", `Worker with ID ${id} and type ${type} online and running on ${path}${this.Cache.filter(w => w.type === type).size > this.typeLimit ? `. The workers type limit has been exceeded by the ${type} type..` : this.Cache.filter(w => w.type === type).size === this.typeLimit ? `. The workers type limit has been reached by the type ${type}` : ""}`));
+        worker.on("online", () => Log.info(`Worker with ID ${id} and type ${type} online and running on ${path}${this.Cache.filter(w => w.type === type).size > this.typeLimit ? `. The workers type limit has been exceeded by the ${type} type..` : this.Cache.filter(w => w.type === type).size === this.typeLimit ? `. The workers type limit has been reached by the type ${type}` : ""}`, { workerId: id, workerType: type }));
         worker.on("message", message => {
             if (this.RunningCache.has(id)) this.RunningCache.delete(id);
             this.emit("message", { id, message });
         });
-        worker.on("exit", c => { Log.info("workers", `Worker with ID ${id} and type ${type} exited with code ${c}`); this.Cache.delete(id); this.RunningCache.delete(id) });
+        worker.on("exit", c => { 
+            Log.info(`Worker with ID ${id} and type ${type} exited with code ${c}`, { workerId: id, workerType: type, exitCode: c }); 
+            this.Cache.delete(id); 
+            this.RunningCache.delete(id) 
+        });
         return { id, worker, type };
     };
 
@@ -156,10 +160,10 @@ export default class WorkerManager extends EventEmitter {
             this.getWorker(id)?.workerData.worker.terminate();
             this.Cache.delete(id);
             if (this.RunningCache.has(id)) {
-                Log.warn("workers", `Worker with ID ${id} and type ${workerData?.type} was running a task when terminated.`);
+                Log.warn(`Worker with ID ${id} and type ${workerData?.type} was running a task when terminated.`, { workerId: id, workerType: workerData?.type });
                 this.RunningCache.delete(id);
             }
-            else Log.info("workers", `Worker with ID ${id} and type ${workerData?.type} was terminated.`);
+            else Log.info(`Worker with ID ${id} and type ${workerData?.type} was terminated.`, { workerId: id, workerType: workerData?.type });
         }
     };
 

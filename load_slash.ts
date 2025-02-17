@@ -10,12 +10,12 @@ export default async function load_slash() {
     }
 
     const rest = new REST({ version: '10' }).setToken(data.bot.token);
-    Log.info("bot", "Refreshing global application commands...");
+    Log.info("Refreshing global application commands...", { component: "CommandLoader" });
     const loaded = await rest.put(
         Routes.applicationCommands(process.env.DISCORD_BOT_ID as string),
         {
             body: rawCommands
         }
     );
-    Log.success("bot", "Global application commands successfully refreshed.");
+    Log.success("Global application commands refreshed", { component: "CommandLoader", commandCount: rawCommands.length });
 }

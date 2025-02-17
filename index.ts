@@ -54,22 +54,32 @@ const client = new Client({
         }
         // Catch any errors that may occur while loading the command file
         catch (err: any) {
-            Log.error("commands", `Couldn't load command file '${cmdFile}' properly due to an unexpected error:\n${err.stack}`);
+            Log.error("Command loading failed", new Error(`Failed to load command file '${cmdFile}': ${err.stack}`));
         }
     }
     // Log the amount of commands loaded
-    Log.success("commands", `Successfully loaded ${data.bot.commands.size}/${commandsDir.length} commands.`);
+    Log.success(`Commands loaded successfully`, { 
+        component: "CommandLoader",
+        loadedCommands: data.bot.commands.size,
+        totalCommands: commandsDir.length
+    });
 })();
 
 client.on("ready", async (): Promise<any> => {
-    Log.success("bot", `Successfully logged in at discord as ${client.user?.tag}`);
+    Log.success(`Bot logged in successfully`, { 
+        component: "Bot",
+        username: client.user?.tag
+    });
     queries();
     client.user?.setPresence({ activities: [{ name: `V ${String(process.env.VERSION)}`, type: ActivityType.Playing }] });
     await load_slash(); // Load slash commands
-    Log.info("bot", `Current users cache size: ${client.users.cache.size}`);
+    Log.info(`Cache status`, { 
+        component: "Bot",
+        usersCacheSize: client.users.cache.size
+    });
     data.bot.owners.push(...String(process.env.OWNERS).trim().split(",")); // Load owners from .env
-    Log.info("bot", "Owners data loaded.");
-    Log.info("bot", "Loading workers...");
+    Log.info("Owners data loaded", { component: "Initialization" });
+    Log.info("Loading workers...", { component: "Initialization" });
     // Check if the bot was safely shutted down or not
     if (Number(process.env.SAFELY_SHUTTED_DOWN) === 0 && Number(process.env.NOTIFY_STARTUP) === 1) {
         await manager.announce("¡Hey! He sido reiniciado... Según mis registros, fue un reinicio forzado, por lo cual, no pude avisarles de éste. Lamentamos cualquier inconveniente o interrupción que esto haya causado.", "es");
@@ -77,9 +87,9 @@ client.on("ready", async (): Promise<any> => {
     else if (Number(process.env.NOTIFY_STARTUP) === 1) await manager.announce("¡He vuelto! El chat global está nuevamente en línea.", "es");
     Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", 5); // Create 5 workers for translation tasks
     fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
-    Log.info("bot", "Workers loaded.");
-    Log.info("bot", "Bot is ready.");
-    Log.info("bot", "Checking for AI history entries with a length of over 60,000 characters...");
+    Log.info("Workers loaded", { component: "WorkerSystem" });
+    Log.info("Bot is ready", { component: "System" });
+    Log.info("Checking AI history entries", { component: "Maintenance", action: "length-check" });
     // Check for AI history entries with a length of over 60,000 characters and delete them
     const filterAiHistory = (await db.query("SELECT * FROM ai_history") as any).filter((h: any) => h.content.length >= 60000);
     if (filterAiHistory.length > 0) {
@@ -88,9 +98,9 @@ client.on("ready", async (): Promise<any> => {
             await db.query("DELETE FROM ai_history WHERE id = ?", [h.id]);
             deletedHistory++;
         });
-        Log.warn("bot", `[!] Deleted ${deletedHistory} AI history entries due to a length of over 60,000 characters`);
+        Log.warn("AI history cleanup completed", { deletedEntries: deletedHistory, reason: "length-exceeded-60k" });
     }
-    Log.info("bot", "AI history entries checked.");
+    Log.info("AI history check completed", { component: "Maintenance" });
 });
 
 const activeGuilds: Collection<string, number> = new Collection(); // Active guilds collection for active guilds tracking (messageCreate event)
@@ -114,12 +124,22 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (activeGuilds.has(message.guildId as string)) {
         const agValue = activeGuilds.get(message.guildId as string);
         activeGuilds.set(message.guildId as string, (agValue as number) + 1);
-        Log.info("bot", `Received messageCreate. Guild: ${message.guild?.name} | Author: ${message.author.displayName} (${message.author.username}).`);
+        Log.info("Message received", { 
+            component: "MessageSystem",
+            guild: message.guild?.name,
+            author: message.author.displayName,
+            username: message.author.username
+        });
     }
     else {
         // If the guild is not in the activeGuilds collection, add it
         activeGuilds.set(message.guildId as string, 1);
-        Log.info("bot", `Received messageCreate. Guild: ${message.guild?.name} | Author: ${message.author.displayName} (${message.author.username}). [GUILD WAS NOT REGISTERED]`);
+        Log.info("Message received from unregistered guild", { 
+            component: "MessageSystem",
+            guild: message.guild?.name,
+            author: message.author.displayName,
+            username: message.author.username
+        });
     }
     const prefix = "b.";
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]); // Get user language
@@ -362,8 +382,8 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     await interaction.editReply(`${texts.error} https://discord.gg/BKFa6tFYJx`);
                 }
                 catch (err: any) {
-                    Log.error("bot", `Couldn't send error message to user ${interaction.user.username}`);
-                    await interaction.channel?.send(`<@${interaction.user.id}>, ${texts.error} https://discord.gg/BKFa6tFYJx`);
+                    Log.error("Error sending message to user", new Error(`Failed to send error message to ${interaction.user.username}`));
+                    await (interaction.channel as TextChannel).send(`<@${interaction.user.id}>, ${texts.error} https://discord.gg/BKFa6tFYJx`);
                 }
             }
             else {
@@ -371,10 +391,10 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     await interaction.reply({ ephemeral: true, content: `${texts.error} https://discord.gg/BKFa6tFYJx` });
                 }
                 catch (err: any) {
-                    Log.error("bot", `Couldn't send error message to user ${interaction.user.username}`);
+                    Log.error("Error sending message to user", new Error(`Failed to send error message to ${interaction.user.username}`));
                 }
             }
-            Log.error("bot", `Error executing slash command ${cmd.data.name}`);
+            Log.error("Slash command execution failed", new Error(`Error executing command ${cmd.data.name}`));
             console.error(err.stack, err);
         }
     }
@@ -444,8 +464,8 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 await imessage.edit({ components: [], embeds: [embed], content: "" });
                 // Function to ask for input
                 async function GetResponse(msg: string): Promise<Message<boolean>> {
-                    const temp_msg = await interaction.channel?.send(msg);
-                    const collected = await interaction.channel?.awaitMessages({ filter: m => m.author.id === uid, max: 1 });
+                    const temp_msg = await (interaction.channel as TextChannel).send(msg);
+                    const collected = await (interaction.channel as TextChannel).awaitMessages({ filter: m => m.author.id === uid, max: 1 });
                     await temp_msg?.delete();
                     await collected?.first()?.delete();
                     return collected?.first() as Message<boolean>;
@@ -538,7 +558,11 @@ client.on("guildCreate", async (guild): Promise<any> => {
     const channel = client.channels.cache.get(data.bot.log_channel) as TextChannel;
     if (!channel) return;
     await channel.send({ embeds: [embed] });
-    Log.info("bot", `Joined a new guild: ${guild.name} (${guild.id})`);
+    Log.info("Guild joined", { 
+        component: "GuildSystem",
+        guildName: guild.name,
+        guildId: guild.id
+    });
 });
 
 client.on("guildDelete", async (guild): Promise<any> => {
@@ -551,10 +575,18 @@ client.on("guildDelete", async (guild): Promise<any> => {
     const channel = client.channels.cache.get(data.bot.log_channel) as TextChannel;
     if (!channel) return;
     await channel.send({ embeds: [embed] });
-    Log.info("bot", `Left a guild: ${guild.name} (${guild.id})`);
+    Log.info("Guild left", { 
+        component: "GuildSystem",
+        guildName: guild.name,
+        guildId: guild.id
+    });
     db.query("DELETE FROM filter_configs WHERE guild = ?", [guild.id]);
     db.query("DELETE FROM filter_words WHERE guild = ?", [guild.id]);
-    Log.info("bot", `Deleted filter configs and words for guild ${guild.name} (${guild.id})`);
+    Log.info("Filter configs deleted", { 
+        component: "FilterSystem",
+        guildName: guild.name,
+        guildId: guild.id
+    });
 });
 
 client.on("messageCreate", async (message): Promise<any> => {
@@ -631,7 +663,10 @@ client.on("messageCreate", async (message): Promise<any> => {
             await tmpmsg.delete();
         }
         catch (e: any) {
-            Log.warn("bot", `Can't send filter log to set channel in guild ${message.guild.name}`);
+            Log.warn("Filter log send failed", { 
+                component: "FilterSystem",
+                guildName: message.guild.name
+            });
         }
         if (canSend) {
             let texts = {
@@ -664,13 +699,21 @@ client.on("messageCreate", async (message): Promise<any> => {
 
 manager.on("limit-reached", async u => {
     const user = await client.users.fetch(u.uid);
-    Log.info("bot", `User ${user?.username} has reached messages limit. This user's gonna be ratelimited if he sends another message before time resets.`, true);
+    Log.info("User approaching rate limit", { 
+        component: "RateLimit",
+        username: user?.username,
+        status: "warning"
+    });
     await manager.announce(`User ${user?.username} has reached messages limit. This user's gonna be ratelimited if he sends another message before time resets. Time remaining: ${u.time_left / 1000} seconds.`, "en");
 });
 manager.on("limit-exceed", async u => {
     const user = await client.users.fetch(u.uid);
     manager.ratelimit(u.uid, user?.username);
-    Log.info("bot", `User ${user?.username} has been ratelimited for ${manager.options.ratelimit_time / 1000} seconds.`, true);
+    Log.info("User rate limited", { 
+        component: "RateLimit",
+        username: user?.username,
+        duration: manager.options.ratelimit_time / 1000
+    });
 });
 
 client.login(data.bot.token);

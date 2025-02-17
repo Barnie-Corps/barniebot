@@ -10,8 +10,7 @@ class AiManager extends EventEmitter {
     private ratelimits: Map<string, Ratelimit> = new Map();
     private chats: Map<string, ChatSession> = new Map();
     constructor(private ratelimit: number, private max: number, private timeout: number) {
-        if (!Log.sources.includes("ai")) Log.sources.push("ai");
-        Log.info("ai", "AI Manager initialized");
+        Log.info("AiManager initialized", { component: "AiManager" });
         setInterval(() => this.ClearTimeouts(), 1000);
         super();
     }

@@ -44,8 +44,8 @@ export default class ChatManager extends EventEmitter {
         }
     };
     public async processMessage(message: Message<true>): Promise<any> {
-        if (blacklist.includes(message.author.id)) { message.reply("No."); return Log.info("bot", "Ignoring blacklisted user.") }
-        if (this.isRatelimited(message.author.id)) return Log.info("bot", `Ignoring user ${message.author.username} as they're ratelimited.`);
+        if (blacklist.includes(message.author.id)) { message.reply("No."); return Log.info("Ignoring blacklisted user.", { userId: message.author.id }) }
+        if (this.isRatelimited(message.author.id)) return Log.info(`Ignoring user ${message.author.username} as they're ratelimited.`, { userId: message.author.id, username: message.author.username });
         const start = Date.now();
         let guilds: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
         let userLanguage: any = (await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as any)[0]?.lang ?? "es";
@@ -91,8 +91,7 @@ export default class ChatManager extends EventEmitter {
                     done(null, true);
                 }
                 catch (err: any) {
-                    Log.error("bot", `Couldn't send global message to guild ${g.name}`);
-                    console.log(err.stack);
+                    Log.warn(`Couldn't send global message to guild ${g.name}`, { guildId: g.id, guildName: g.name });                    console.log(err.stack);
                     await message.reactions.removeAll();
                     message.react("800125816633557043");
                     message.react("869607044892741743");
@@ -104,8 +103,19 @@ export default class ChatManager extends EventEmitter {
         await utils.parallel(parallelObject);
         const end = Date.now();
         await message.reactions.removeAll();
-        if ((end - start) >= 900) Log.info("chat-manager", `Slow dispatch of message with ID ${message.id} from author ${message.author.username} (${message.author.id}). Message dispatch took ${end - start} ms`, true);
-        else Log.info("chat-manager", `Message with ID ${message.id} from author ${message.author.username} (${message.author.id}) dispatched in ${end - start} ms`);
+        if ((end - start) >= 900) Log.info(`Slow dispatch of message with ID ${message.id} from author ${message.author.username}`, { 
+            messageId: message.id, 
+            authorId: message.author.id, 
+            username: message.author.username,
+            dispatchTime: end - start,
+            slow: true
+        });
+        else Log.info(`Message dispatch completed`, { 
+            messageId: message.id, 
+            authorId: message.author.id, 
+            username: message.author.username,
+            dispatchTime: end - start
+        });
     };
     public async announce(message: string, language: string, attachments?: Collection<string, Attachment>): Promise<void> {
         const guilds: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
@@ -113,7 +123,7 @@ export default class ChatManager extends EventEmitter {
         for (const graw of guilds) {
             const g = client.guilds.cache.get(graw.guild) as Guild;
             if (!g) {
-                Log.info("chat-manager", `Couldn't find guild with ID ${graw.guild}, this guild entry has been deleted.`);
+                Log.info(`Couldn't find guild with ID ${graw.guild}, this guild entry has been deleted.`, { guildId: graw.guild });
                 await db.query("DELETE FROM globalchats WHERE guild = ?", [graw.guild]);
                 continue;
             }
@@ -140,7 +150,7 @@ export default class ChatManager extends EventEmitter {
                     });
                 }
                 catch (err: any) {
-                    Log.error("bot", `Couldn't send global message to guild ${g.name}`);
+                    Log.warn(`Couldn't send global message to guild ${g.name}`, { guildId: g.id, guildName: g.name });
                 }
                 done(null, true);
             };
@@ -164,7 +174,7 @@ export default class ChatManager extends EventEmitter {
             const newv = v;
             if (v.time_left === 0) {
                 this.ratelimits.delete(k);
-                Log.info("bot", `User ID ${k} removed from ratelimit`);
+                Log.info(`User removed from ratelimit`, { userId: k });
                 await this.announce(`User ${v.username} ratelimit has been removed.`, "en");
                 continue;
             }
