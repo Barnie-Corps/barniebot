@@ -1,38 +1,95 @@
-BarnieBot Privacy Policy
+# BarnieBot Privacy Policy
 
-# Privacy Policy
+*Last updated: February 17, 2024*
 
-## 1. Introduction
+## Table of Contents
+1. [Introduction](#introduction)
+2. [Information We Collect](#information-we-collect)
+3. [Data Retention and Deletion](#data-retention-and-deletion)
+4. [How We Use Your Information](#how-we-use-your-information)
+5. [Data Security](#data-security)
+6. [Your Rights](#your-rights)
+7. [Updates to This Policy](#updates-to-this-policy)
+8. [Contact Us](#contact-us)
 
-We are committed to respecting and protecting the privacy of all users who interact with our Discord bot, BarnieBot. This Privacy Policy outlines the types of information we collect, how we use it, and the measures we take to secure it.
+## Introduction
+BarnieBot is committed to protecting your privacy and ensuring transparent data practices. This policy details our approach to data collection and protection.
 
-## 2. Information We Collect
+## Information We Collect
 
-We collect the following public data from Discord:
-
-- Profile picture
+### Public Discord Data
+- Discord User ID
 - Username
-- Discord ID
-- Command executions (both count and complete log)
+- Profile picture
+- Server information for servers where BarnieBot is present
 
-We also store messages, including their [encrypted] content, when they're sent through the bot's global chat for security purposes. This information cannot be deleted. Additionally, we collect public guild info and bot interaction statistics. When using our AI feature, we store the chat history so you can continue the conversation later, but this data is not shared with any third parties, you can delete it at any time and, in case that data passes the 60,000 characters limit, it will be automatically deleted. We also store the user's language preference, which can be changed at any time. We do not store any other personal information. We do not store any payment information, as we do not offer any paid services yet. Once any deletable data is deleted, it is permanently removed from our servers and cannot be recovered.
+### Usage Data
+- Command execution history and statistics
+- Bot interaction metrics
+- Language preferences
 
-## 3. Use of Information
+### Feature-Specific Data
+1. **Global Chat**
+   - Message content (encrypted)
+   - Message metadata
+   - This data is retained for security purposes and cannot be deleted
 
-The information we collect is used to improve the functionality of BarnieBot and enhance user experience. We do not share or sell your information to any third parties. We may use your information to:
-- Provide you with the services you request
-- Personalize your experience
-- Improve our services
-- Respond to your inquiries
-Also, some public data as your username can be displayed in some features like the messages top command, but we do not store any other personal information. We may also use your information to contact you with important updates or information about our services. We will not send you any promotional or marketing emails. We may also use your information to investigate and prevent fraud, abuse, or other illegal activities. We may also use your information to comply with applicable laws, regulations, or legal processes.
+2. **AI Chat Feature**
+   - Conversation history
+   - Limited to 60,000 characters
+   - Automatically deleted when limit is reached
+   - Can be manually deleted at any time
 
-## 4. Security
+## Data Retention and Deletion
+- AI chat history: Deletable on request
+- Command logs: Retained for 30 days
+- Global chat messages: Permanently retained for security
+- Language preferences: Modifiable at any time
 
-We implement a variety of security measures to maintain the safety of your personal information. We are committed to protecting your information to the best of our ability. If necessary, our dev(s) can join your guild through a staff command that generates an invitation to your server. We do not share it with non-staffs.
+## How We Use Your Information
+1. **Service Provision**
+   - Command processing
+   - Feature customization
+   - User experience optimization
 
-## 5. Changes to This Policy
+2. **Public Features**
+   - Leaderboard displays
+   - Global chat functionality
+   - Server statistics
 
-We may update our Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page. We advise you to review this Privacy Policy periodically for any changes, as continued use of BarnieBot constitutes acceptance of the updated policy. This policy was last updated on October 3rd, 2024.
+3. **Support and Security**
+   - Issue investigation
+   - Abuse prevention
+   - Technical support
 
-By using BarnieBot, you consent to our Privacy Policy. If you have any questions or concerns about this policy, please contact us at our support server linked in the repository README or via email at barniecorps@gmail.com.
+## Data Security
+- End-to-end encryption for sensitive data
+- Regular security audits
+- Strict access controls
+- Staff access monitoring
+- Secure server infrastructure
+
+## Your Rights
+You have the right to:
+- Access your data
+- Delete eligible data
+- Modify language preferences
+- Opt-out of features
+- Request data export
+
+## Updates to This Policy
+We may update this policy to reflect:
+- New features
+- Changed practices
+- Legal requirements
+
+Significant changes will be announced in our Discord server.
+
+## Contact Us
+- Email: barniecorps@gmail.com
+- Discord: [Support Server](https://discord.com/invite/58Tt83kX9K)
+- GitHub Issues: For technical concerns
+
+---
+By using BarnieBot, you agree to this privacy policy.
 

@@ -1,27 +1,92 @@
-# Usage Policy
-Welcome to BarnieBot! By using our services, you agree to comply with the following usage policy. Please read this document carefully to understand your rights and responsibilities when using the BarnieBot Discord bot.
+# BarnieBot Usage Policy
 
-1. **Authorized Use**: BarnieBot is intended for lawful and ethical purposes only. You may use our services for personal or business use, as long as it does not violate any applicable laws or regulations. We reserve the right to restrict or terminate access to our services for users who misuse or abuse them.
+*Last Updated: February 17, 2024*
 
-2. **Prohibited Activities**: The following activities are strictly prohibited when using BarnieBot:
-    - Engaging in any illegal activities.
-    - Harassing, threatening, or abusing others.
-    - Uploading or sharing any content that is offensive, discriminatory, or violates the rights of others.
-    - Attempting to gain unauthorized access to BarnieBot's systems or data.
-    - Disrupting or interfering with the proper functioning of BarnieBot or its services.
-    - Misrepresenting yourself or your affiliation with BarnieBot.
+## Overview
+This Usage Policy ("Policy") governs the use of BarnieBot ("the Bot") Discord bot service. By using BarnieBot, you agree to comply with this Policy.
 
-3. **Data Privacy**: We take data privacy seriously. BarnieBot collects and stores user data solely for the purpose of providing our services. We do not sell or share user data with third parties without explicit consent, unless required by law. Users have the right to request access to, correction of, or deletion of their personal data unless it is necessary for legal or security reasons.
+## 1. Acceptable Use
+### Permitted Uses
+- Discord server management and moderation
+- Community engagement features
+- AI chat interactions
+- Global chat participation
+- User statistics tracking
+- Language customization
 
-4. **Intellectual Property**: BarnieBot respects intellectual property rights. Users are responsible for ensuring that any content they upload or share does not infringe upon the copyrights or trademarks of others. If you believe that your intellectual property rights have been violated, please contact us immediately.
+### Service Limitations
+- Rate limits apply to prevent abuse
+- API usage restrictions
+- Storage limitations for AI chat history
+- Command cooldowns where applicable
 
-5. **Disclaimer**: BarnieBot is provided "as is" without any warranties or guarantees. We do not guarantee the accuracy, reliability, or availability of our services. Users are responsible for their own actions and use BarnieBot at their own risk. We are not liable for any damages or losses resulting from the use of our services.
+## 2. Prohibited Activities
+Users SHALL NOT:
+- Attempt to bypass bot restrictions
+- Abuse bot features or commands
+- Use the bot for spam or harassment
+- Exploit bugs or vulnerabilities
+- Reverse engineer the bot
+- Access unauthorized data
+- Use the bot for illegal purposes
+- Share explicit or inappropriate content
 
-6. **Termination**: BarnieBot reserves the right to terminate or suspend user accounts that violate this usage policy or engage in any unauthorized or harmful activities. We may also take legal action against users who violate our terms of service.
+## 3. User Responsibilities
+Users MUST:
+- Follow Discord's Terms of Service
+- Report bugs and vulnerabilities
+- Respect other users' privacy
+- Use commands appropriately
+- Maintain secure access credentials
+- Follow server-specific rules
 
-By using BarnieBot, you acknowledge and agree to abide by this usage policy. Failure to comply may result in the termination of your account and legal consequences.
+## 4. Data Usage
+### Collection
+- Limited to necessary operational data
+- User preferences and settings
+- Command usage statistics
+- Chat logs for security purposes
 
-If you have any questions or concerns regarding this usage policy, please contact our support team at barniecorps@gmail.com. Thank you for using BarnieBot!
+### User Rights
+- Access to personal data
+- Data modification requests
+- Data deletion (where applicable)
+- Privacy controls
 
-License: Santiago Morales
+## 5. Service Reliability
+- No guaranteed uptime
+- Maintenance windows as needed
+- Feature availability may vary
+- Updates may affect functionality
+
+## 6. Enforcement
+We reserve the right to:
+- Suspend or terminate access
+- Report violations to Discord
+- Take legal action if necessary
+- Modify features without notice
+- Remove harmful content
+
+## 7. Liability
+BarnieBot and its developers:
+- Provide the service "AS IS"
+- Make no warranties
+- Are not liable for damages
+- Reserve all legal rights
+
+## 8. Changes to Policy
+- Policy updates without notice
+- Continued use implies acceptance
+- Major changes will be announced
+- User notification via Discord
+
+## 9. Contact
+For policy questions or support:
+- Email: barniecorps@gmail.com
+- Discord: [Support Server](https://discord.com/invite/58Tt83kX9K)
+- GitHub: [Issues](https://github.com/santiadjmc/barniebot/issues)
+
+## License and Attribution
+Copyright © 2024 Santiago Morales (BarnieCorps)
+All rights reserved.
 

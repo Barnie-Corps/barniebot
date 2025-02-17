@@ -1,19 +1,81 @@
-# BarnieBot Code of Conduct
+# Contributor Covenant Code of Conduct
 
-BarnieBot is committed to providing a welcoming and inclusive environment for all users. We expect all users to adhere to the following code of conduct:
+## Our Pledge
 
-1. **Be respectful**: Treat others with respect and kindness. Do not engage in any form of harassment, discrimination, or offensive behavior. Respect the opinions and boundaries of others.
+We as members, contributors, and leaders of the BarnieBot community pledge to make participation in our
+community a harassment-free experience for everyone, regardless of age, body size, visible or invisible
+disability, ethnicity, sex characteristics, gender identity and expression, level of experience,
+education, socio-economic status, nationality, personal appearance, race, religion, or sexual identity
+and orientation.
 
-2. **Maintain a safe environment**: Do not share or promote any content that is harmful, hateful, or violates the rights of others. Report any inappropriate behavior to the moderation team.
+We pledge to act and interact in ways that contribute to an open, welcoming, diverse, inclusive, and
+healthy community.
 
-3. **Follow Discord's Terms of Service**: Abide by Discord's terms of service and community guidelines while using BarnieBot. Do not engage in any activities that violate Discord's policies.
+## Our Standards
 
-4. **Use appropriate language**: Avoid using offensive or inappropriate language in any interactions. Keep conversations civil and constructive.
+Examples of behavior that contributes to a positive environment:
 
-5. **Be mindful of others**: Be considerate of others' opinions, experiences, and backgrounds. Avoid engaging in arguments or personal attacks.
+* Demonstrating empathy and kindness toward other people
+* Being respectful of differing opinions, viewpoints, and experiences
+* Giving and gracefully accepting constructive feedback
+* Accepting responsibility and apologizing to those affected by our mistakes
+* Focusing on what is best for the overall community
 
-6. **Report any issues**: If you encounter any violations of this code of conduct, please report them to the BarnieBot moderation team. Do not engage in retaliatory behavior.
+Examples of unacceptable behavior:
 
-Failure to comply with this code of conduct may result in temporary or permanent removal from BarnieBot's services. We reserve the right to take appropriate action to maintain a safe and welcoming environment for all users.
+* The use of sexualized language or imagery, and sexual attention or advances
+* Trolling, insulting or derogatory comments, and personal or political attacks
+* Public or private harassment
+* Publishing others' private information without explicit permission
+* Other conduct which could reasonably be considered inappropriate in a professional setting
 
-By using BarnieBot, you agree to abide by this code of conduct. If you have any questions or concerns, please contact us at barniecorps@gmail.com
+## Enforcement Responsibilities
+
+Community leaders are responsible for clarifying and enforcing our standards of acceptable behavior and
+will take appropriate and fair corrective action in response to any behavior that they deem
+inappropriate, threatening, offensive, or harmful.
+
+## Enforcement
+
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the BarnieBot
+team responsible for enforcement at barniecorps@gmail.com. All complaints will be reviewed and
+investigated promptly and fairly.
+
+## Enforcement Guidelines
+
+Community leaders will follow these Community Impact Guidelines in determining the consequences for any
+action they deem in violation of this Code of Conduct:
+
+### 1. Correction
+**Impact**: Use of inappropriate language or other behavior deemed unprofessional.
+
+**Consequence**: A private, written warning providing clarity around the nature of the violation and an
+explanation of why the behavior was inappropriate. A public apology may be requested.
+
+### 2. Warning
+**Impact**: A violation through a single incident or series of actions.
+
+**Consequence**: A warning with consequences for continued behavior. No interaction with the people
+involved, including unsolicited interaction with those enforcing the Code of Conduct, for a specified
+period of time.
+
+### 3. Temporary Ban
+**Impact**: A serious violation of community standards.
+
+**Consequence**: A temporary ban from any sort of interaction or public communication with the community
+for a specified period of time.
+
+### 4. Permanent Ban
+**Impact**: Demonstrating a pattern of violation of community standards.
+
+**Consequence**: A permanent ban from any sort of public interaction within the community.
+
+## Attribution
+
+This Code of Conduct is adapted from the [Contributor Covenant](https://www.contributor-covenant.org),
+version 2.0, available at
+https://www.contributor-covenant.org/version/2/0/code_of_conduct.html.
+
+---
+For answers to common questions about this code of conduct, see the FAQ at
+https://www.contributor-covenant.org/faq.

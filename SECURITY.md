@@ -1,30 +1,71 @@
 # Security Policy
 
-## Reporting a Vulnerability
+## Supported Versions
 
-If you discover any security vulnerabilities in barniebot, please report them immediately by creating a new issue in the [GitHub repository](https://github.com/Barnie-Corps/barniebot/issues). We take security concerns seriously and appreciate your efforts to responsibly disclose any potential issues.
+| Version | Supported          |
+| ------- | ------------------ |
+| > 1.0   | :white_check_mark: |
+| < 1.0   | :x:                |
 
-When reporting a vulnerability, please provide detailed information about the vulnerability and steps to reproduce it. This will help us understand and address the issue more effectively.
+## Reporting a Security Vulnerability
 
-## Responsible Disclosure
+We take the security of BarnieBot seriously. If you discover a security vulnerability, please follow these steps:
 
-We kindly request that you refrain from publicly disclosing any vulnerabilities before they have been addressed and fixed. We are committed to addressing security issues promptly and will keep you informed about the progress of the fix. We appreciate your cooperation and understanding in this matter.
+1. **DO NOT** disclose the issue publicly
+2. Email us at barniecorps@gmail.com with:
+   - A description of the vulnerability
+   - Steps to reproduce
+   - Potential impact
+   - Any suggested fixes (if available)
 
-## Bug Bounty Program
+## Response Timeline
 
-At the moment, we do not have a bug bounty program in place for barniebot. However, we greatly appreciate your contributions to the security of our project and will acknowledge and reward responsible disclosures on a case-by-case basis. If you have any questions or concerns about our security policy, please feel free to contact us via email at barniecorps@gmail.com
+- Initial Response: Within 48 hours
+- Status Update: Within 5 business days
+- Fix Implementation: Timeline will be communicated based on severity
 
 ## Security Best Practices
 
-To ensure the security of our discord bot, we recommend following these best practices:
-- Keep your bot token secure and avoid sharing it with unauthorized users.
-- Regularly update your bot to the latest version to patch any known security vulnerabilities.
-- Use secure coding practices and avoid hardcoding sensitive information in your code.
-- Monitor your bot's activity and log any suspicious behavior for further investigation.
-- Implement proper access controls and permissions to restrict bot functionality to authorized users.
-- Regularly review and audit your bot's codebase for potential security issues.
-- Educate your team members on security best practices and encourage them to report any security concerns promptly.
-- Stay informed about the latest security threats and vulnerabilities in the discord bot ecosystem.
-- Engage with the discord bot community to share knowledge and best practices for securing your bot.
+### For Bot Administrators
+1. **Token Security**
+   - Never share your bot token
+   - Rotate tokens if compromised
+   - Use environment variables
 
-By following these best practices, you can help maintain the security and integrity of barniebot. If you have any questions or concerns about our security policy, please feel free to contact us via email at barniecorps@gmail.com
+2. **Permissions**
+   - Use minimal required permissions
+   - Regularly audit bot permissions
+   - Implement role-based access control
+
+3. **Monitoring**
+   - Enable audit logging
+   - Monitor unusual activity
+   - Keep logs secure
+
+### For Contributors
+1. **Code Security**
+   - No hardcoded credentials
+   - Input validation
+   - Secure error handling
+   - Regular dependency updates
+
+2. **Development**
+   - Use separate development tokens
+   - Test in isolated environments
+   - Follow secure coding guidelines
+
+## Bug Bounty Program
+
+Currently, we do not offer a formal bug bounty program. However, we appreciate security researchers and will acknowledge contributors in our Hall of Fame.
+
+## Acknowledgments
+
+We'd like to thank all security researchers who have helped improve BarnieBot's security. Contributors will be listed here unless they wish to remain anonymous.
+
+## Contact
+
+- Security Email: barniecorps@gmail.com
+- Discord Server: [Join for Support](https://discord.com/invite/58Tt83kX9K)
+
+---
+BarnieCorps Security Team
