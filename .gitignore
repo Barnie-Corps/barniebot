@@ -7,3 +7,6 @@ response.json
 node_modules/
 dist/
 logs/
+
+#Ignore vscode AI rules
+.github\instructions\codacy.instructions.md
