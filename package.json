@@ -142,7 +142,6 @@
     "ms": "^2.1.2",
     "mysql": "^2.18.1",
     "natural-compare": "^1.4.0",
-    "node": "^16.13.2",
     "node-bin-setup": "^1.1.0",
     "node-disk-info": "^1.3.0",
     "node-fetch": "^2.6.7",
