@@ -97,23 +97,26 @@ const utils = {
     return newObj;
   },
   encryptWithAES: (key: string, data: string): string => {
-    const iv = crypto.randomBytes(16);
+    const iv = Uint8Array.from(crypto.randomBytes(16));
     const cipher = crypto.createCipheriv(
       "aes-256-cbc",
-      Buffer.from(key, "base64"),
+      Buffer.from(key, "base64") as crypto.CipherKey,
       iv
     );
     let crypted = cipher.update(data, "utf8", "hex");
     crypted += cipher.final("hex");
-    return iv.toString("hex") + ":" + crypted;
+    return iv.toString() + ":" + crypted;
   },
   decryptWithAES: (key: string, data: string): string | null => {
     const textParts = data.split(":");
-    const iv = Buffer.from(textParts.shift() as string, "hex");
+    const ivHex = textParts.shift();
+    if (!ivHex) return null;
     const encrypted = textParts.join(":");
+    if (!encrypted) return null;
+    const iv = Uint8Array.from(Buffer.from(ivHex, "hex"));
     const decipher = crypto.createDecipheriv(
       "aes-256-cbc",
-      Buffer.from(key, "base64"),
+      Buffer.from(key, "base64") as crypto.CipherKey,
       iv
     );
     let decrypted = decipher.update(encrypted, "hex", "utf8");
