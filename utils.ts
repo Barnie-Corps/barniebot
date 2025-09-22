@@ -6,6 +6,9 @@ import db from "./mysql/database";
 import { ChatSession } from "@google/generative-ai";
 import * as nodemailer from "nodemailer";
 import Log from "./Log";
+import AIFunctions from "./AIFunctions";
+import data from "./data";
+import client from ".";
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
   port: 465,
@@ -22,6 +25,90 @@ const utils = {
       arrows += "^";
     }
     return arrows;
+  },
+  AIFunctions: {
+    get_user_data: async (id: string): Promise<any> => {
+      const user: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [id]);
+      if (!user[0]) return { error: "User not found" };
+      const language: any = await db.query("SELECT * FROM languages WHERE userid = ?", [id]);
+      return { user: user[0], language: language[0] ?? "es" };
+    },
+    set_user_language: async (args: { userId: string; language: string }): Promise<any> => {
+      if (!args.userId || !args.language) return { error: "Missing parameters" };
+      const user: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [args.userId]);
+      if (!user[0]) return { error: "User not found" };
+      const language: any = await db.query("SELECT * FROM languages WHERE userid = ?", [args.userId]);
+      if (!language[0]) {
+        await db.query("INSERT INTO languages SET ?", [{ userid: args.userId, lang: args.language }]);
+      } else {
+        await db.query("UPDATE languages SET ? WHERE userid = ?", [{ lang: args.language }, args.userId]);
+      }
+      return { success: true };
+    },
+    fetch_url: async (args: { url: string }): Promise<any> => {
+      if (!args.url) return { error: "Missing url parameter" };
+      try {
+        const response = await fetch(args.url);
+        const text = await response.text();
+        return { content: text };
+      } catch (error) {
+        return { error: "Failed to fetch URL" };
+      }
+    },
+    retrieve_owners: (): string[] => {
+      return data.bot.owners;
+    },
+    fetch_user: async (args: { userId: string }): Promise<any> => {
+      if (!args.userId) return { error: "Missing userId parameter" };
+      const user: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [args.userId]);
+      if (!user[0]) return { error: "User not found" };
+      return { user: user[0] };
+    },
+    fetch_discord_user: async (args: { userId: string }): Promise<any> => {
+      if (!args.userId) return { error: "Missing userId parameter" };
+      let user;
+      let validUser = true;
+      try {
+        user = await client.users.fetch(args.userId);
+      } catch (error) {
+        validUser = false;
+      }
+      if (validUser) {
+        return { user };
+      } else {
+        return { error: "User not found" };
+      }
+    },
+    get_memories: async (args: { userId: string }): Promise<any> => {
+      if (!args.userId) return { error: "Missing userId parameter" };
+      const memories: any = await db.query("SELECT * FROM ai_memories WHERE uid = ?", [args.userId]);
+      return { memories: memories };
+    },
+    insert_memory: async (args: { userId: string; memory: string }): Promise<any> => {
+      if (!args.userId || !args.memory) return { error: "Missing parameters" };
+      await db.query("INSERT INTO ai_memories SET ?", [{ uid: args.userId, memory: args.memory }]);
+      return { success: true };
+    },
+    fetch_ai_rules: async (): Promise<any> => {
+      return require("./ai_rules.json").rules;
+    },
+    search_user_by_username: async (args: { username: string }): Promise<any> => {
+      if (!args.username) return { error: "Missing username parameter" };
+      const users: any = await db.query("SELECT * FROM discord_users WHERE username LIKE ?", [`%${args.username}%`]);
+      return { users: users };
+    },
+    search_user_by_username_discord: async (args: { username: string }): Promise<any> => {
+      if (!args.username) return { error: "Missing username parameter" };
+      const users = client.users.cache.filter(u => u.username.toLowerCase().includes(args.username.toLowerCase()));
+      return { users: Array.from(users.values()) };
+    },
+    update_user_data: async (args: { userId: string; data: any }): Promise<any> => {
+      if (!args.userId || !args.data) return { error: "Missing parameters" };
+      const user: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [args.userId]);
+      if (!user[0]) return { error: "User not found" };
+      await db.query("UPDATE discord_users SET ? WHERE id = ?", [args.data, args.userId]);
+      return { success: true };
+    }
   },
   createSpaces: (length: number): string => {
     let spaces = "";
@@ -40,7 +127,7 @@ const utils = {
   translate: async (text: string, from: string, target: string): Promise<any> => {
     return new Promise((resolve, reject) => {
       const worker = Workers.getAvailableWorker("translate") ?? (Workers.createWorker(path.join(__dirname, "workers/translate.js"), "translate") as unknown as { type: string; worker: Worker; id: string });
-      const message = Workers.postMessage(worker.id, {text, from, to: target});
+      const message = Workers.postMessage(worker.id, { text, from, to: target });
       Workers.on("message", async (data) => {
         if (data.id !== worker.id) return;
         if (data.message.id !== message) return;
@@ -204,10 +291,16 @@ const utils = {
     else return true;
   },
   getAiResponse: async (prompt: string, chat: ChatSession) => {
-    const result = await chat.sendMessage(prompt);
-    const response = await result.response;
+    let result;
+    try {
+    result = await chat.sendMessage(prompt);
+    } catch (error: any) {
+      console.error("Error getting AI response:", error, error.stack);
+      return { text: "Error: Could not get a response from the AI service. Please try again later.", call: null };
+    }
+    const response = result.response;
     const text = response.text();
-    return text;
+    return { text, call: response.functionCalls()?.[0] ?? null };
   },
   sendEmail: async (to: string, subject: string, text: string, html?: string) => {
     if (!to || !subject || !text) throw new Error("Missing important data in utils.sendEmail");

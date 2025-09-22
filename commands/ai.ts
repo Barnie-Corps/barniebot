@@ -4,6 +4,7 @@ import utils from "../utils";
 import data from "../data";
 import ai from "../ai";
 import * as fs from "fs";
+import { FunctionCall } from "@google/genai";
 
 export default {
     data: new SlashCommandBuilder()
@@ -21,10 +22,6 @@ export default {
         .addSubcommand(s =>
             s.setName("chat")
                 .setDescription("Starts a chat with the AI.")
-        )
-        .addSubcommand(s =>
-            s.setName("clear_history")
-                .setDescription("Clears the chat history.")
         ),
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
@@ -37,12 +34,11 @@ export default {
                 question: "Tu pregunta fue:",
                 thinking: "Pensando...",
                 started_chat: "El chat con la Inteligencia Artificial se ha iniciado, puedes decir una de las siguientes frases para detenerla:",
-                stopped_ai: "El chat con la Inteligencia Artificial ha sido detenido.",
-                can_take_time: "Recuerda que la respuesta de la IA puede tomar tiempo, si envías varios mensajes antes de recibir respuesta o empiezas a enviar demasiados mensajes juntos, se te prohibirá el acceso a este comando indefinidamente."
+                stopped_ai: "El chat con la Inteligencia Artificial ha sido desactivado.",
+                can_take_time: "Recuerda que la respuesta de la IA puede tomar tiempo, si envías varios mensajes antes de recibir respuesta o empiezas a enviar demasiados mensajes juntos, se te prohibirá el acceso a este comando indefinidamente.",
+                ai_left: "La IA ha decidido terminar la conversación. Abajo está el motivo dado por la misma.",
             },
-            success: {
-                cleared_history: "Historial de chat limpiado."
-            }
+            success: {}
         }
         if (lang !== "es") {
             texts = await utils.autoTranslate(texts, "es", lang);
@@ -52,7 +48,7 @@ export default {
             case "ask": {
                 await interaction.editReply(texts.common.thinking);
                 const question = interaction.options.getString("question") as string;
-                const response = await ai.GetResponse(interaction.user.id, `Responde a la siguiente pregunta de la forma más corta posible y en el idioma de la pregunta: ${question}`);
+                const response = await ai.GetSingleResponse(interaction.user.id, `Responde a la siguiente pregunta de la forma más corta posible y en el idioma de la pregunta: ${question}`);
                 if (response.length < 1) return await interaction.editReply(texts.errors.no_response);
                 if (response.length > 2000) {
                     const filename = `./ai-response-${Date.now()}.md`;
@@ -60,7 +56,7 @@ export default {
                     await interaction.editReply({ content: texts.errors.long_response, files: [filename] });
                     fs.unlinkSync(filename);
                     return;
-                }
+                }   
                 await interaction.editReply(response);
                 break;
             }
@@ -78,21 +74,26 @@ export default {
                         return;
                     }
                     const response = await ai.GetResponse(interaction.user.id, message.content);
-                    if (response.length < 1) return await message.reply(texts.errors.no_response);
-                    if (response.length > 2000) {
+                    if (response.text.length < 1 && !response.call) return await message.reply(texts.errors.no_response);
+                    if (response.text.length > 2000) {
                         const filename = `./ai-response-${Date.now()}.md`;
-                        fs.writeFileSync(filename, response, "utf-8");
+                        fs.writeFileSync(filename, response.text, "utf-8");
                         await message.reply({ content: texts.errors.long_response, files: [filename] });
                         fs.unlinkSync(filename);
                         return;
                     }
-                    await message.reply(response);
+                    if (response.call) {
+                        if ((response.call as FunctionCall).name === "end_conversation") {
+                            await message.reply(`${texts.common.ai_left}\n${(response.call as FunctionCall).args?.reason || "No reason provided."}`);
+                            collector?.stop();
+                            return;
+                        }
+                    }
+                    const msg = await message.reply(response.call ? `Executing function ${(response.call as FunctionCall).name} <a:discordproloading:875107406462472212>` : response.text);
+                    if (response.call) {
+                        await ai.ExecuteFunction(interaction.user.id, (response.call as FunctionCall).name!, (response.call as FunctionCall).args, msg);
+                    }
                 });
-                break;
-            }
-            case "clear_history": {
-                await ai.ClearHistory(interaction.user.id);
-                await interaction.editReply(texts.success.cleared_history);
                 break;
             }
         }

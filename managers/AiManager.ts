@@ -4,6 +4,9 @@ import db from "../mysql/database";
 import utils from "../utils";
 import { ChatSession, GoogleGenerativeAI } from "@google/generative-ai";
 import Log from "../Log";
+import AIFunctions from "../AIFunctions";
+import { Message } from "discord.js";
+import * as fs from "fs";
 const genAI = new GoogleGenerativeAI(String(process.env.AI_API_KEY));
 
 class AiManager extends EventEmitter {
@@ -36,41 +39,71 @@ class AiManager extends EventEmitter {
     public async RemoveRatelimit(id: string): Promise<void> {
         this.ratelimits.delete(id);
     }
-    private async GetHistory(id: string): Promise<any> {
-        const history: any = await db.query("SELECT * FROM ai_history WHERE uid = ?", [id]);
-        let hdata = history[0] ? JSON.parse(history[0].content).data : null;
-        return hdata;
-    }
-    public async GetResponse(id: string, text: string): Promise<string> {
+    public async GetResponse(id: string, text: string): Promise<any> {
         if (await this.RatelimitUser(id)) return "You are sending too many messages, please wait a few seconds before sending another message.";
         const chat = await this.GetChat(id, text);
         const response = await utils.getAiResponse(text, chat);
-        const hdata = await this.GetHistory(id);
-        hdata.push({ parts: [{ text }], role: "user" });
-        hdata.push({ parts: [{ text: response }], role: "model" });
-        await this.UpdateHistory(id, hdata);
         return response;
+    }
+    public async GetSingleResponse(id: string, text: string): Promise<string> {
+        if (await this.RatelimitUser(id)) return "You are sending too many messages, please wait a few seconds before sending another message.";
+        const tempChat = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }).startChat({
+            history: [],
+            generationConfig: {
+                maxOutputTokens: 480,
+                temperature: 0.9,
+                topP: 0.9,
+                topK: 40,
+            }
+        });
+        const response = await utils.getAiResponse(text, tempChat);
+        return response.text;
+    }
+    public async ExecuteFunction(id: string, name: string, args: any, message: Message): Promise<any> {
+        if (await this.RatelimitUser(id)) return { error: "You are sending too many messages, please wait a few seconds before sending another message." };
+        const chat = await this.GetChat(id, "");
+        const func: any = utils.AIFunctions[name as keyof typeof utils.AIFunctions];
+        if (!Object.keys(args).length) args = id;
+        console.log(func, name, args);
+        const data = await func(args);
+        let reply = "";
+        const rsp = await chat.sendMessage([
+            {
+                functionResponse: {
+                    name,
+                    response: {
+                        result: data
+                    }
+                }
+            }
+        ]);
+        if (rsp.response.functionCalls()?.length) {
+            message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} <a:discordproloading:875107406462472212>`);
+            return this.ExecuteFunction(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
+        }
+        reply = rsp.response.text();
+        if (reply.length > 2000) {
+            const filename = `./ai-response-${Date.now()}.md`;
+            fs.writeFileSync(filename, reply);
+            await message.reply({ content: "The response from the AI was too long, so it has been sent as a file.", files: [filename] });
+            return;
+        }
+        await message.edit(reply);
+        return;
     }
     // text param is used in case the user has no history
     private async GetChat(id: string, text: string): Promise<ChatSession> {
         let chat = this.chats.get(id);
-        let hdata = await this.GetHistory(id);
-        if (!hdata) {
-            db.query("INSERT INTO ai_history SET ? ", [{
-                content: JSON.stringify({ data: [{ parts: [{ text }], role: "user" }] }),
-                uid: id
-            }]);
-        };
         if (!chat) {
-            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
             chat = model.startChat({
-                history: hdata,
                 generationConfig: {
                     maxOutputTokens: 480,
                     temperature: 0.9,
                     topP: 0.9,
                     topK: 40,
-                }
+                },
+                tools: AIFunctions
             });
             this.chats.set(id, chat);
         }
@@ -80,16 +113,6 @@ class AiManager extends EventEmitter {
         this.ratelimits.forEach((ratelimit) => {
             if (Date.now() - ratelimit.time > this.timeout) this.ratelimits.delete(ratelimit.id);
         });
-    }
-    private async UpdateHistory(id: string, data: any): Promise<void> {
-        db.query("UPDATE ai_history SET ? WHERE uid = ?", [{
-            content: JSON.stringify({ data }),
-        }, id]);
-    }
-    public async ClearHistory(id: string): Promise<void> {
-        await db.query("DELETE FROM ai_history WHERE uid = ?", [{
-            content: JSON.stringify({ data: [] }),
-        }, id]);
     }
 }
 export default AiManager;

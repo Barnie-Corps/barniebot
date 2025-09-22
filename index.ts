@@ -17,7 +17,7 @@ global.Headers = require("node-fetch").Headers;
 globalThis.fetch = require("node-fetch");
 import * as dotenv from "dotenv";
 dotenv.config();
-import { EmbedBuilder, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, WebhookClient, TextChannel, Message, time, TimestampStyles, Collection } from "discord.js";
+import { EmbedBuilder, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, WebhookClient, TextChannel, Message, time, TimestampStyles, Collection, MessageFlags } from "discord.js";
 import * as fs from "fs";
 import data from "./data"; // Data file for storing bot data
 import Log from "./Log"; // Log object for logging
@@ -65,7 +65,7 @@ const client = new Client({
     });
 })();
 
-client.on("ready", async (): Promise<any> => {
+client.on("clientReady", async (): Promise<any> => {
     Log.success(`Bot logged in successfully`, { 
         component: "Bot",
         username: client.user?.tag
@@ -310,7 +310,7 @@ client.on("messageCreate", async (message): Promise<any> => {
                 await message.reply(`VIP has been added to user with ID ${uid} for ${newTime} ${timeType} -> ${time(Math.round(end / 1000), TimestampStyles.ShortDate)} (${time(Math.round(end / 1000), TimestampStyles.RelativeTime)})`);
                 break;
             }
-        } // Add VIP to a user
+        }
         case "remove_vip": {
             if (!args[0]) return await message.reply("You must provide the user ID.");
             const [uid] = args;
@@ -331,7 +331,15 @@ client.on("messageCreate", async (message): Promise<any> => {
             await db.query("DELETE FROM vip_users WHERE id = ?", [uid]);
             await message.reply(`VIP has been removed from user with ID ${uid} [@${user.username} / ${user.displayName}].`);
             break;
-        } // Remove VIP from a user
+        }
+        case "fetch_guilds_members": {
+            const msg = await message.reply("<a:discordproloading:875107406462472212> Fetching members from guilds...");
+            for (const g of client.guilds.cache.values()) {
+                await g.members.fetch();
+            }
+            await msg.edit("Finished fetching members from guilds.");
+            break;
+        }
     }
 });
 client.on("interactionCreate", async (interaction): Promise<any> => {
@@ -355,7 +363,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             return await interaction.reply({ content: "```\n" + `/${interaction.commandName}\n ${utils.createArrows(`${interaction.command?.name}`.length)}\n\nERR: Unknown slash command` + "\n```", ephemeral: true });
         }
         try {
-            await interaction.reply({ ephemeral: cmd.ephemeral as boolean, content: Lang !== "es" ? `${texts.loading} <a:discordproloading:875107406462472212>` : `<a:discordproloading:875107406462472212>` }); // Reply with a loading message
+            await interaction.reply({ content: Lang !== "es" ? `${texts.loading} <a:discordproloading:875107406462472212>` : `<a:discordproloading:875107406462472212>`, flags: cmd.ephemeral ?  MessageFlags.Ephemeral : undefined }); // Reply with a loading message
             await cmd.execute(interaction, Lang);
             await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE"); // Update the last command executed
             await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]); // Insert the executed command into the executed_commands table
