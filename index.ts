@@ -89,18 +89,6 @@ client.on("clientReady", async (): Promise<any> => {
     fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
     Log.info("Workers loaded", { component: "WorkerSystem" });
     Log.info("Bot is ready", { component: "System" });
-    Log.info("Checking AI history entries", { component: "Maintenance", action: "length-check" });
-    // Check for AI history entries with a length of over 60,000 characters and delete them
-    const filterAiHistory = (await db.query("SELECT * FROM ai_history") as any).filter((h: any) => h.content.length >= 60000);
-    if (filterAiHistory.length > 0) {
-        let deletedHistory = 0;
-        filterAiHistory.forEach(async (h: any) => {
-            await db.query("DELETE FROM ai_history WHERE id = ?", [h.id]);
-            deletedHistory++;
-        });
-        Log.warn("AI history cleanup completed", { deletedEntries: deletedHistory, reason: "length-exceeded-60k" });
-    }
-    Log.info("AI history check completed", { component: "Maintenance" });
 });
 
 const activeGuilds: Collection<string, number> = new Collection(); // Active guilds collection for active guilds tracking (messageCreate event)
@@ -124,7 +112,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (activeGuilds.has(message.guildId as string)) {
         const agValue = activeGuilds.get(message.guildId as string);
         activeGuilds.set(message.guildId as string, (agValue as number) + 1);
-        Log.info("Message received", { 
+        if (Boolean(process.env.LOG_MESSAGES)) Log.info("Message received", { 
             component: "MessageSystem",
             guild: message.guild?.name,
             author: message.author.displayName,
@@ -134,7 +122,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     else {
         // If the guild is not in the activeGuilds collection, add it
         activeGuilds.set(message.guildId as string, 1);
-        Log.info("Message received from unregistered guild", { 
+        if (Boolean(process.env.LOG_MESSAGES)) Log.info("Message received from unregistered guild", { 
             component: "MessageSystem",
             guild: message.guild?.name,
             author: message.author.displayName,
