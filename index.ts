@@ -112,22 +112,10 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (activeGuilds.has(message.guildId as string)) {
         const agValue = activeGuilds.get(message.guildId as string);
         activeGuilds.set(message.guildId as string, (agValue as number) + 1);
-        if (Boolean(process.env.LOG_MESSAGES)) Log.info("Message received", { 
-            component: "MessageSystem",
-            guild: message.guild?.name,
-            author: message.author.displayName,
-            username: message.author.username
-        });
     }
     else {
         // If the guild is not in the activeGuilds collection, add it
         activeGuilds.set(message.guildId as string, 1);
-        if (Boolean(process.env.LOG_MESSAGES)) Log.info("Message received from unregistered guild", { 
-            component: "MessageSystem",
-            guild: message.guild?.name,
-            author: message.author.displayName,
-            username: message.author.username
-        });
     }
     const prefix = "b.";
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]); // Get user language
