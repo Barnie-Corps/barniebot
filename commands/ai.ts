@@ -46,6 +46,7 @@ export default {
         const subcmd = interaction.options.getSubcommand();
         switch (subcmd) {
             case "ask": {
+                return await interaction.editReply("Temporary unavailable due to high demand. Please use the chat command.");
                 await interaction.editReply(texts.common.thinking);
                 const question = interaction.options.getString("question") as string;
                 const response = await ai.GetSingleResponse(interaction.user.id, `Responde a la siguiente pregunta de la forma más corta posible y en el idioma de la pregunta: ${question}`);
@@ -74,7 +75,10 @@ export default {
                         return;
                     }
                     const response = await ai.GetResponse(interaction.user.id, message.content);
-                    if (response.text.length < 1 && !response.call) return await message.reply(texts.errors.no_response);
+                    if (response.text.length < 1 && !response.call) {
+                        console.log("No response from AI", response);
+                        return await message.reply(texts.errors.no_response);
+                    }
                     if (response.text.length > 2000) {
                         const filename = `./ai-response-${Date.now()}.md`;
                         fs.writeFileSync(filename, response.text, "utf-8");
@@ -93,6 +97,9 @@ export default {
                     if (response.call) {
                         await ai.ExecuteFunction(interaction.user.id, (response.call as FunctionCall).name!, (response.call as FunctionCall).args, msg);
                     }
+                });
+                collector?.on("end", () => {
+                    ai.ClearChat(interaction.user.id);
                 });
                 break;
             }
