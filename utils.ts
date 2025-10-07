@@ -108,7 +108,16 @@ const utils = {
       if (!user[0]) return { error: "User not found" };
       await db.query("UPDATE discord_users SET ? WHERE id = ?", [args.data, args.userId]);
       return { success: true };
-    }
+    },
+    execute_query: async (args: { query: string; }): Promise<any> => {
+      if (!args.query) return { error: "Missing query parameter" };
+      try {
+        const result: any = await db.query(args.query);
+        return { result };
+      } catch (error: any) {
+        return { error: error.message };
+      }
+    } 
   },
   createSpaces: (length: number): string => {
     let spaces = "";

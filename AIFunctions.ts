@@ -99,7 +99,7 @@ const functionDeclarations = {
         parameters: {
             type: SchemaType.OBJECT,
             properties: {
-                reason: { type: SchemaType.STRING, description: "The reason for ending the conversation." }
+                reason: { type: SchemaType.STRING, description: "The reason for ending the conversation. It must be provided in the user's language." }
             },
             required: ["reason"]
         }
@@ -137,7 +137,18 @@ const functionDeclarations = {
             },
             required: ["userId", "data"]
         }
-    }
+    },
+    execute_query: {
+        name: "execute_query",
+        description: "Executes a custom database query. This is a powerful function that allows for advanced data retrieval and manipulation. Use with caution. This command is restricted to owners, so first check if the user is an owner using the retrieve_owners and get_user_data functions. You must ask for confirmation before executing this command, providing a detailed explanation of the query and its potential impact and why you're executing it.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                query: { type: SchemaType.STRING }
+            },
+            required: ["query"]
+        }
+    },
 } as const satisfies Record<string, FunctionDeclaration>;
 
 const AIFunctions: FunctionDeclarationsTool[] = [

@@ -63,6 +63,23 @@ class AiManager extends EventEmitter {
         if (await this.RatelimitUser(id)) return { error: "You are sending too many messages, please wait a few seconds before sending another message." };
         const chat = await this.GetChat(id, "");
         const func: any = utils.AIFunctions[name as keyof typeof utils.AIFunctions];
+        if (!func) {
+            await message.edit("The AI requested an unknown function, please try again.");
+            const rsp = await chat.sendMessage([
+                {
+                    functionResponse: {
+                        name,
+                        response: {
+                            result: { error: "Unknown function" }
+                        }
+                    }
+                }
+            ]);
+            if (rsp.response.functionCalls()?.length) {
+                await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} <a:discordproloading:875107406462472212>`);
+                return this.ExecuteFunction(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
+            }
+        }
         if (!Object.keys(args).length) args = id;
         console.log(func, name, args);
         const data = await func(args);
@@ -78,7 +95,7 @@ class AiManager extends EventEmitter {
             }
         ]);
         if (rsp.response.functionCalls()?.length) {
-            message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} <a:discordproloading:875107406462472212>`);
+            await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} <a:discordproloading:875107406462472212>`);
             return this.ExecuteFunction(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
         }
         reply = rsp.response.text();
@@ -113,6 +130,10 @@ class AiManager extends EventEmitter {
         this.ratelimits.forEach((ratelimit) => {
             if (Date.now() - ratelimit.time > this.timeout) this.ratelimits.delete(ratelimit.id);
         });
+    }
+
+    public async ClearChat(id: string): Promise<void> {
+        this.chats.delete(id);
     }
 }
 export default AiManager;
