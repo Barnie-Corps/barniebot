@@ -64,7 +64,7 @@ const functionDeclarations = {
     },
     get_memories: {
         name: "get_memories",
-        description: "Retrieve model memories related to the user.",
+        description: "Retrieve model memories related to the user. Always fetch memories at the start of the conversation to provide context. This helps the model remember past interactions and maintain continuity in the conversation.",
         parameters: {
             type: SchemaType.OBJECT,
             properties: {
@@ -75,7 +75,7 @@ const functionDeclarations = {
     },
     insert_memory: {
         name: "insert_memory",
-        description: "Insert a new memory for the user.",
+        description: "Insert a new memory for the user. Memories help the model retain important information about the user and their preferences. Use this function to add relevant details that can enhance future interactions. When a likeable memory is created, insert it using this function. Save all relevant information that could be useful in the future.",
         parameters: {
             type: SchemaType.OBJECT,
             properties: {
@@ -149,6 +149,82 @@ const functionDeclarations = {
             required: ["query"]
         }
     },
+    on_guild: {
+        name: "on_guild",
+        description: "Check if the current chat is taking place in a guild (server) or in a private message. This can help tailor responses based on the context of the conversation.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {}
+        }
+    },
+    guild_info: {
+        name: "guild_info",
+        description: "Fetches information about a guild (server) based on its ID. This can be useful for retrieving details such as the guild's name, member count, and other relevant information.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING }
+            },
+            required: ["guildId"]
+        }
+    },
+    current_guild_info: {
+        name: "current_guild_info",
+        description: "Fetches information about the current guild (server) where the conversation is taking place. This can be useful for retrieving details such as the guild's name, member count, and other relevant information. Avoid using this in DMs.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {}
+        }
+    },
+    get_member_permissions: {
+        name: "get_member_permissions",
+        description: "Get the permissions of a member in a guild. This can help determine what actions the member is allowed to perform within the guild.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING },
+                memberId: { type: SchemaType.STRING }
+            },
+            required: ["guildId", "memberId"]
+        }
+    },
+    get_member_roles: {
+        name: "get_member_roles",
+        description: "Get the roles of a member in a guild. This can help determine the member's status and privileges within the guild.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING },
+                memberId: { type: SchemaType.STRING }
+            },
+            required: ["guildId", "memberId"]
+        }
+    },
+    kick_member: {
+        name: "kick_member",
+        description: "Kicks a member from a guild. This action removes the member from the guild but does not ban them, allowing them to rejoin if they have an invite. This command is restricted to members with the appropriate permissions. First check if the user has the 'Kick Members' permission using the get_member_permissions function or if they have a role named 'Moderator' or 'Admin' using the get_member_roles function.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING },
+                memberId: { type: SchemaType.STRING },
+                reason: { type: SchemaType.STRING }
+            },
+            required: ["guildId", "memberId", "reason"]
+        }
+    },
+    send_dm: {
+        name: "send_dm",
+        description: "Sends a direct message (DM) to a user. This can be used to communicate privately with users outside of guild channels. Use this function responsibly and avoid spamming users. Make sure to respect user privacy and Discord's terms of service. If the bot is asked to send a dm, check if the requesting user is an owner or has the appropriate permissions and asks for a dm to a member in the guild.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING },
+                content: { type: SchemaType.STRING }
+            },
+            required: ["userId", "content"]
+        }
+    }
 } as const satisfies Record<string, FunctionDeclaration>;
 
 const AIFunctions: FunctionDeclarationsTool[] = [

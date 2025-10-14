@@ -117,7 +117,64 @@ const utils = {
       } catch (error: any) {
         return { error: error.message };
       }
-    } 
+    },
+    on_guild: async (message: any): Promise<any> => {
+      return { isGuild: message.guild !== null };
+    },
+    current_guild_info: async (message: any): Promise<any> => {
+      if (!message.guild) return { error: "Not in a guild" };
+      return { guild: { id: message.guild.id, name: message.guild.name, memberCount: message.guild.memberCount } };
+    },
+    guild_info: async (args: { guildId: string }): Promise<any> => {
+      if (!args.guildId) return { error: "Missing guildId parameter" };
+      const guild = client.guilds.cache.get(args.guildId);
+      if (!guild) return { error: "Guild not found" };
+      return { guild: { id: guild.id, name: guild.name, memberCount: guild.memberCount } };
+    },
+    get_member_permissions: async (args: { guildId: string; memberId: string }): Promise<any> => {
+      if (!args.guildId || !args.memberId) return { error: "Missing parameters" };
+      const guild = client.guilds.cache.get(args.guildId);
+      if (!guild) return { error: "Guild not found" };
+      let member = guild.members.cache.get(args.memberId);
+      if (!member) return { error: "Member not found" };
+      return { permissions: member.permissions.toArray() };
+    },
+    get_member_roles: async (args: { guildId: string; memberId: string }): Promise<any> => {
+      if (!args.guildId || !args.memberId) return { error: "Missing parameters" };
+      const guild = client.guilds.cache.get(args.guildId);
+      if (!guild) return { error: "Guild not found" };
+      let member = guild.members.cache.get(args.memberId);
+      if (!member) return { error: "Member not found" };
+      return { roles: member.roles.cache.map(r => ({ id: r.id, name: r.name })) };
+    },
+    send_dm: async (args: { userId: string; content: string; }): Promise<any> => {
+      if (!args.userId || !args.content) return { error: "Missing parameters" };
+      let user;
+      try {
+        user = await client.users.fetch(args.userId);
+      } catch (error) {
+        return { error: "User not found" };
+      }
+      try {
+        await user.send(args.content);
+        return { success: true };
+      } catch (error) {
+        return { error: "Failed to send DM" };
+      }
+    },
+    kick_member: async (args: { guildId: string; memberId: string; reason: string }): Promise<any> => {
+      if (!args.guildId || !args.memberId || !args.reason) return { error: "Missing parameters" };
+      const guild = client.guilds.cache.get(args.guildId);
+      if (!guild) return { error: "Guild not found" };
+      let member = guild.members.cache.get(args.memberId);
+      if (!member) return { error: "Member not found" };
+      try {
+        await member.kick(args.reason);
+        return { success: true };
+      } catch (error) {
+        return { error: "Failed to kick member" };
+      }
+    }
   },
   createSpaces: (length: number): string => {
     let spaces = "";

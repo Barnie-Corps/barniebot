@@ -64,7 +64,7 @@ class AiManager extends EventEmitter {
         const chat = await this.GetChat(id, "");
         const func: any = utils.AIFunctions[name as keyof typeof utils.AIFunctions];
         if (!func) {
-            await message.edit("The AI requested an unknown function, please try again.");
+            await message.edit("The AI requested an unknown function, attempting to recover... <a:discordproloading:875107406462472212>");
             const rsp = await chat.sendMessage([
                 {
                     functionResponse: {
@@ -81,6 +81,7 @@ class AiManager extends EventEmitter {
             }
         }
         if (!Object.keys(args).length) args = id;
+        if (["current_guild_info", "on_guild"].includes(name)) args = message;
         console.log(func, name, args);
         const data = await func(args);
         let reply = "";
