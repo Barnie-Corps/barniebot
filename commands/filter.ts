@@ -81,44 +81,44 @@ export default {
         ),
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
-            default: "Este comando aún está en desarrollo.",
+            default: "This command is still in development.",
             errors: {
-                repeated: "No habilitaste permitir repeticiones al ejecutar el comando. No puedo añadir una palabra repetida.",
-                not_admin_delete: "Para poder forzar la eliminación de una palabra o establecerla como protegida, debes ser administrador.",
-                not_setup: "Este servidor no está registrado en la base de datos de filtros ->",
-                no_guild: "Este comando sólo puede ser ejecutado en un servidor.",
-                not_admin_add: "Para poder establecer una palabra como protegida, debes ser administrador.",
-                missing_force: "Debes utilizar la opción de forzar para poder eliminar una palabra protegida.",
-                no_words: "El contenido del filtro de este servidor está vacío.",
-                too_long: "Hay demasiadas palabras en el filtro de este servidor, no puedo mostrarlas en formato de mensaje de discord.",
-                invalid_id: "La ID que has proporcionado no es válida.",
-                no_results: "No hubo resultados.",
-                already_registered: "Este servidor ya está registrado en mi base de datos."
+                repeated: "You didn't enable allow repeats when executing the command. I can't add a repeated word.",
+                not_admin_delete: "To force the deletion of a word or set it as protected, you must be an administrator.",
+                not_setup: "This server is not registered in the filter database ->",
+                no_guild: "This command can only be executed in a server.",
+                not_admin_add: "To set a word as protected, you must be an administrator.",
+                missing_force: "You must use the force option to delete a protected word.",
+                no_words: "This server's filter content is empty.",
+                too_long: "There are too many words in this server's filter, I can't display them in a Discord message format.",
+                invalid_id: "The ID you provided is not valid.",
+                no_results: "There were no results.",
+                already_registered: "This server is already registered in my database."
             },
             success: {
-                registered: "Este servidor no se encontraba en la base de datos, por lo tanto, ha sido añadido. Por defecto, el filtro estará activo en el momento que el servidor se registra por primera vez.",
-                toggled_off: "Se ha desactivado el filtro en el servidor.",
-                toggled_on: "Se ha activado el filtro en el servidor.",
-                added_word: "La palabra se ha añadido correctamente al filtro del servidor.",
-                removed_word: "La palabra se ha removido correctamente del filtro del servidor."
+                registered: "This server was not found in the database, therefore it has been added. By default, the filter will be active when the server is registered for the first time.",
+                toggled_off: "The filter has been disabled on the server.",
+                toggled_on: "The filter has been enabled on the server.",
+                added_word: "The word has been successfully added to the server filter.",
+                removed_word: "The word has been successfully removed from the server filter."
             },
             common: {
-                turned_off: "Recordatorio: El filtro está desactivado en el servidor.",
-                protected_word: "Esta palabra está marcada como protegida.",
-                was_forced: "Esta eliminación fue forzada.",
-                protected_text: "Protegida",
-                filter_content_text: "Palabras en el filtro",
-                results: "Resultados de",
-                single_word: "Esta palabra está marcada como palabra única. (No puede ser parte de otra palabra)"
+                turned_off: "Reminder: The filter is disabled on the server.",
+                protected_word: "This word is marked as protected.",
+                was_forced: "This deletion was forced.",
+                protected_text: "Protected",
+                filter_content_text: "Words in filter",
+                results: "Results for",
+                single_word: "This word is marked as a single word. (Cannot be part of another word)"
             },
             setup: {
-                msg: "Estás a punto de inicializar el setup del filtro, ¿Deseas continuar?",
-                continue_btn: "Continuar",
-                cancel_btn: "Cancelar"
+                msg: "You are about to initialize the filter setup, do you want to continue?",
+                continue_btn: "Continue",
+                cancel_btn: "Cancel"
             }
         };
-        if (lang !== "es") {
-            texts = await utils.autoTranslate(texts, "es", lang);
+        if (lang !== "en") {
+            texts = await utils.autoTranslate(texts, "en", lang);
         }
         // if (!data.bot.owners.includes(interaction.user.id)) return await interaction.editReply(texts.default);
         if (!interaction.inGuild()) return await interaction.editReply(texts.errors.no_guild);

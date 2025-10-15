@@ -82,9 +82,9 @@ client.on("clientReady", async (): Promise<any> => {
     Log.info("Loading workers...", { component: "Initialization" });
     // Check if the bot was safely shutted down or not
     if (Number(process.env.SAFELY_SHUTTED_DOWN) === 0 && Number(process.env.NOTIFY_STARTUP) === 1) {
-        await manager.announce("¡Hey! He sido reiniciado... Según mis registros, fue un reinicio forzado, por lo cual, no pude avisarles de éste. Lamentamos cualquier inconveniente o interrupción que esto haya causado.", "es");
+        await manager.announce("Hey! I have been restarted. According to my records it was a forced restart, so I could not warn you in advance. We apologize for any inconvenience or downtime this may have caused.", "en");
     }
-    else if (Number(process.env.NOTIFY_STARTUP) === 1) await manager.announce("¡He vuelto! El chat global está nuevamente en línea.", "es");
+    else if (Number(process.env.NOTIFY_STARTUP) === 1) await manager.announce("I'm back! The global chat is online again.", "en");
     Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", 5); // Create 5 workers for translation tasks
     fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
     Log.info("Workers loaded", { component: "WorkerSystem" });
@@ -119,7 +119,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     }
     const prefix = "b.";
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]); // Get user language
-    const Lang = foundLang[0] ? foundLang[0].lang : "es"; // If the user has a language set, use it, otherwise use Spanish
+    const Lang = foundLang[0] ? foundLang[0].lang : "en"; // If the user has a language set, use it, otherwise use English
     // Check if the message starts with the prefix and if the user is not an owner
     if (message.content.toLowerCase().startsWith(prefix) && !data.bot.owners.includes(message.author.id)) return;
     if (!message.content.toLowerCase().startsWith(prefix)) return;
@@ -127,7 +127,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     const [command, ...args] = message.content.slice(prefix.length).trim().split(" ");
     switch (command) {
         case "shutdown": {
-            await manager.announce("¡Hey! Seré apagado en un segundo, lamentamos inconvenientes.", "es");
+            await manager.announce("Hey! I'm shutting down in just a second. Sorry for the inconvenience.", "en");
             fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=0", "SAFELY_SHUTTED_DOWN=1"));
             client.destroy();
             process.exit(0);
@@ -335,16 +335,16 @@ client.on("messageCreate", async (message): Promise<any> => {
 client.on("interactionCreate", async (interaction): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(interaction.user.id)) return;
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
-    const Lang = foundLang[0] ? foundLang[0].lang : "es"; // If the user has a language set, use it, otherwise use Spanish
+    const Lang = foundLang[0] ? foundLang[0].lang : "en"; // If the user has a language set, use it, otherwise use English
     let texts = {
-        new: "Hey! Veo que es la primera vez que utilizas uno de mis comandos, por lo menos en esta cuenta jaja. Quiero decirte que no te olvides de leer mi política de privacidad!",
-        error: "Whoops... Ha ocurrido un error inesperado, ya he reportado el error pero si éste persiste, puedes notificarlo en el siguiente enlace:",
-        loading: "Traduciendo textos (puede tardar un tiempo)...",
-        not_vip: "Hmm... No puedes ejecutar este comando si no eres VIP.",
-        expired_vip: "¡Vaya! Al parecer tu suscripción VIP ha terminado. He revocado tu acceso VIP."
+        new: "Hey! It looks like this is the first time you're using one of my commands, at least on this account. Don't forget to read my privacy policy!",
+        error: "Whoops... An unexpected error occurred. I've already reported it, but if it keeps happening you can let us know at:",
+        loading: "Translating texts (this may take a moment)...",
+        not_vip: "Hmm... You can't run this command unless you're a VIP.",
+        expired_vip: "Wow! It seems your VIP subscription has ended. I've revoked your VIP access."
     } // Texts for the interactionCreate event
-    if (Lang !== "es") {
-        texts = await utils.autoTranslate(texts, "es", Lang); // Translate the texts to the user's language if it is not Spanish
+    if (Lang !== "en") {
+        texts = await utils.autoTranslate(texts, "en", Lang); // Translate the texts to the user's language if it is not English
     }
     if (interaction.isCommand()) {
         const cmd = data.bot.commands.get(interaction.commandName as string);
@@ -353,7 +353,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             return await interaction.reply({ content: "```\n" + `/${interaction.commandName}\n ${utils.createArrows(`${interaction.command?.name}`.length)}\n\nERR: Unknown slash command` + "\n```", ephemeral: true });
         }
         try {
-            await interaction.reply({ content: Lang !== "es" ? `${texts.loading} <a:discordproloading:875107406462472212>` : `<a:discordproloading:875107406462472212>`, flags: cmd.ephemeral ?  MessageFlags.Ephemeral : undefined }); // Reply with a loading message
+            await interaction.reply({ content: Lang !== "en" ? `${texts.loading} <a:discordproloading:875107406462472212>` : `<a:discordproloading:875107406462472212>`, flags: cmd.ephemeral ?  MessageFlags.Ephemeral : undefined }); // Reply with a loading message
             await cmd.execute(interaction, Lang);
             await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE"); // Update the last command executed
             await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]); // Insert the executed command into the executed_commands table
@@ -404,11 +404,11 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 // If the event is cancel_setup, cancel the setup
                 const [uid] = args;
                 let text = {
-                    value: "Vale, he cancelado el setup.",
-                    not_author: "No eres quien ejecutó el comando originalmente."
+                    value: "Alright, I've cancelled the setup.",
+                    not_author: "You're not the person who ran the command originally."
                 } // Texts for the cancel_setup event
-                if (Lang !== "es") {
-                    text = await utils.autoTranslate(text, "es", Lang); // Translate the texts to the user's language if it is not Spanish
+                if (Lang !== "en") {
+                    text = await utils.autoTranslate(text, "en", Lang); // Translate the texts to the user's language if it is not English
                 }
                 if (interaction.isRepliable() && uid !== interaction.user.id) return await interaction.reply({ content: text.not_author, ephemeral: true }); // Check if the user is the author of the original command and if not, reply with a message
                 if (interaction.isRepliable()) await interaction.deferUpdate(); // Defer the interaction if it is repliable
@@ -420,27 +420,27 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 const foundConfig: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [interaction.guildId]);
                 let stexts = {
                     errors: {
-                        not_author: "No eres quien ejecutó el comando originalmente.",
-                        invalid_rsp: "Respuesta inválida."
+                        not_author: "You're not the person who ran the command originally.",
+                        invalid_rsp: "Invalid response."
                     },
                     success: {
-                        done: "¡Hemos terminado el setup básico para tu servidor! Abajo está cómo quedó establecida la configuración."
+                        done: "We've finished the basic setup for your server! Below is the configuration we applied."
                     },
                     common: {
-                        ask_enable: "¿Deseas que al momento de terminar el setup, el filtro se active automáticamente? Responde con un 0 para indiciar que no deseas eso o con un 1 para indicar que sí deseas eso.",
-                        loaded_data: "Datos establecidos",
-                        yes: "Sí",
+                        ask_enable: "Do you want the filter to enable automatically when the setup ends? Reply with 0 if you don't and 1 if you do.",
+                        loaded_data: "Configured data",
+                        yes: "Yes",
                         no: "No",
-                        enabled: "Habilitado",
-                        init_msg: "Bien. Empezaré con algunas preguntas.",
-                        logs_enabled: "Logística habilitada",
-                        not_set: "No configurado",
-                        set: "Configurado",
-                        langtxt: "Idioma",
-                        log_channel: "Canal de logística",
-                        ask_enabled_logs: "¿Deseas habilitar los registros?",
-                        ask_logs_channel: "Activaste los registros, ¿En qué canal los quieres?",
-                        ask_lang: "¿Qué idioma quieres para el filtro? Utiliza el código del idioma. Por ejemplo:"
+                        enabled: "Enabled",
+                        init_msg: "Great. I'll start with a few questions.",
+                        logs_enabled: "Logging enabled",
+                        not_set: "Not configured",
+                        set: "Configured",
+                        langtxt: "Language",
+                        log_channel: "Log channel",
+                        ask_enabled_logs: "Do you want to enable logging?",
+                        ask_logs_channel: "You enabled logging. Which channel should I use?",
+                        ask_lang: "Which language should the filter use? Provide the language code. For example:"
                     }
                 };
                 const values = {
@@ -449,8 +449,8 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     logs_channel: "0",
                     lang: "en"
                 }
-                if (Lang !== "es") {
-                    stexts = await utils.autoTranslate(stexts, "es", Lang);
+                if (Lang !== "en") {
+                    stexts = await utils.autoTranslate(stexts, "en", Lang);
                 }
                 if (interaction.isRepliable() && uid !== interaction.user.id) return await interaction.reply({ content: stexts.errors.not_author, ephemeral: true });
                 const imessage = interaction.message;
@@ -517,7 +517,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 values["lang"] = await new Promise(async (resolve, reject) => {
                     let err = false;
                     do {
-                        const input = await GetResponse(err ? `${stexts.errors.invalid_rsp}\n${stexts.common.ask_lang} Español -> es || English -> en` : `${stexts.common.ask_lang} Español -> es || English -> en`);
+                        const input = await GetResponse(err ? `${stexts.errors.invalid_rsp}\n${stexts.common.ask_lang} English -> en || Spanish -> es` : `${stexts.common.ask_lang} English -> en || Spanish -> es`);
                         if (input.content.length > 2 || ["br", "ch", "wa"].some(v => input.content.toLowerCase() === v) || !langs.has(1, input.content.toLowerCase())) { err = true; continue; };
                         resolve(input.content.toLowerCase());
                         break;

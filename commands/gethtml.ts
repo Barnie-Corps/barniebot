@@ -9,11 +9,11 @@ export default {
         .addStringOption(o => o.setName("url").setRequired(true).setDescription("URL whose response code and html you wanna get")),
     execute: async (interaction: ChatInputCommandInteraction, language: string) => {
         let texts = {
-            code: "Código de respuesta",
-            invalid: "Ooops... Comprueba nuevamente la URL que me diste :)"
+            code: "Response Code",
+            invalid: "The URL provided is invalid or unreachable."
         }
-        if (language !== "es") {
-            texts = await utils.autoTranslate(texts, "es", language);
+        if (language !== "en") {
+            texts = await utils.autoTranslate(texts, "en", language);
         }
         const url = interaction.options.getString("url") as string;
         let response;

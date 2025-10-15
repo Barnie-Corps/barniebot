@@ -16,38 +16,38 @@ export default {
         const users: any = await db.query("SELECT * FROM discord_users");
         let texts = {
             embed: {
-                title: "Información general",
-                description: "Aquí verás estadísticas generales del bot.",
-                footer: "Santiago Morales © 2020 - 2025 Todos los derechos reservados.",
+            title: "General Information",
+            description: "Here you will see general bot statistics.",
+            footer: "Santiago Morales © 2020 - 2025 All rights reserved.",
             },
             fields: {
-                database: {
-                    users: "Usuarios",
-                    title: "Base de datos",
-                    last_command: "Último comando ejecutado",
-                    normal_messages: "Mensajes normales",
-                    global_messages: "Mensajes globales"
-                },
-                system: {
-                    cpu: "Carga de la CPU",
-                    storage: "Almacenamiento disponible",
-                    title: "Sistema"
-                },
-                bot: {
-                    cachedUsers: "Usuarios en la caché",
-                    totalUsers: "Usuarios totales",
-                    guilds: "Servidores",
-                    channels: "Canales"
-                },
-                messages: "Mensajes"
+            database: {
+                users: "Users",
+                title: "Database",
+                last_command: "Last executed command",
+                normal_messages: "Normal messages",
+                global_messages: "Global messages"
+            },
+            system: {
+                cpu: "CPU Load",
+                storage: "Available storage",
+                title: "System"
+            },
+            bot: {
+                cachedUsers: "Cached users",
+                totalUsers: "Total users",
+                guilds: "Servers",
+                channels: "Channels"
+            },
+            messages: "Messages"
             }
         }
         let needTranslation: boolean = false;
         const Start = Date.now();
         let ExecutionTime: number;
-        if (lang !== "es") {
+        if (lang !== "en") {
             needTranslation = true;
-            texts = await utils.autoTranslate(texts, "es", lang);
+            texts = await utils.autoTranslate(texts, "en", lang);
         }
         ExecutionTime = needTranslation ? Date.now() - Start : 0;
         let totalUsers = 0;

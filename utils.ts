@@ -30,8 +30,8 @@ const utils = {
     get_user_data: async (id: string): Promise<any> => {
       const user: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [id]);
       if (!user[0]) return { error: "User not found" };
-      const language: any = await db.query("SELECT * FROM languages WHERE userid = ?", [id]);
-      return { user: user[0], language: language[0] ?? "es" };
+  const language: any = await db.query("SELECT * FROM languages WHERE userid = ?", [id]);
+  return { user: user[0], language: language[0] ?? "en" };
     },
     set_user_language: async (args: { userId: string; language: string }): Promise<any> => {
       if (!args.userId || !args.language) return { error: "Missing parameters" };
@@ -292,9 +292,9 @@ const utils = {
   // getAiResponse: async (text: string, lang: string, id: string, isStart: boolean): Promise<string> => {
   //   const modelId = "ChitChatterLdJSpZu";
   //   let texts = {
-  //     mainMessage: "Habla en español",
-  //     mainReply: "Ok, voy a hablar en español",
-  //     instruction: "RECUERDA: No generes una respuesta que supere los 1800 caracteres"
+  //     mainMessage: "Speak in English",
+  //     mainReply: "Okay, I'll speak in English",
+  //     instruction: "REMEMBER: Do not generate a response longer than 1800 characters"
   //   }
   //   if (lang !== "es") {
   //     texts = await utils.autoTranslate(texts, "es", lang);

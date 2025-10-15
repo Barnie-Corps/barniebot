@@ -2,18 +2,29 @@ import { ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder } from "
 
 export default {
     data: new SlashCommandBuilder()
-    .setName("avatar")
-    .setDescription("Shows the avatar of an specified user or the author if none specified.")
-    .addUserOption(o => o.setName("target").setDescription("Target whose avatar u wanna see (don't specify if you want to see ur own avatar)").setRequired(false)),
-    async execute (interaction: ChatInputCommandInteraction) {
-        let target = interaction.options.getUser("target");
-        if (!target) target = interaction.user;
+        .setName("avatar")
+        .setDescription("Displays the avatar of a specified user or yourself if none is specified.")
+        .addUserOption(option => 
+            option
+                .setName("target")
+                .setDescription("The user whose avatar you wish to view")
+                .setRequired(false)
+        ),
+    async execute(interaction: ChatInputCommandInteraction) {
+        const target = interaction.options.getUser("target") ?? interaction.user;
+        
         const embed = new EmbedBuilder()
-        .setAuthor({ name: interaction.user.username, iconURL: interaction.user.displayAvatarURL() })
-        .setTitle(target.username)
-        .setImage(target.displayAvatarURL({ size: 1024 }))
-        .setColor("Purple")
+            .setAuthor({ 
+                name: interaction.user.username, 
+                iconURL: interaction.user.displayAvatarURL() 
+            })
+            .setTitle(`${target.username}'s Avatar`)
+            .setImage(target.displayAvatarURL({ size: 1024 }))
+            .setColor("Purple")
+            .setFooter({ text: `Requested by ${interaction.user.username}` })
+            .setTimestamp();
+        
         await interaction.editReply({ embeds: [embed], content: "" });
     },
     ephemeral: false
-}
+};

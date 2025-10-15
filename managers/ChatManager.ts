@@ -47,8 +47,8 @@ export default class ChatManager extends EventEmitter {
         if (blacklist.includes(message.author.id)) { message.reply("No."); return Log.info("Ignoring blacklisted user.", { userId: message.author.id }) }
         if (this.isRatelimited(message.author.id)) return Log.info(`Ignoring user ${message.author.username} as they're ratelimited.`, { userId: message.author.id, username: message.author.username });
         const start = Date.now();
-        let guilds: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
-        let userLanguage: any = (await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as any)[0]?.lang ?? "es";
+    let guilds: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
+    let userLanguage: any = (await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as any)[0]?.lang ?? "en";
         const parallelObject: any = {};
         guilds = guilds.sort((g1: any, g2: any) => {
             if (Number(g1.autotranslate) === 1 && Number(g2.autotranslate) !== 1) return 1;
@@ -63,20 +63,22 @@ export default class ChatManager extends EventEmitter {
             const wh = new WebhookClient({ id: graw.webhook_id, token: graw.webhook_token });
             parallelObject[g.id] = async (done: any): Promise<any> => {
                 let { content } = message;
+                const languageName = langs.where("1", userLanguage)?.name ?? userLanguage;
                 let texts = {
-                    default: "Mensaje traducido del",
-                    name: (await utils.translate(`Idioma ${langs.where("1", userLanguage)?.local}`, userLanguage, "es")).text.trim().split(" ").pop(),
-                    time: "(este mensaje tardó 1 segundo(s) en llegar a este servidor)"
+                    default: "Message translated from",
+                    name: languageName,
+                    time: "(this message took 1 second(s) to reach this server)"
                 }
                 if (message.reference) {
                     const ref = await message.fetchReference();
                     content = `> ${ref.content}\n\`@${ref.author.displayName}\` ${content}`;
                 }
                 if (userLanguage !== graw.language && graw.autotranslate) {
-                    if (graw.language !== "es") {
-                        texts = await utils.autoTranslate(texts, "es", graw.language);
+                    if (graw.language !== "en") {
+                        texts = await utils.autoTranslate(texts, "en", graw.language);
                     }
-                    content = `${(await utils.translate(content, userLanguage, graw.language)).text}\n*${texts.default} ${texts.name}*`;
+                    const translatedContent = (await utils.translate(content, userLanguage, graw.language)).text;
+                    content = `${translatedContent}\n*${texts.default} ${texts.name}*`;
                 }
                 try {
                     content = content.replace(/(http|https):\/\/[\w-]+(\.[\w-]+)+([\w.,@?^=%&amp;:/~+#-]*[\w@?^=%&amp;/~+#-])?/g, "[LINK]");
@@ -129,22 +131,24 @@ export default class ChatManager extends EventEmitter {
             }
             const wh = new WebhookClient({ id: graw.webhook_id, token: graw.webhook_token });
             parallelObject[g.id] = async (done: any): Promise<any> => {
+                let contentToSend = message;
                 if (graw.language !== language && graw.autotranslate) {
+                    const sourceLanguageName = langs.where("1", language)?.name ?? language;
                     let texts = {
-                        default: "Mensaje traducido del",
-                        name: (await utils.translate(`Idioma ${langs.where("1", language)?.local}`, language, "es")).text.trim().split(" ").pop()
+                        default: "Message translated from",
+                        name: sourceLanguageName
                     }
-                    if (graw.language !== "es") {
-                        texts = await utils.autoTranslate(texts, "es", graw.language);
+                    if (graw.language !== "en") {
+                        texts = await utils.autoTranslate(texts, "en", graw.language);
                     }
-                    texts.name = (await utils.translate(`Idioma ${texts.name}`, language, "es")).text.trim().split(" ").pop();
-                    message = `${(await utils.translate(message, language, graw.language)).text}\n*${texts.default} ${texts.name}*`;
+                    const translatedContent = (await utils.translate(message, language, graw.language)).text;
+                    contentToSend = `${translatedContent}\n*${texts.default} ${texts.name}*`;
                 }
                 try {
                     await wh.send({
                         username: client.user?.username,
                         avatarURL: client.user?.displayAvatarURL(),
-                        content: message,
+                        content: contentToSend,
                         allowedMentions: { parse: [] },
                         files: attachments?.map(a => a)
                     });

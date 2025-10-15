@@ -15,28 +15,28 @@ export default {
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
             errors: {
-                not_valid: "El canal elegido no es de texto, sólo se permiten canales de texto.",
-                only_guild: "Este comando sólo puede ejecutarse en servidores.",
-                not_registered: "Woah, tranquilo amigo, tienes que primero establecer un canal...",
-                missing_perms: "Hey, no tienes los permisos necesarios para hacer eso."
+                not_valid: "The chosen channel is not a text channel, only text channels are allowed.",
+                only_guild: "This command can only be executed in servers.",
+                not_registered: "Woah, hold on friend, you need to first set a channel...",
+                missing_perms: "Hey, you don't have the necessary permissions to do that."
             },
             success: {
-                set: "El canal ha sido establecido con éxito.",
-                disabled: "El chat global ha sido deshabilitado con éxito.",
-                enabled: "El chat global ha sido habilitado con éxito.",
-                first_time_enabled: "El canal ha sido establecido y, siendo la primera vez que se activa el chat global en este servidor, se ha activado por defecto. Recuerda que puedes activar la traducción automática para mensajes en un idioma distinto al tuyo.",
+                set: "The channel has been successfully set.",
+                disabled: "The global chat has been successfully disabled.",
+                enabled: "The global chat has been successfully enabled.",
+                first_time_enabled: "The channel has been set and, being the first time the global chat is activated in this server, it has been enabled by default. Remember that you can enable automatic translation for messages in a language different from yours.",
             },
             autotranslate: {
-                on: "El traductor automático está ahora activado en este servidor.",
-                off: "El traductor automático está ahora desactivado en este servidor."
+                on: "The automatic translator is now enabled on this server.",
+                off: "The automatic translator is now disabled on this server."
             },
             language: {
-                set: "El nuevo idioma se ha establecido con éxito.",
-                unsupported: "El idioma proporcionado no tiene soporte, intenta con otro."
+                set: "The new language has been successfully set.",
+                unsupported: "The provided language is not supported, try another one."
             }
         }
-        if (lang !== "es") {
-            texts = await utils.autoTranslate(texts, "es", lang);
+        if (lang !== "en") {
+            texts = await utils.autoTranslate(texts, "en", lang);
         }
         if (interaction.options.getSubcommand()) {
             const subcmd = interaction.options.getSubcommand();
@@ -110,7 +110,7 @@ export default {
                         break;
                     }
                     await db.query("UPDATE globalchats SET enabled = ? WHERE guild = ?", [chatdb[0].enabled ? false : true, interaction.guildId]);
-                    await interaction.editReply(chatdb[0].enabled ? texts.success.disabled : texts.success.disabled);
+                    await interaction.editReply(chatdb[0].enabled ? texts.success.disabled : texts.success.enabled);
                     break;
                 }
             }

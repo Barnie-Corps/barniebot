@@ -6,11 +6,11 @@ export default {
     .setName("privacy")
     .setDescription("Shows you the bot privacy policy."),
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
-        let text = { value: "A continuación, te enviaré mi política de privacidad, te recomiendo que la leas." };
-        if (lang !== "es") {
-            text = (await utils.autoTranslate(text, "es", lang));
+        let text = { value: "Here is the bot's privacy policy, I recommend reading it." };
+        if (lang !== "en") {
+            text = (await utils.autoTranslate(text, "en", lang));
         }
-        await interaction.editReply(`${text.value}\n[privacy.md](https://github.com/Barnie-Corps/barniebot/blob/master/privacy.md)`);
+        await interaction.editReply(`${text.value}\n[Privacy policy](https://github.com/Barnie-Corps/barniebot/blob/master/privacy.md)`);
     },
     ephemeral: false
 }

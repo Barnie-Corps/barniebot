@@ -25,7 +25,8 @@ export default {
         else {
             await db.query("INSERT INTO languages SET ?", [{ userid: interaction.user.id, lang: newLang }]);
         }
-        await reply(newLang === "es" ? `Idioma establecido correctamente a **${langs.where("1", newLang)?.local}**\n\nRecuerda: BarnieBot almacena información pública de tu perfil, tal como lo es tu ID de discord, tu nombre de usuario, foto de perfil, etc. ¡Nosotros no almacenamos tus mensajes!` : (await utils.translate(`Idioma establecido correctamente a **${langs.where("1", newLang)?.local}**\n\nRecuerda: BarnieBot almacena información pública de tu perfil, tal como lo es tu ID de discord, tu nombre de usuario, foto de perfil, etc. ¡Nosotros no almacenamos tus mensajes!`, "es", newLang)).text);
+    const confirmationMessage = `Language set successfully to **${langs.where("1", newLang)?.local}**\n\nRemember: BarnieBot stores public information from your profile such as your Discord ID, username, profile picture, etc. We do not store your messages!`;
+    await reply(newLang === "en" ? confirmationMessage : (await utils.translate(confirmationMessage, "en", newLang)).text);
     },
     ephemeral: true
 }

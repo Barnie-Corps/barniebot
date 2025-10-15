@@ -26,22 +26,22 @@ export default {
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
             errors: {
-                not_vip: "Debes ser VIP para usar esta función.",
-                no_response: "¡Oh no! No pude generar una respuesta, prueba repitiendo lo que dijiste, tal vez cambiando un par de palabras.",
-                long_response: "¡Oh no! La respuesta es demasiado larga, enviaré la respuesta como archivo de texto con formato Markdown.",
+                not_vip: "You must be a VIP to use this feature.",
+                no_response: "Oh no! I couldn't generate a reply. Try repeating what you said, maybe changing a couple of words.",
+                long_response: "Oh no! The response is too long. I'll send it as a Markdown-formatted text file.",
             },
             common: {
-                question: "Tu pregunta fue:",
-                thinking: "Pensando...",
-                started_chat: "El chat con la Inteligencia Artificial se ha iniciado, puedes decir una de las siguientes frases para detenerla:",
-                stopped_ai: "El chat con la Inteligencia Artificial ha sido desactivado.",
-                can_take_time: "Recuerda que la respuesta de la IA puede tomar tiempo, si envías varios mensajes antes de recibir respuesta o empiezas a enviar demasiados mensajes juntos, se te prohibirá el acceso a este comando indefinidamente.",
-                ai_left: "La IA ha decidido terminar la conversación. Abajo está el motivo dado por la misma.",
+                question: "Your question was:",
+                thinking: "Thinking...",
+                started_chat: "The chat with the AI has started. You can say one of the following phrases to stop it:",
+                stopped_ai: "The chat with the AI has been disabled.",
+                can_take_time: "Remember that the AI's reply can take a bit of time. If you send multiple messages before getting a response or start flooding the chat, you'll lose access to this command indefinitely.",
+                ai_left: "The AI decided to end the conversation. Here's the reason it gave.",
             },
             success: {}
         }
-        if (lang !== "es") {
-            texts = await utils.autoTranslate(texts, "es", lang);
+        if (lang !== "en") {
+            texts = await utils.autoTranslate(texts, "en", lang);
         }
         const subcmd = interaction.options.getSubcommand();
         switch (subcmd) {
@@ -49,7 +49,7 @@ export default {
                 return await interaction.editReply("Temporary unavailable due to high demand. Please use the chat command.");
                 await interaction.editReply(texts.common.thinking);
                 const question = interaction.options.getString("question") as string;
-                const response = await ai.GetSingleResponse(interaction.user.id, `Responde a la siguiente pregunta de la forma más corta posible y en el idioma de la pregunta: ${question}`);
+                const response = await ai.GetSingleResponse(interaction.user.id, `Answer the following question as briefly as possible and in the language used in the question: ${question}`);
                 if (response.length < 1) return await interaction.editReply(texts.errors.no_response);
                 if (response.length > 2000) {
                     const filename = `./ai-response-${Date.now()}.md`;
@@ -66,10 +66,10 @@ export default {
                 const collector = (interaction.channel as any).createMessageCollector({ 
                     filter: (m: { author: { id: string } }) => m.author.id === interaction.user.id 
                 });
-                await interaction.editReply(`${texts.common.started_chat} \`stop ai, ai stop, detener ia, detener ai\`\n${texts.common.can_take_time}`);
+                await interaction.editReply(`${texts.common.started_chat} \`stop ai, ai stop, stop chat, end ai\`\n${texts.common.can_take_time}`);
                 collector?.on("collect", async (message: any): Promise<any> => {
                     await (interaction.channel as TextChannel).sendTyping?.();
-                    if (["stop ai", "detener ai", "detener ia", "ai stop"].some(stop => message.content.toLowerCase().includes(stop))) {
+                    if (["stop ai", "ai stop", "stop chat", "end ai"].some(stop => message.content.toLowerCase().includes(stop))) {
                         await interaction.followUp(texts.common.stopped_ai);
                         collector?.stop();
                         return;
