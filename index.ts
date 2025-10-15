@@ -167,55 +167,70 @@ client.on("messageCreate", async (message): Promise<any> => {
             const targetCode = args.slice(0).join(' '); // Get the code to eval from the message content
             if (!targetCode) return message.reply('You must provide a code to eval.');
             try {
-                // Evaluate the code
-                const start = Date.now();
-                const evalued = eval(targetCode);
-                const done = Date.now() - start;
-                const embed = new EmbedBuilder()
-                    .setColor("Green")
-                    .setTitle('Code evaluated')
-                    .addFields(
-                        {
-                            name: "**Output Type**:",
-                            value: `\`\`\`prolog\n${typeof (evalued)}\`\`\``,
-                            inline: true
-                        },
-                        {
-                            name: "**Evaluated in:**",
-                            value: `\`\`\`yaml\n${done}ms\`\`\``,
-                            inline: true
-                        },
-                        {
-                            name: "**Input**",
-                            value: `\`\`\`js\n${targetCode}\`\`\``
-                        },
-                        {
-                            name: "**Output**",
-                            value: `\`\`\`js\n${inspect(evalued, { depth: 0 })}\`\`\``
-                        }
-                    ) // Create an embed with the evaluation results
-                message.reply({ embeds: [embed] }); // Reply with the embed
-                break;
+            // Evaluate the code
+            const start = Date.now();
+            let evalued = eval(targetCode);
+            
+            // Handle promises
+            if (evalued instanceof Promise) {
+                evalued = await evalued;
+            }
+            
+            const done = Date.now() - start;
+            const output = inspect(evalued, { depth: 1, maxArrayLength: 100 });
+            
+            // Truncate output if too long
+            const truncatedOutput = output.length > 1900 ? `${output.substring(0, 1900)}...` : output;
+            
+            const embed = new EmbedBuilder()
+                .setColor("Green")
+                .setTitle('Code evaluated')
+                .addFields(
+                {
+                    name: "**Output Type**:",
+                    value: `\`\`\`prolog\n${typeof (evalued)}\`\`\``,
+                    inline: true
+                },
+                {
+                    name: "**Evaluated in:**",
+                    value: `\`\`\`yaml\n${done}ms\`\`\``,
+                    inline: true
+                },
+                {
+                    name: "**Input**",
+                    value: `\`\`\`js\n${targetCode.length > 1000 ? `${targetCode.substring(0, 1000)}...` : targetCode}\`\`\``
+                },
+                {
+                    name: "**Output**",
+                    value: `\`\`\`js\n${truncatedOutput}\`\`\``
+                }
+                );
+            
+            await message.reply({ embeds: [embed] });
+            break;
             }
             // Catch any errors that may occur while evaluating the code and reply with the error
-            catch (error) {
-                const errorEmbed = new EmbedBuilder()
-                    .setColor('Red')
-                    .setTitle('ERROR')
-                    .addFields(
-                        {
-                            name: "Input",
-                            value: `\`\`\`js\n${targetCode}\`\`\``
-                        },
-                        {
-                            name: "Error",
-                            value: `\`\`\`js\n${error}\`\`\``
-                        }
-                    )
-                message.reply({ embeds: [errorEmbed] });
-                break;
-            }
+            catch (error: any) {
+            const errorMessage = error?.stack || error?.message || String(error);
+            const truncatedError = errorMessage.length > 1900 ? `${errorMessage.substring(0, 1900)}...` : errorMessage;
+            
+            const errorEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setTitle('ERROR')
+                .addFields(
+                {
+                    name: "Input",
+                    value: `\`\`\`js\n${targetCode.length > 1000 ? `${targetCode.substring(0, 1000)}...` : targetCode}\`\`\``
+                },
+                {
+                    name: "Error",
+                    value: `\`\`\`js\n${truncatedError}\`\`\``
+                }
+                );
+            
+            await message.reply({ embeds: [errorEmbed] });
             break;
+            }
         }
         case "active_guilds": {
             const guilds = [...(function () {
