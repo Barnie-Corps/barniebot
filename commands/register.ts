@@ -2,6 +2,7 @@ import { ChatInputCommandInteraction, SlashCommandBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
 import data from "../data";
+import * as fs from "fs";
 
 export default {
     data: new SlashCommandBuilder()
@@ -72,7 +73,7 @@ export default {
                 // Creating token with a base64 encoded string of the email and the current time [TOKEN IS NOT SECURE SINCE IT IS USED FOR NON-SENSITIVE DATA]
                 const token = Buffer.from(`${email}:${Date.now()}`).toString("base64");
                 await db.query("INSERT INTO registered_accounts SET ?", [{ email, username, password: utils.encryptWithAES(data.bot.encryption_key, password), verification_code, created_at: Date.now(), token }]);
-                await utils.sendEmail(email, "Verification code", `Your verification code is: ${verification_code}`);
+                await utils.sendEmail(email, "Verification code", "", fs.readFileSync("./verification_placeholder.html", "utf-8").replace("{code}", verification_code.toString()).replace("{username}", username));
                 await interaction.user.send(texts.common.email_sent);
                 break;
             }
