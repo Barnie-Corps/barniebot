@@ -224,6 +224,17 @@ const functionDeclarations = {
             },
             required: ["userId", "content"]
         }
+    },
+    check_vip_status: {
+        name: "check_vip_status",
+        description: "Check if a user has VIP status. VIP users may have access to special features or privileges. This function can be used to verify a user's VIP status based on their user ID.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
     }
 } as const satisfies Record<string, FunctionDeclaration>;
 

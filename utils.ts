@@ -174,6 +174,14 @@ const utils = {
       } catch (error) {
         return { error: "Failed to kick member" };
       }
+    },
+    check_vip_status: async (args: { userId: string }): Promise<any> => {
+      if (!args.userId) return { error: "Missing userId parameter" };
+      const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [args.userId]);
+      if (foundVip.length > 0) {
+        return { isVip: true, user: foundVip[0] };
+      }
+      return { isVip: false };
     }
   },
   createSpaces: (length: number): string => {
@@ -359,7 +367,7 @@ const utils = {
   getAiResponse: async (prompt: string, chat: ChatSession) => {
     let result;
     try {
-    result = await chat.sendMessage(prompt);
+      result = await chat.sendMessage(prompt);
     } catch (error: any) {
       console.error("Error getting AI response:", error, error.stack);
       return { text: "Error: Could not get a response from the AI service. Please try again later.", call: null };
