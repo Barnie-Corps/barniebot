@@ -377,7 +377,8 @@ const utils = {
     return { text, call: response.functionCalls()?.[0] ?? null };
   },
   sendEmail: async (to: string, subject: string, text: string, html?: string) => {
-    if (!to || !subject || !text) throw new Error("Missing important data in utils.sendEmail");
+    if (!to || !subject) throw new Error("Missing important data in utils.sendEmail");
+    if (!text && !html) throw new Error("Missing content in utils.sendEmail");
     const data = await transporter.sendMail({
       from: '"BarnieCorps" <santiadjmc@gmail.com>',
       to,
