@@ -13,12 +13,18 @@ const DefaultChatManagerOptions: ChatManagerOptions = {
     ratelimit_time: 60000
 }
 const blacklist: string[] = ["1204899276229058625"];
+const GUILD_CACHE_TTL = 15000;
+const LANGUAGE_CACHE_TTL = 600000;
+const LINK_REGEX = /(http|https):\/\/[\w-]+(\.[\w-]+)+([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])?/g;
 
 export default class ChatManager extends EventEmitter {
     private cache = new Collection<string, any>();
     private ratelimits = new Collection<string, any>();
     private normal_interval: NodeJS.Timer = setInterval(() => { }, 1000);
     private ratelimit_interval: NodeJS.Timer = setInterval(() => { }, 1000);
+    private guildCache: { expires: number, data: any[] } | null = null;
+    private languageCache = new Collection<string, { expires: number, lang: string }>();
+    private webhookCache = new Collection<string, WebhookClient>();
     constructor(public options: ChatManagerOptions = DefaultChatManagerOptions) {
         super();
         this.clear_times_function = this.clear_times_function.bind(this);
@@ -47,119 +53,139 @@ export default class ChatManager extends EventEmitter {
         if (blacklist.includes(message.author.id)) { message.reply("No."); return Log.info("Ignoring blacklisted user.", { userId: message.author.id }) }
         if (this.isRatelimited(message.author.id)) return Log.info(`Ignoring user ${message.author.username} as they're ratelimited.`, { userId: message.author.id, username: message.author.username });
         const start = Date.now();
-    let guilds: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
-    let userLanguage: any = (await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as any)[0]?.lang ?? "en";
-        const parallelObject: any = {};
-        guilds = guilds.sort((g1: any, g2: any) => {
-            if (Number(g1.autotranslate) === 1 && Number(g2.autotranslate) !== 1) return 1;
-            else if (Number(g2.autotranslate) === 1 && Number(g1.autotranslate) !== 1) return -1;
-            else return 0;
+        const reactionPromise = message.react("875107406462472212").catch(error => {
+            Log.warn(`Failed to add processing reaction to message ${message.id}`, { messageId: message.id, error: error?.message ?? error });
+            return null;
         });
-        await message.react("875107406462472212");
-        for (const graw of guilds) {
-            const g = client.guilds.cache.get(graw.guild) as Guild;
-            if (g.id === message.guildId) continue;
-            const c = g.channels.cache.get(graw.channel);
-            const wh = new WebhookClient({ id: graw.webhook_id, token: graw.webhook_token });
-            parallelObject[g.id] = async (done: any): Promise<any> => {
-                let { content } = message;
-                const languageName = langs.where("1", userLanguage)?.name ?? userLanguage;
-                let texts = {
-                    default: "Message translated from",
-                    name: languageName,
-                    time: "(this message took 1 second(s) to reach this server)"
-                }
-                if (message.reference) {
-                    const ref = await message.fetchReference();
-                    content = `> ${ref.content}\n\`@${ref.author.displayName}\` ${content}`;
-                }
-                if (userLanguage !== graw.language && graw.autotranslate) {
-                    if (graw.language !== "en") {
-                        texts = await utils.autoTranslate(texts, "en", graw.language);
-                    }
-                    const translatedContent = (await utils.translate(content, userLanguage, graw.language)).text;
-                    content = `${translatedContent}\n*${texts.default} ${texts.name}*`;
-                }
-                try {
-                    content = content.replace(/(http|https):\/\/[\w-]+(\.[\w-]+)+([\w.,@?^=%&amp;:/~+#-]*[\w@?^=%&amp;/~+#-])?/g, "[LINK]");
-                    await wh.send({
-                        username: data.bot.owners.includes(message.author.id) ? `[OWNER] ${message.author.displayName}` : message.author.displayName,
-                        avatarURL: message.author.displayAvatarURL(),
-                        content: content || "*Attachment*",
-                        allowedMentions: { parse: [] },
-                        files: message.attachments.map(a => a)
-                    });
-                    // wh.editMessage(msg.id, `*${msg.content}\n${texts.time.replace("1", String((((new Date(msg.timestamp)).getTime() - (new Date(message.createdTimestamp).getTime())) / 1000).toFixed(1)))}*`);
-                    done(null, true);
-                }
-                catch (err: any) {
-                    Log.warn(`Couldn't send global message to guild ${g.name}`, { guildId: g.id, guildName: g.name });                    console.log(err.stack);
-                    await message.reactions.removeAll();
-                    message.react("800125816633557043");
-                    message.react("869607044892741743");
-                }
-            };
-        }
+        const [guilds, userLanguage, baseContent] = await Promise.all([
+            this.getActiveGuilds(),
+            this.getUserLanguage(message.author.id),
+            this.resolveMessageContent(message)
+        ]);
+        const normalizedUserLanguage = userLanguage.toLowerCase();
+        const languageName = langs.where("1", userLanguage)?.name ?? userLanguage;
+        const hasTextContent = baseContent.trim().length > 0;
+        let sanitizedDefaultContent = this.sanitizeContent(baseContent);
+        if (!sanitizedDefaultContent || !sanitizedDefaultContent.trim().length) sanitizedDefaultContent = "*Attachment*";
+        const files = message.attachments.size ? Array.from(message.attachments.values()) : undefined;
+        const senderUsername = data.bot.owners.includes(message.author.id) ? `[OWNER] ${message.author.displayName}` : message.author.displayName;
+        const senderAvatarURL = message.author.displayAvatarURL();
+        const getTranslatedContent = this.createTranslationResolver(
+            baseContent,
+            userLanguage,
+            languageName,
+            sanitizedDefaultContent,
+            hasTextContent
+        );
+        let failed = false;
+        const tasks = guilds
+            .filter((graw: any) => graw.guild !== message.guildId)
+            .map(async (graw: any) => {
+            const guild = client.guilds.cache.get(graw.guild) as Guild | undefined;
+            if (!guild) {
+                await db.query("DELETE FROM globalchats WHERE guild = ?", [graw.guild]);
+                this.invalidateGuildCache();
+                return;
+            }
+                const targetLanguage = typeof graw.language === "string" ? graw.language : String(graw.language ?? "");
+                const shouldTranslate = Boolean(graw.autotranslate) && targetLanguage && targetLanguage.toLowerCase() !== normalizedUserLanguage;
+            const webhook = this.getWebhook(graw);
+                const contentToSend = shouldTranslate ? await getTranslatedContent(targetLanguage) : sanitizedDefaultContent;
+                const payload: any = {
+                    username: senderUsername,
+                    avatarURL: senderAvatarURL,
+                    content: contentToSend,
+                    allowedMentions: { parse: [] }
+                };
+                if (files) payload.files = files;
+            try {
+                await webhook.send(payload);
+            }
+            catch (error: any) {
+                failed = true;
+                Log.warn(`Couldn't send global message to guild ${guild.name}`, { guildId: guild.id, guildName: guild.name });
+                this.webhookCache.delete(graw.webhook_id);
+                if (error?.stack) console.log(error.stack);
+                throw error;
+            }
+            });
+        await Promise.allSettled(tasks);
+        const dispatchEnd = Date.now();
         const content = utils.encryptWithAES(data.bot.encryption_key, message.content);
-        await db.query("INSERT INTO global_messages SET ?", [{ uid: message.author.id, content: content || "[EMPTY MESSAGE]", language: userLanguage }]);
-        await utils.parallel(parallelObject);
-        const end = Date.now();
-        await message.reactions.removeAll();
-        if ((end - start) >= 900) Log.info(`Slow dispatch of message with ID ${message.id} from author ${message.author.username}`, { 
+        const insertPromise = db.query("INSERT INTO global_messages SET ?", [{ uid: message.author.id, content: content || "[EMPTY MESSAGE]", language: userLanguage }]);
+        const removalPromise = message.reactions.removeAll().catch(error => {
+            Log.warn(`Failed to clear reactions for message ${message.id}`, { messageId: message.id, error: error?.message ?? error });
+            return null;
+        });
+        await Promise.all([insertPromise, removalPromise, reactionPromise]);
+        if (failed) {
+            await message.react("800125816633557043");
+            await message.react("869607044892741743");
+        }
+        const totalDuration = Date.now() - start;
+        const dispatchTime = dispatchEnd - start;
+        if (dispatchTime >= 900) Log.info(`Slow dispatch of message with ID ${message.id} from author ${message.author.username}`, { 
             messageId: message.id, 
             authorId: message.author.id, 
             username: message.author.username,
-            dispatchTime: end - start,
+            dispatchTime: dispatchTime,
+            totalDuration,
             slow: true
         });
         else Log.info(`Message dispatch completed`, { 
             messageId: message.id, 
             authorId: message.author.id, 
             username: message.author.username,
-            dispatchTime: end - start
+            dispatchTime: dispatchTime,
+            totalDuration
         });
     };
     public async announce(message: string, language: string, attachments?: Collection<string, Attachment>): Promise<void> {
-        const guilds: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
-        const parallelObject: any = {};
-        for (const graw of guilds) {
-            const g = client.guilds.cache.get(graw.guild) as Guild;
-            if (!g) {
+        const guilds = await this.getActiveGuilds();
+        if (guilds.length === 0) return;
+        const files = attachments?.size ? Array.from(attachments.values()) : undefined;
+        const normalizedLanguage = (language ?? "en").toLowerCase();
+        const sourceLanguageName = langs.where("1", language)?.name ?? language;
+        const hasTextContent = message.trim().length > 0;
+        let sanitizedDefaultContent = this.sanitizeContent(message);
+        if (!sanitizedDefaultContent || !sanitizedDefaultContent.trim().length) sanitizedDefaultContent = "*Attachment*";
+        const getTranslatedContent = this.createTranslationResolver(
+            message,
+            language,
+            sourceLanguageName,
+            sanitizedDefaultContent,
+            hasTextContent
+        );
+        const botUsername = client.user?.username;
+        const botAvatarURL = client.user?.displayAvatarURL();
+        const tasks = guilds.map(async (graw: any) => {
+            const guild = client.guilds.cache.get(graw.guild) as Guild | undefined;
+            if (!guild) {
                 Log.info(`Couldn't find guild with ID ${graw.guild}, this guild entry has been deleted.`, { guildId: graw.guild });
                 await db.query("DELETE FROM globalchats WHERE guild = ?", [graw.guild]);
-                continue;
+                this.invalidateGuildCache();
+                return;
             }
-            const wh = new WebhookClient({ id: graw.webhook_id, token: graw.webhook_token });
-            parallelObject[g.id] = async (done: any): Promise<any> => {
-                let contentToSend = message;
-                if (graw.language !== language && graw.autotranslate) {
-                    const sourceLanguageName = langs.where("1", language)?.name ?? language;
-                    let texts = {
-                        default: "Message translated from",
-                        name: sourceLanguageName
-                    }
-                    if (graw.language !== "en") {
-                        texts = await utils.autoTranslate(texts, "en", graw.language);
-                    }
-                    const translatedContent = (await utils.translate(message, language, graw.language)).text;
-                    contentToSend = `${translatedContent}\n*${texts.default} ${texts.name}*`;
-                }
-                try {
-                    await wh.send({
-                        username: client.user?.username,
-                        avatarURL: client.user?.displayAvatarURL(),
-                        content: contentToSend,
-                        allowedMentions: { parse: [] },
-                        files: attachments?.map(a => a)
-                    });
-                }
-                catch (err: any) {
-                    Log.warn(`Couldn't send global message to guild ${g.name}`, { guildId: g.id, guildName: g.name });
-                }
-                done(null, true);
+            const webhook = this.getWebhook(graw);
+            const targetLanguage = typeof graw.language === "string" ? graw.language : String(graw.language ?? "");
+            const shouldTranslate = Boolean(graw.autotranslate) && targetLanguage && targetLanguage.toLowerCase() !== normalizedLanguage;
+            const contentToSend = shouldTranslate ? await getTranslatedContent(targetLanguage) : sanitizedDefaultContent;
+            const payload: any = {
+                username: botUsername,
+                avatarURL: botAvatarURL,
+                content: contentToSend,
+                allowedMentions: { parse: [] }
             };
-        }
-        await utils.parallel(parallelObject);
+            if (files) payload.files = files;
+            try {
+                await webhook.send(payload);
+            }
+            catch (error: any) {
+                Log.warn(`Couldn't send global message to guild ${guild.name}`, { guildId: guild.id, guildName: guild.name });
+                this.webhookCache.delete(graw.webhook_id);
+            }
+        });
+        await Promise.allSettled(tasks);
     }
     private async clear_times_function(): Promise<void> {
         for (const [k, v] of this.cache.entries()) {
@@ -196,5 +222,90 @@ export default class ChatManager extends EventEmitter {
     public async ratelimit(uid: string, username: string): Promise<void> {
         this.ratelimits.set(uid, { uid, time_left: this.options.ratelimit_time, username });
         await this.announce(`The user ${username} has been ratelimited for ${this.options.ratelimit_time / 1000} seconds.`, "en");
+    }
+    private sanitizeContent(content: string): string {
+        return content.replace(LINK_REGEX, "[LINK]");
+    }
+    private async getActiveGuilds(): Promise<any[]> {
+        const now = Date.now();
+        if (this.guildCache && this.guildCache.expires > now) return this.guildCache.data;
+    const guildsRaw: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
+    const guilds: any[] = Array.isArray(guildsRaw) ? [...guildsRaw] : [];
+    const sorted = guilds.sort((g1: any, g2: any) => {
+            if (Number(g1.autotranslate) === 1 && Number(g2.autotranslate) !== 1) return 1;
+            if (Number(g2.autotranslate) === 1 && Number(g1.autotranslate) !== 1) return -1;
+            return 0;
+        });
+        this.guildCache = { data: sorted, expires: now + GUILD_CACHE_TTL };
+        return sorted;
+    }
+    private invalidateGuildCache(): void {
+        this.guildCache = null;
+    }
+    private createTranslationResolver(baseContent: string, sourceLanguage: string, sourceLanguageName: string, sanitizedFallback: string, hasTextContent: boolean): (targetLanguage: string) => Promise<string> {
+        const normalizedSource = (sourceLanguage ?? "").toLowerCase();
+        const cache = new Map<string, Promise<string>>();
+        const noticeTemplate = {
+            default: "Message translated from",
+            name: sourceLanguageName
+        };
+        // Resolve translated variants per language only once per dispatch round.
+        return async (targetLanguage: string): Promise<string> => {
+            if (!hasTextContent) return sanitizedFallback;
+            const normalizedTarget = (targetLanguage ?? "").toLowerCase();
+            if (!targetLanguage || normalizedTarget === normalizedSource) return sanitizedFallback;
+            const cacheKey = normalizedTarget || targetLanguage;
+            const cached = cache.get(cacheKey);
+            if (cached) return cached;
+            const translationPromise = (async () => {
+                try {
+                    const [translatedContent, translatedNotice] = await Promise.all([
+                        utils.translate(baseContent, sourceLanguage, targetLanguage),
+                        normalizedTarget === "en"
+                            ? Promise.resolve({ ...noticeTemplate })
+                            : utils.autoTranslate({ ...noticeTemplate }, "en", targetLanguage)
+                    ]);
+                    const notice = normalizedTarget === "en" ? noticeTemplate : translatedNotice;
+                    const noticeText = `*${notice.default} ${notice.name}*`;
+                    const combined = translatedContent.text
+                        ? `${translatedContent.text}\n${noticeText}`
+                        : noticeText;
+                    const sanitized = this.sanitizeContent(combined) || sanitizedFallback;
+                    return sanitized;
+                }
+                catch (error: any) {
+                    Log.warn("Failed to translate global message", { sourceLanguage, targetLanguage, error: error?.message ?? error });
+                    return sanitizedFallback;
+                }
+            })();
+            cache.set(cacheKey, translationPromise);
+            return translationPromise;
+        };
+    }
+    private async getUserLanguage(userId: string): Promise<string> {
+        const now = Date.now();
+        const cached = this.languageCache.get(userId);
+        if (cached && cached.expires > now) return cached.lang;
+        const result: any = await db.query("SELECT * FROM languages WHERE userid = ?", [userId]);
+        const language = result?.[0]?.lang ?? "en";
+        this.languageCache.set(userId, { lang: language, expires: now + LANGUAGE_CACHE_TTL });
+        return language;
+    }
+    private getWebhook(graw: any): WebhookClient {
+        const cached = this.webhookCache.get(graw.webhook_id);
+        if (cached) return cached;
+        const webhook = new WebhookClient({ id: graw.webhook_id, token: graw.webhook_token });
+        this.webhookCache.set(graw.webhook_id, webhook);
+        return webhook;
+    }
+    private async resolveMessageContent(message: Message<true>): Promise<string> {
+        if (!message.reference) return message.content;
+        try {
+            const reference = await message.fetchReference();
+            return `> ${reference.content}\n\`@${reference.author.displayName}\` ${message.content}`;
+        }
+        catch (_error) {
+            return message.content;
+        }
     }
 };

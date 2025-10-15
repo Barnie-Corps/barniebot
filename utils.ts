@@ -9,6 +9,22 @@ import Log from "./Log";
 import AIFunctions from "./AIFunctions";
 import data from "./data";
 import client from ".";
+const TRANSLATE_WORKER_TYPE = "translate";
+const TRANSLATE_WORKER_PATH = path.join(__dirname, "workers/translate.js");
+const TRANSLATE_WORKER_POOL_SIZE = 4;
+const TRANSLATE_TIMEOUT = 15000;
+const TRANSLATE_CACHE_TTL = 300000;
+const TRANSLATE_CACHE_LIMIT = 500;
+const translationCache = new Map<string, { value: string; expires: number }>();
+const pendingTranslations = new Map<string, Promise<string>>();
+Workers.bulkCreateWorkers(TRANSLATE_WORKER_PATH, TRANSLATE_WORKER_TYPE, TRANSLATE_WORKER_POOL_SIZE);
+const trimTranslationCache = () => {
+  while (translationCache.size > TRANSLATE_CACHE_LIMIT) {
+    const firstKey = translationCache.keys().next().value;
+    if (!firstKey) break;
+    translationCache.delete(firstKey);
+  }
+};
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
   port: 465,
@@ -199,15 +215,32 @@ const utils = {
     return censor;
   },
   translate: async (text: string, from: string, target: string): Promise<any> => {
-    return new Promise((resolve, reject) => {
-      const worker = Workers.getAvailableWorker("translate") ?? (Workers.createWorker(path.join(__dirname, "workers/translate.js"), "translate") as unknown as { type: string; worker: Worker; id: string });
-      const message = Workers.postMessage(worker.id, { text, from, to: target });
-      Workers.on("message", async (data) => {
-        if (data.id !== worker.id) return;
-        if (data.message.id !== message) return;
-        resolve({ text: data.message.translation });
-      });
-    });
+    const cacheKey = `${from}->${target}:${text}`;
+    const cached = translationCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && cached.expires > now) return { text: cached.value };
+    if (pendingTranslations.has(cacheKey)) {
+      const shared = pendingTranslations.get(cacheKey) as Promise<string>;
+      return { text: await shared };
+    }
+    const task = (async () => {
+      const worker = Workers.getAvailableWorker(TRANSLATE_WORKER_TYPE) ?? (Workers.createWorker(TRANSLATE_WORKER_PATH, TRANSLATE_WORKER_TYPE) as unknown as { type: string; worker: Worker; id: string } | undefined);
+      if (!worker) throw new Error("Unable to acquire translate worker");
+      const messageId = Workers.postMessage(worker.id, { text, from, to: target });
+      const response = await Workers.awaitResponse(worker.id, messageId, TRANSLATE_TIMEOUT);
+      if (response.message?.error) throw new Error(response.message.error);
+      const translatedText = String(response.message.translation ?? "");
+      translationCache.set(cacheKey, { value: translatedText, expires: Date.now() + TRANSLATE_CACHE_TTL });
+      trimTranslationCache();
+      return translatedText;
+    })();
+    pendingTranslations.set(cacheKey, task);
+    try {
+      const translated = await task;
+      return { text: translated };
+    } finally {
+      pendingTranslations.delete(cacheKey);
+    }
   },
   parallel: (functions: any): Promise<any[]> => {
     return new Promise((resolve, reject) => {
@@ -223,7 +256,7 @@ const utils = {
     if (typeof obj !== "object" || Array.isArray(obj)) throw new TypeError(`The autoTranslate function takes as first argument an object, got ${Array.isArray(obj) ? "Array" : typeof obj}`);
     if (typeof language !== "string") throw new TypeError(`The autoTranslate function takes as second argument a string, got ${typeof language}`);
     const keys = Object.keys(obj);
-    const newObj = obj;
+    const newObj = { ...obj };
     const validKeys: string[] = [];
     for (const k of keys) {
       if (typeof obj[k] === "object" && !Array.isArray(obj)) {
@@ -234,27 +267,10 @@ const utils = {
       if (typeof obj[k] !== "string") continue;
       validKeys.push(k);
     }
-    const translateObj: any = new Object();
-    for (const vk of validKeys) {
-      translateObj[vk] = async (done: any) => {
-        await new Promise(async (resolve, reject) => {
-          const worker = Workers.getAvailableWorker("translate") ?? (Workers.createWorker(path.join(__dirname, "workers/translate.js"), "translate", true) as unknown as { type: string; worker: Worker; id: string });
-          const message = Workers.postMessage(worker.id, {
-            text: obj[vk],
-            from: language,
-            to: target,
-          });
-          Workers.on("message", async (data) => {
-            if (data.id !== worker.id) return;
-            if (data.message.id !== message) return;
-            newObj[vk] = data.message.translation;
-            resolve(true);
-          });
-        });
-        done(null, true);
-      };
-    }
-    await utils.parallel(translateObj);
+    await Promise.all(validKeys.map(async vk => {
+      const translated = await utils.translate(obj[vk], language, target);
+      newObj[vk] = translated.text;
+    }));
     return newObj;
   },
   encryptWithAES: (key: string, data: string): string => {

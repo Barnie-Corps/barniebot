@@ -131,13 +131,29 @@ export default class WorkerManager extends EventEmitter {
      * @param message - The message object to match against the incoming response.
      * @returns A promise that resolves with an object containing the id and message when the expected response is received.
      */
-    public awaitResponse(id: string, message: any): Promise<{ id: string, message: any }> {
+    public awaitResponse(id: string, message: any, timeout?: number): Promise<{ id: string, message: any }> {
         return new Promise((resolve, reject) => {
-            this.on("message", data => {
+            let timer: NodeJS.Timeout | null = null;
+            const handler = (data: any) => {
                 if (data.id !== id) return;
                 if (data.message.id !== message) return;
+                cleanup();
                 resolve({ id: data.id, message: data.message });
-            });
+            };
+            const cleanup = () => {
+                this.removeListener("message", handler);
+                if (timer) {
+                    clearTimeout(timer);
+                    timer = null;
+                }
+            };
+            if (typeof timeout === "number" && timeout > 0) {
+                timer = setTimeout(() => {
+                    cleanup();
+                    reject(new Error("Worker response timed out"));
+                }, timeout);
+            }
+            this.on("message", handler);
         });
     }
 

@@ -10,5 +10,11 @@ parentPort.on("message", async allData => {
         return parentPort.postMessage("pong");
     };
     const { text, from, to } = allData.data;
-    parentPort.postMessage({ translation: await run(text, from, to), id: allData.id });
+    try {
+        parentPort.postMessage({ translation: await run(text, from, to), id: allData.id });
+    }
+    catch (error) {
+        const message = error && typeof error.message === "string" ? error.message : "Translation failed";
+        parentPort.postMessage({ error: message, id: allData.id });
+    }
 });
