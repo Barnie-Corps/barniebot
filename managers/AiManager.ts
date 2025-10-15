@@ -103,7 +103,7 @@ class AiManager extends EventEmitter {
         if (reply.length > 2000) {
             const filename = `./ai-response-${Date.now()}.md`;
             fs.writeFileSync(filename, reply);
-            await message.reply({ content: "The response from the AI was too long, so it has been sent as a file.", files: [filename] });
+            await message.edit({ content: "The response from the AI was too long, so it has been sent as a file.", files: [filename] });
             return;
         }
         await message.edit(reply);

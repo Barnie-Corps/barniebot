@@ -1,4 +1,4 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder, TextChannel, } from "discord.js";
+import { ChatInputCommandInteraction, SlashCommandBuilder, TextChannel, } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
 import data from "../data";
