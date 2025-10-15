@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to BarnieBot!</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Comic Sans MS', 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .container {
+            max-width: 600px;
+            margin: 40px auto;
+            background: white;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        .header {
+            background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
+            padding: 40px 20px;
+            text-align: center;
+            color: white;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 36px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .dino-emoji {
+            font-size: 60px;
+            margin-bottom: 10px;
+            animation: bounce 2s infinite;
+        }
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        .content {
+            padding: 40px 30px;
+            text-align: center;
+        }
+        .content h2 {
+            color: #7c3aed;
+            font-size: 28px;
+            margin-bottom: 20px;
+        }
+        .content p {
+            color: #4b5563;
+            font-size: 16px;
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+        .code-container {
+            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+            border-radius: 15px;
+            padding: 30px;
+            margin: 30px 0;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        .code-label {
+            color: #78350f;
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .verification-code {
+            font-size: 42px;
+            font-weight: bold;
+            color: #1f2937;
+            letter-spacing: 8px;
+            font-family: 'Courier New', monospace;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+        }
+        .footer {
+            background: #f3f4f6;
+            padding: 30px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 14px;
+        }
+        .footer-emoji {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+        .divider {
+            height: 4px;
+            background: linear-gradient(90deg, #a855f7, #ec4899, #f59e0b, #10b981, #3b82f6, #a855f7);
+            margin: 0;
+        }
+        .stars {
+            color: #fbbf24;
+            font-size: 20px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="dino-emoji">🦕</div>
+            <h1>Welcome to BarnieBot!</h1>
+        </div>
+        <div class="divider"></div>
+        <div class="content">
+            <h2>🎉 Thanks for Registering! 🎉</h2>
+            <p>
+                We're super excited to have you join the BarnieBot family! 
+                You're just one step away from having your very own dino-powered RPG account, {username}!
+            </p>
+            <div class="stars">⭐ ⭐ ⭐</div>
+            <div class="code-container">
+                <div class="code-label">Your Verification Code</div>
+                <div class="verification-code">{code}</div>
+            </div>
+            <p>
+                Copy this code and paste it into the verification field to complete your registration.
+                This code won't really expire, but don't wait too long! 🦖
+            </p>
+            <p style="font-size: 14px; color: #9ca3af;">
+                <strong>Tip:</strong> Save this email in case you need to verify again!
+            </p>
+        </div>
+        <div class="divider"></div>
+        <div class="footer">
+            <div class="footer-emoji">💜 🦕 💚</div>
+            <p>
+                If you didn't request this code, please ignore this email.<br>
+                <strong>BarnieBot Team</strong>
+            </p>
+            <p style="margin-top: 15px; font-size: 12px;">
+                © 2025 BarnieCorps. All rights reserved.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
