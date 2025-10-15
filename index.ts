@@ -121,17 +121,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]); // Get user language
     const Lang = foundLang[0] ? foundLang[0].lang : "es"; // If the user has a language set, use it, otherwise use Spanish
     // Check if the message starts with the prefix and if the user is not an owner
-    if (message.content.toLowerCase().startsWith(prefix) && !data.bot.owners.includes(message.author.id)) {
-        if (Lang === "es") {
-            message.reply("Lo siento, los comandos de prefijo ya no son soportados.");
-            return;
-        }
-        else {
-            const reply = (await utils.translate("Lo siento, los comandos de prefijo ya no son soportados.", "es", Lang)).text;
-            message.reply(reply);
-            return;
-        }
-    }
+    if (message.content.toLowerCase().startsWith(prefix) && !data.bot.owners.includes(message.author.id)) return;
     if (!message.content.toLowerCase().startsWith(prefix)) return;
     // Split the message content and get the command and arguments
     const [command, ...args] = message.content.slice(prefix.length).trim().split(" ");
@@ -318,6 +308,30 @@ client.on("messageCreate", async (message): Promise<any> => {
         }
     }
 });
+
+client.on("messageCreate", async (message): Promise<any> => {
+    if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(message.author.id)) return;
+    if (message.author.bot) return;
+    const customResponses: any = await db.query("SELECT * FROM custom_responses WHERE guild = ?", [message.guildId]);
+    if (!customResponses[0]) return;
+    for (const cr of customResponses) {
+        let match = false;
+        if (cr.is_regex) {
+            try {
+                match = new RegExp(cr.command, "i").test(message.content);
+            } catch (error) {
+                console.error("Error parsing regex:", error);
+            }
+        } else {
+            match = message.content.toLowerCase() === cr.command.toLowerCase();
+        }
+        if (match) {
+            await message.reply(cr.response);
+            break;
+        }
+    }
+});
+
 client.on("interactionCreate", async (interaction): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(interaction.user.id)) return;
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
