@@ -9,6 +9,7 @@ import Log from "./Log";
 import AIFunctions from "./AIFunctions";
 import data from "./data";
 import client from ".";
+import { promises as fs } from "fs";
 const TRANSLATE_WORKER_TYPE = "translate";
 const TRANSLATE_WORKER_PATH = path.join(__dirname, "workers/translate.js");
 const TRANSLATE_WORKER_POOL_SIZE = 4;
@@ -17,6 +18,9 @@ const TRANSLATE_CACHE_TTL = 300000;
 const TRANSLATE_CACHE_LIMIT = 500;
 const translationCache = new Map<string, { value: string; expires: number }>();
 const pendingTranslations = new Map<string, Promise<string>>();
+const AI_WORKSPACE_ROOT = path.join(__dirname, "ai_workspace");
+const MAX_WORKSPACE_SCAN_RESULTS = 50;
+const MAX_FILE_SIZE_FOR_SEARCH = 1024 * 1024;
 Workers.bulkCreateWorkers(TRANSLATE_WORKER_PATH, TRANSLATE_WORKER_TYPE, TRANSLATE_WORKER_POOL_SIZE);
 const trimTranslationCache = () => {
   while (translationCache.size > TRANSLATE_CACHE_LIMIT) {
@@ -24,6 +28,58 @@ const trimTranslationCache = () => {
     if (!firstKey) break;
     translationCache.delete(firstKey);
   }
+};
+const resolveWorkspacePath = (targetPath = ".") => {
+  const resolved = path.resolve(AI_WORKSPACE_ROOT, targetPath);
+  if (!resolved.startsWith(AI_WORKSPACE_ROOT)) {
+    throw new Error("Path escapes ai_workspace");
+  }
+  return resolved;
+};
+const ensureWorkspaceExists = async () => {
+  await fs.mkdir(AI_WORKSPACE_ROOT, { recursive: true });
+};
+const safeStat = async (target: string) => {
+  try {
+    return await fs.stat(target);
+  } catch (error: any) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+};
+const readDirectoryRecursive = async (dir: string, limit: number, results: any[] = [], prefix = "") => {
+  if (results.length >= limit) return results;
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const relativePath = path.join(prefix, entry.name);
+    const fullPath = path.join(dir, entry.name);
+    results.push({
+      path: relativePath.replace(/\\/g, "/"),
+      type: entry.isDirectory() ? "directory" : "file"
+    });
+    if (results.length >= limit) break;
+    if (entry.isDirectory()) {
+      await readDirectoryRecursive(fullPath, limit, results, relativePath);
+      if (results.length >= limit) break;
+    }
+  }
+  return results;
+};
+const collectSearchMatches = async (filePath: string, query: string, maxMatches: number) => {
+  const content = await fs.readFile(filePath, "utf8");
+  const lines = content.split(/\r?\n/);
+  const matches: { path: string; line: number; snippet: string }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].toLowerCase().includes(query.toLowerCase())) {
+      matches.push({
+        path: filePath.replace(AI_WORKSPACE_ROOT + path.sep, "").replace(/\\/g, "/"),
+        line: i + 1,
+        snippet: lines[i].trim().slice(0, 200)
+      });
+      if (matches.length >= maxMatches) break;
+    }
+  }
+  return matches;
 };
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
@@ -198,6 +254,176 @@ const utils = {
         return { isVip: true, user: foundVip[0] };
       }
       return { isVip: false };
+    },
+    list_workspace_files: async (args: { path?: string; recursive?: boolean } = {}): Promise<any> => {
+      await ensureWorkspaceExists();
+      const directoryPath = resolveWorkspacePath(args.path ?? ".");
+      const stats = await safeStat(directoryPath);
+      if (!stats) return { error: "Path not found" };
+      if (!stats.isDirectory()) return { error: "Target is not a directory" };
+      if (args.recursive) {
+        const entries = await readDirectoryRecursive(directoryPath, MAX_WORKSPACE_SCAN_RESULTS, [], path.relative(AI_WORKSPACE_ROOT, directoryPath) || "");
+        return { entries };
+      }
+      const items = await fs.readdir(directoryPath, { withFileTypes: true });
+      return {
+        entries: items.map(item => ({
+          path: path.join(path.relative(AI_WORKSPACE_ROOT, directoryPath), item.name).replace(/\\/g, "/"),
+          type: item.isDirectory() ? "directory" : "file"
+        }))
+      };
+    },
+    read_workspace_file: async (args: { path: string; encoding?: BufferEncoding }): Promise<any> => {
+      if (!args?.path) return { error: "Missing path parameter" };
+      const filePath = resolveWorkspacePath(args.path);
+      const stats = await safeStat(filePath);
+      if (!stats) return { error: "File not found" };
+      if (!stats.isFile()) return { error: "Path is not a file" };
+      const encoding = args.encoding ?? "utf8";
+      const content = await fs.readFile(filePath, encoding);
+      return { content };
+    },
+    write_workspace_file: async (args: { path: string; content: string; overwrite?: boolean }): Promise<any> => {
+      if (!args?.path) return { error: "Missing path parameter" };
+      if (typeof args.content !== "string") return { error: "Missing content parameter" };
+      await ensureWorkspaceExists();
+      const filePath = resolveWorkspacePath(args.path);
+      const directory = path.dirname(filePath);
+      await fs.mkdir(directory, { recursive: true });
+      const stats = await safeStat(filePath);
+      if (stats && !args.overwrite) return { error: "File already exists" };
+      await fs.writeFile(filePath, args.content, "utf8");
+      return { success: true };
+    },
+    append_workspace_file: async (args: { path: string; content: string }): Promise<any> => {
+      if (!args?.path) return { error: "Missing path parameter" };
+      if (typeof args.content !== "string") return { error: "Missing content parameter" };
+      await ensureWorkspaceExists();
+      const filePath = resolveWorkspacePath(args.path);
+      const directory = path.dirname(filePath);
+      await fs.mkdir(directory, { recursive: true });
+      await fs.appendFile(filePath, args.content, "utf8");
+      return { success: true };
+    },
+    delete_workspace_entry: async (args: { path: string; recursive?: boolean }): Promise<any> => {
+      if (!args?.path) return { error: "Missing path parameter" };
+      const targetPath = resolveWorkspacePath(args.path);
+      const stats = await safeStat(targetPath);
+      if (!stats) return { error: "Path not found" };
+      if (stats.isDirectory()) {
+        if (!args.recursive) return { error: "Directory deletion requires recursive flag" };
+        await fs.rm(targetPath, { recursive: true, force: true });
+      } else {
+        await fs.unlink(targetPath);
+      }
+      return { success: true };
+    },
+    move_workspace_entry: async (args: { from: string; to: string; overwrite?: boolean }): Promise<any> => {
+      if (!args?.from || !args.to) return { error: "Missing path parameters" };
+      const source = resolveWorkspacePath(args.from);
+      const destination = resolveWorkspacePath(args.to);
+      const sourceStats = await safeStat(source);
+      if (!sourceStats) return { error: "Source not found" };
+      const destinationStats = await safeStat(destination);
+      if (destinationStats) {
+        if (!args.overwrite) return { error: "Destination already exists" };
+        if (destinationStats.isDirectory()) {
+          await fs.rm(destination, { recursive: true, force: true });
+        } else {
+          await fs.unlink(destination);
+        }
+      } else {
+        await fs.mkdir(path.dirname(destination), { recursive: true });
+      }
+      await fs.rename(source, destination);
+      return { success: true };
+    },
+    create_workspace_directory: async (args: { path: string }): Promise<any> => {
+      if (!args?.path) return { error: "Missing path parameter" };
+      const directoryPath = resolveWorkspacePath(args.path);
+      await fs.mkdir(directoryPath, { recursive: true });
+      return { success: true };
+    },
+    download_to_workspace: async (args: { url: string; path: string; overwrite?: boolean }): Promise<any> => {
+      if (!args?.url || !args.path) return { error: "Missing parameters" };
+      await ensureWorkspaceExists();
+      const response = await fetch(args.url);
+      if (!response.ok) return { error: `Failed to download resource: ${response.status}` };
+      const filePath = resolveWorkspacePath(args.path);
+      const stats = await safeStat(filePath);
+      if (stats && !args.overwrite) return { error: "File already exists" };
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      const arrayBuffer = await response.arrayBuffer();
+      await fs.writeFile(filePath, Buffer.from(arrayBuffer).toString("utf8"));
+      return { success: true };
+    },
+    search_workspace_text: async (args: { query: string; path?: string; maxResults?: number }): Promise<any> => {
+      if (!args?.query) return { error: "Missing query parameter" };
+      await ensureWorkspaceExists();
+      const basePath = resolveWorkspacePath(args.path ?? ".");
+      const stats = await safeStat(basePath);
+      if (!stats) return { error: "Path not found" };
+      const maxResults = Math.max(1, Math.min(args.maxResults ?? MAX_WORKSPACE_SCAN_RESULTS, MAX_WORKSPACE_SCAN_RESULTS));
+      const queue: string[] = [];
+      if (stats.isDirectory()) {
+        queue.push(basePath);
+      } else if (stats.isFile()) {
+        queue.push(basePath);
+      } else {
+        return { error: "Unsupported file type" };
+      }
+      const matches: { path: string; line: number; snippet: string }[] = [];
+      while (queue.length > 0 && matches.length < maxResults) {
+        const current = queue.shift() as string;
+        const currentStats = await fs.stat(current);
+        if (currentStats.isDirectory()) {
+          const children = await fs.readdir(current);
+          for (const child of children) {
+            queue.push(path.join(current, child));
+          }
+        } else if (currentStats.isFile() && currentStats.size <= MAX_FILE_SIZE_FOR_SEARCH) {
+          const fileMatches = await collectSearchMatches(current, args.query, maxResults - matches.length);
+          matches.push(...fileMatches);
+        }
+      }
+      return { matches };
+    },
+    workspace_file_info: async (args: { path: string }): Promise<any> => {
+      if (!args?.path) return { error: "Missing path parameter" };
+      const target = resolveWorkspacePath(args.path);
+      const stats = await safeStat(target);
+      if (!stats) return { error: "Path not found" };
+      return {
+        info: {
+          path: args.path.replace(/\\/g, "/"),
+          size: stats.size,
+          isDirectory: stats.isDirectory(),
+          isFile: stats.isFile(),
+          modified: stats.mtime.toISOString()
+        }
+      };
+    },
+    search_web: async (args: { query: string; numResults?: number; engineId?: string }): Promise<any> => {
+      if (!args?.query) return { error: "Missing query parameter" };
+      const apiKey = process.env.SEARCH_ENGINE_API_KEY;
+      const engineId = args.engineId ?? process.env.SEARCH_ENGINE_CX;
+      if (!apiKey || !engineId) return { error: "Search engine not configured" };
+      const url = new URL("https://www.googleapis.com/customsearch/v1");
+      url.searchParams.set("key", apiKey);
+      url.searchParams.set("cx", engineId);
+      url.searchParams.set("q", args.query);
+      if (args.numResults) url.searchParams.set("num", String(Math.min(Math.max(args.numResults, 1), 10)));
+      const response = await fetch(url.toString());
+      if (!response.ok) return { error: `Search request failed: ${response.status}` };
+      const data = await response.json();
+      if (!Array.isArray(data.items)) return { results: [] };
+      return {
+        results: data.items.map((item: any) => ({
+          title: item.title,
+          link: item.link,
+          snippet: item.snippet
+        }))
+      };
     }
   },
   createSpaces: (length: number): string => {

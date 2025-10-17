@@ -235,6 +235,140 @@ const functionDeclarations = {
             },
             required: ["userId"]
         }
+    },
+    list_workspace_files: {
+        name: "list_workspace_files",
+        description: "List entries inside the ai_workspace directory. Optionally provide a relative path and choose whether to traverse recursively.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                path: { type: SchemaType.STRING },
+                recursive: { type: SchemaType.BOOLEAN }
+            }
+        }
+    },
+    read_workspace_file: {
+        name: "read_workspace_file",
+        description: "Read the contents of a file stored within the ai_workspace directory.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                path: { type: SchemaType.STRING },
+                encoding: { type: SchemaType.STRING }
+            },
+            required: ["path"]
+        }
+    },
+    write_workspace_file: {
+        name: "write_workspace_file",
+        description: "Write a text file inside the ai_workspace directory. Creates intermediary directories if required.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                path: { type: SchemaType.STRING },
+                content: { type: SchemaType.STRING },
+                overwrite: { type: SchemaType.BOOLEAN }
+            },
+            required: ["path", "content"]
+        }
+    },
+    append_workspace_file: {
+        name: "append_workspace_file",
+        description: "Append text to a file inside the ai_workspace directory, creating it if it does not exist.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                path: { type: SchemaType.STRING },
+                content: { type: SchemaType.STRING }
+            },
+            required: ["path", "content"]
+        }
+    },
+    delete_workspace_entry: {
+        name: "delete_workspace_entry",
+        description: "Delete a file or directory located inside the ai_workspace directory. Directories require the recursive flag.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                path: { type: SchemaType.STRING },
+                recursive: { type: SchemaType.BOOLEAN }
+            },
+            required: ["path"]
+        }
+    },
+    move_workspace_entry: {
+        name: "move_workspace_entry",
+        description: "Move or rename a file or directory inside the ai_workspace directory.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                from: { type: SchemaType.STRING },
+                to: { type: SchemaType.STRING },
+                overwrite: { type: SchemaType.BOOLEAN }
+            },
+            required: ["from", "to"]
+        }
+    },
+    create_workspace_directory: {
+        name: "create_workspace_directory",
+        description: "Create a directory (and any missing parents) inside the ai_workspace directory.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                path: { type: SchemaType.STRING }
+            },
+            required: ["path"]
+        }
+    },
+    download_to_workspace: {
+        name: "download_to_workspace",
+        description: "Download a remote resource and store it inside the ai_workspace directory.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                url: { type: SchemaType.STRING },
+                path: { type: SchemaType.STRING },
+                overwrite: { type: SchemaType.BOOLEAN }
+            },
+            required: ["url", "path"]
+        }
+    },
+    search_workspace_text: {
+        name: "search_workspace_text",
+        description: "Search for text within files stored inside the ai_workspace directory.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                query: { type: SchemaType.STRING },
+                path: { type: SchemaType.STRING },
+                maxResults: { type: SchemaType.NUMBER }
+            },
+            required: ["query"]
+        }
+    },
+    workspace_file_info: {
+        name: "workspace_file_info",
+        description: "Retrieve metadata (size, type, last modification) about an entry inside the ai_workspace directory.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                path: { type: SchemaType.STRING }
+            },
+            required: ["path"]
+        }
+    },
+    search_web: {
+        name: "search_web",
+        description: "Perform a Google web search using the configured search engine identifier and API key.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                query: { type: SchemaType.STRING },
+                numResults: { type: SchemaType.NUMBER },
+                engineId: { type: SchemaType.STRING }
+            },
+            required: ["query"]
+        }
     }
 } as const satisfies Record<string, FunctionDeclaration>;
 
