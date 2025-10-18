@@ -6,11 +6,16 @@ export default {
         .setName("github")
         .setDescription("Provides info about the BarnieBot's GitHub repository"),
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
-        let message = "You can find the GitHub repository of BarnieBot at :wink:\n\n- [Repo](https://github.com/Barnie-Corps/barniebot)\n- [Optional message](https://github.com/Barnie-Corps/barniebot/blob/master/based.txt)";
+        let message = "🔧 **BarnieBot GitHub Repository**\n\n" +
+            "Check out the source code and contribute to the project:\n\n" +
+            "📦 **Repository**: https://github.com/Barnie-Corps/barniebot\n" +
+            "💬 **Optional Message**: https://github.com/Barnie-Corps/barniebot/blob/master/based.txt\n\n" +
+            "Feel free to star ⭐ the repo if you find it useful!";
+        
         if (lang !== "en") {
             message = (await utils.translate(message, "en", lang)).text;
         }
-        await interaction.editReply(`${message.replace(": wink:", " :wink:")}`);
+        await interaction.editReply(message);
         const msg = await interaction.fetchReply();
         await msg.suppressEmbeds(true);
     },
