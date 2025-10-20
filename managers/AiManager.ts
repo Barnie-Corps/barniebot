@@ -1,12 +1,12 @@
 import EventEmitter from "events";
 import { Ratelimit } from "../types/interfaces";
-import db from "../mysql/database";
 import utils from "../utils";
 import { ChatSession, GoogleGenerativeAI } from "@google/generative-ai";
 import Log from "../Log";
 import AIFunctions from "../AIFunctions";
 import { Message } from "discord.js";
 import * as fs from "fs";
+import path from "path";
 const genAI = new GoogleGenerativeAI(String(process.env.AI_API_KEY));
 
 class AiManager extends EventEmitter {
@@ -80,17 +80,51 @@ class AiManager extends EventEmitter {
                 return this.ExecuteFunction(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
             }
         }
-        if (!Object.keys(args).length) args = id;
-        if (["current_guild_info", "on_guild"].includes(name)) args = message;
-        console.log(func, name, args);
-        const data = await func(args);
+        let preparedArgs: any = args;
+        if (["current_guild_info", "on_guild"].includes(name)) {
+            preparedArgs = message;
+        } else {
+            const isPlainObject = typeof args === "object" && args !== null && !Array.isArray(args);
+            if (isPlainObject) {
+                if (Object.keys(args).length === 0) {
+                    preparedArgs = id;
+                } else {
+                    preparedArgs = {
+                        ...args,
+                        requesterId: id,
+                        guildId: message.guild?.id ?? null,
+                        channelId: message.channel?.id ?? null
+                    };
+                }
+            } else if (preparedArgs === null || preparedArgs === undefined || preparedArgs === "") {
+                preparedArgs = id;
+            }
+        }
+        let rawResult: any;
+        try {
+            rawResult = await func(preparedArgs);
+        } catch (error: any) {
+            Log.error(`AI function ${name} threw an exception`, error instanceof Error ? error : new Error(String(error)));
+            rawResult = { error: error instanceof Error ? error.message : String(error) };
+        }
+        let attachments: Array<{ path: string; name?: string }> = [];
+        let sanitizedResult = rawResult;
+        if (rawResult && typeof rawResult === "object" && !Array.isArray(rawResult)) {
+            const { __attachments, ...rest } = rawResult as any;
+            if (Array.isArray(__attachments)) {
+                attachments = __attachments
+                    .filter((item: any) => item && typeof item.path === "string")
+                    .map((item: any) => ({ path: item.path, name: item.name }));
+            }
+            sanitizedResult = rest;
+        }
         let reply = "";
         const rsp = await chat.sendMessage([
             {
                 functionResponse: {
                     name,
                     response: {
-                        result: data
+                        result: sanitizedResult
                     }
                 }
             }
@@ -100,16 +134,36 @@ class AiManager extends EventEmitter {
             return this.ExecuteFunction(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
         }
         reply = rsp.response.text();
+        const filesPayload = attachments.map(att => ({
+            attachment: att.path,
+            name: att.name ?? path.basename(att.path)
+        }));
         if (reply.length > 2000) {
             const filename = `./ai-response-${Date.now()}.md`;
             fs.writeFileSync(filename, reply);
-            await message.edit({ content: "The response from the AI was too long, so it has been sent as a file.", files: [filename] });
+            filesPayload.push({ attachment: filename, name: path.basename(filename) });
+            try {
+                await message.edit({
+                    content: "The response from the AI was too long, so it has been sent as a file.",
+                    files: filesPayload,
+                    attachments: []
+                });
+            } finally {
+                try {
+                    fs.unlinkSync(filename);
+                } catch (error) {
+                    Log.warn("Failed to remove temporary AI response file", { error: String(error) });
+                }
+            }
             return;
         }
-        await message.edit(reply);
+        if (filesPayload.length > 0) {
+            await message.edit({ content: reply.length ? reply : " ", files: filesPayload, attachments: [] });
+        } else {
+            await message.edit(reply.length ? reply : " ");
+        }
         return;
     }
-    // text param is used in case the user has no history
     private async GetChat(id: string, text: string): Promise<ChatSession> {
         let chat = this.chats.get(id);
         if (!chat) {

@@ -10,6 +10,10 @@ import AIFunctions from "./AIFunctions";
 import data from "./data";
 import client from ".";
 import { promises as fs } from "fs";
+import * as vm from "vm";
+import { exec as execCallback } from "child_process";
+import { promisify, inspect, TextDecoder, TextEncoder } from "util";
+import * as mathjs from "mathjs";
 const TRANSLATE_WORKER_TYPE = "translate";
 const TRANSLATE_WORKER_PATH = path.join(__dirname, "workers/translate.js");
 const TRANSLATE_WORKER_POOL_SIZE = 4;
@@ -21,6 +25,11 @@ const pendingTranslations = new Map<string, Promise<string>>();
 const AI_WORKSPACE_ROOT = path.join(__dirname, "ai_workspace");
 const MAX_WORKSPACE_SCAN_RESULTS = 50;
 const MAX_FILE_SIZE_FOR_SEARCH = 1024 * 1024;
+const MAX_ATTACHMENT_SIZE = 8 * 1024 * 1024; // 8MB, safe default for Discord without Nitro
+const execPromise = promisify(execCallback);
+const ALLOWED_SANDBOX_MODULES = new Map<string, unknown>([
+  ["mathjs", mathjs]
+]);
 Workers.bulkCreateWorkers(TRANSLATE_WORKER_PATH, TRANSLATE_WORKER_TYPE, TRANSLATE_WORKER_POOL_SIZE);
 const trimTranslationCache = () => {
   while (translationCache.size > TRANSLATE_CACHE_LIMIT) {
@@ -80,6 +89,22 @@ const collectSearchMatches = async (filePath: string, query: string, maxMatches:
     }
   }
   return matches;
+};
+const isOwner = (userId: string | undefined | null): boolean => {
+  if (!userId) return false;
+  return data.bot.owners.includes(userId);
+};
+const formatLogValue = (value: any): string => {
+  if (typeof value === "string") return value;
+  try {
+    return inspect(value, { depth: 2, maxArrayLength: 20, breakLength: 120 });
+  } catch (error) {
+    return String(value);
+  }
+};
+const truncate = (value: string, limit = 4000): string => {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit)}…(truncated)`;
 };
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
@@ -354,7 +379,7 @@ const utils = {
       if (stats && !args.overwrite) return { error: "File already exists" };
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       const arrayBuffer = await response.arrayBuffer();
-      await fs.writeFile(filePath, Buffer.from(arrayBuffer).toString("utf8"));
+      await fs.writeFile(filePath, new Uint8Array(arrayBuffer));
       return { success: true };
     },
     search_workspace_text: async (args: { query: string; path?: string; maxResults?: number }): Promise<any> => {
@@ -424,6 +449,183 @@ const utils = {
           snippet: item.snippet
         }))
       };
+    },
+    attach_workspace_file: async (args: { path: string; requesterId?: string }): Promise<any> => {
+      if (!args?.path) return { error: "Missing path parameter" };
+      await ensureWorkspaceExists();
+      const filePath = resolveWorkspacePath(args.path);
+      const stats = await safeStat(filePath);
+      if (!stats) return { error: "File not found" };
+      if (!stats.isFile()) return { error: "Path is not a file" };
+      if (stats.size > MAX_ATTACHMENT_SIZE) {
+        const limitMb = (MAX_ATTACHMENT_SIZE / (1024 * 1024)).toFixed(1);
+        return { error: `File exceeds ${limitMb}MB limit` };
+      }
+      const relativePath = path.relative(AI_WORKSPACE_ROOT, filePath).replace(/\\/g, "/");
+      return {
+        success: true,
+        file: {
+          path: relativePath,
+          size: stats.size,
+          name: path.basename(filePath)
+        },
+        __attachments: [
+          {
+            path: filePath,
+            name: path.basename(filePath)
+          }
+        ]
+      };
+    },
+    execute_js_code: async (args: { code: string; requesterId?: string }): Promise<any> => {
+      if (!args?.code) return { error: "Missing code parameter" };
+      if (!isOwner(args.requesterId)) return { error: "Requester is not authorized to execute code" };
+      if (args.code.length > 5000) return { error: "Code is too long" };
+      await ensureWorkspaceExists();
+      const logs: string[] = [];
+      const logLimit = 50;
+      const pushLog = (...values: any[]) => {
+        if (logs.length >= logLimit) return;
+        logs.push(values.map(value => formatLogValue(value)).join(" "));
+      };
+      const workspaceAPI = {
+        readFile: async (target: string) => {
+          const resolved = resolveWorkspacePath(target);
+          const fileStats = await safeStat(resolved);
+          if (!fileStats) throw new Error("File not found");
+          if (!fileStats.isFile()) throw new Error("Target is not a file");
+          return fs.readFile(resolved, "utf8");
+        },
+        writeFile: async (target: string, content: string) => {
+          if (typeof content !== "string") throw new Error("Content must be a string");
+          const resolved = resolveWorkspacePath(target);
+          await fs.mkdir(path.dirname(resolved), { recursive: true });
+          await fs.writeFile(resolved, content, "utf8");
+          return true;
+        },
+        appendFile: async (target: string, content: string) => {
+          if (typeof content !== "string") throw new Error("Content must be a string");
+          const resolved = resolveWorkspacePath(target);
+          await fs.mkdir(path.dirname(resolved), { recursive: true });
+          await fs.appendFile(resolved, content, "utf8");
+          return true;
+        },
+        deleteFile: async (target: string) => {
+          const resolved = resolveWorkspacePath(target);
+          const fileStats = await safeStat(resolved);
+          if (!fileStats) throw new Error("Path not found");
+          if (!fileStats.isFile()) throw new Error("Target is not a file");
+          await fs.unlink(resolved);
+          return true;
+        },
+        list: async (target = ".") => {
+          const resolved = resolveWorkspacePath(target);
+          const dirStats = await safeStat(resolved);
+          if (!dirStats) throw new Error("Path not found");
+          if (!dirStats.isDirectory()) throw new Error("Target is not a directory");
+          const entries = await fs.readdir(resolved, { withFileTypes: true });
+          return entries.map(entry => ({
+            name: entry.name,
+            type: entry.isDirectory() ? "directory" : "file"
+          }));
+        }
+      } as const;
+      const moduleCache = new Map<string, unknown>();
+      const safeRequire = (requested: unknown) => {
+        if (typeof requested !== "string") throw new Error("Module name must be a string");
+        const moduleName = requested.trim();
+        if (!ALLOWED_SANDBOX_MODULES.has(moduleName)) throw new Error(`Module "${moduleName}" is not allowed`);
+        if (!moduleCache.has(moduleName)) {
+          moduleCache.set(moduleName, ALLOWED_SANDBOX_MODULES.get(moduleName));
+        }
+        return moduleCache.get(moduleName);
+      };
+      Object.defineProperties(safeRequire, {
+        cache: { value: Object.freeze({}), writable: false, enumerable: false },
+        main: { value: undefined, writable: false, enumerable: false },
+        resolve: {
+          value: () => {
+            throw new Error("require.resolve is not available inside the sandbox");
+          },
+          writable: false,
+          enumerable: false
+        },
+        extensions: { value: undefined, writable: false, enumerable: false }
+      });
+      const sandbox: Record<string, any> = {
+        console: {
+          log: (...values: any[]) => pushLog(...values)
+        },
+        workspace: workspaceAPI,
+        Buffer,
+        TextEncoder,
+        TextDecoder,
+        Date,
+        Math,
+        setTimeout,
+        setInterval,
+        clearTimeout,
+        clearInterval
+      };
+      sandbox.global = sandbox;
+      sandbox.globalThis = sandbox;
+      sandbox.process = undefined;
+      sandbox.require = safeRequire;
+      sandbox.module = undefined;
+      sandbox.exports = undefined;
+      sandbox.__dirname = undefined;
+      sandbox.__filename = undefined;
+      try {
+        const scriptSource = `(async () => {\n${args.code}\n})()`;
+  const script = new vm.Script(scriptSource, { filename: "ai-workspace.js" });
+        const context = vm.createContext(sandbox, { name: "ai-sandbox" });
+        const timeoutMs = 5000;
+        const resultPromise = script.runInContext(context, { timeout: 1000 });
+        const executionResult = await Promise.race([
+          resultPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Execution timed out")), timeoutMs))
+        ]);
+        const formattedResult = typeof executionResult === "undefined" ? "undefined" : formatLogValue(executionResult);
+        return {
+          success: true,
+          logs,
+          result: formattedResult
+        };
+      } catch (error: any) {
+        return {
+          error: error?.message ?? "Failed to execute code",
+          logs
+        };
+      }
+    },
+    execute_command: async (args: { command: string; requesterId?: string }): Promise<any> => {
+      if (!args?.command) return { error: "Missing command parameter" };
+      if (!isOwner(args.requesterId)) return { error: "Requester is not authorized to execute commands" };
+      const trimmedCommand = args.command.trim();
+      if (!trimmedCommand) return { error: "Command cannot be empty" };
+      if (trimmedCommand.length > 256) return { error: "Command is too long" };
+      if (/[\r\n]/.test(trimmedCommand)) return { error: "Command cannot contain newline characters" };
+      await ensureWorkspaceExists();
+      try {
+        const { stdout, stderr } = await execPromise(trimmedCommand, {
+          cwd: AI_WORKSPACE_ROOT,
+          timeout: 10000,
+          maxBuffer: 1024 * 1024,
+          windowsHide: true
+        });
+        return {
+          success: true,
+          stdout: truncate(String(stdout ?? "").trim()),
+          stderr: truncate(String(stderr ?? "").trim())
+        };
+      } catch (error: any) {
+        return {
+          error: error?.message ?? "Command execution failed",
+          code: typeof error?.code === "number" ? error.code : null,
+          stdout: truncate(String(error?.stdout ?? "").trim()),
+          stderr: truncate(String(error?.stderr ?? "").trim())
+        };
+      }
     }
   },
   createSpaces: (length: number): string => {

@@ -369,6 +369,39 @@ const functionDeclarations = {
             },
             required: ["query"]
         }
+    },
+    attach_workspace_file: {
+        name: "attach_workspace_file",
+        description: "Attach a file from the ai_workspace directory to the current conversation, allowing the user to download it directly.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                path: { type: SchemaType.STRING }
+            },
+            required: ["path"]
+        }
+    },
+    execute_js_code: {
+        name: "execute_js_code",
+        description: "Executes a JavaScript code snippet in a secure sandboxed environment. The code has access to a limited set of libraries and functions to ensure safety. Use this function to perform calculations, data manipulations, or other tasks that can be accomplished with JavaScript. This command can interact with the AI file workspace. Never outside it.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                code: { type: SchemaType.STRING }
+            },
+            required: ["code"]
+        }
+    },
+    execute_command: {
+        name: "execute_command",
+        description: "Executes a shell command in a secure sandboxed environment. The command has access to a limited set of tools and functions to ensure safety. Use this function to perform system-level tasks, file manipulations, or other operations that can be accomplished via shell commands. This command can interact with the AI file workspace. Never outside it.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                command: { type: SchemaType.STRING }
+            },
+            required: ["command"]
+        }
     }
 } as const satisfies Record<string, FunctionDeclaration>;
 
