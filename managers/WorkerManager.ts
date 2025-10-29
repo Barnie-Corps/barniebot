@@ -1,7 +1,14 @@
-import { Worker, workerData } from "worker_threads";
+import { Worker } from "worker_threads";
 import Log from "../Log";
 import EventEmitter from "events";
 import { Collection } from "../classes/Collection";
+
+export type WorkerHandle = { type: string; worker: Worker; id: string };
+type WorkerWaiter = {
+    resolve: (worker: WorkerHandle) => void;
+    reject: (error: Error) => void;
+    timeoutHandle?: NodeJS.Timeout;
+};
 
 export default class WorkerManager extends EventEmitter {
     /**
@@ -16,7 +23,7 @@ export default class WorkerManager extends EventEmitter {
      * @property {Worker} value.worker - The worker instance.
      * @property {string} value.id - The unique identifier for the worker instance.
      */
-    private Cache: Collection<string, { type: string, worker: Worker, id: string }> = new Collection();
+    private Cache: Collection<string, WorkerHandle> = new Collection();
     /**
      * A cache that keeps track of running workers.
      * 
@@ -29,7 +36,10 @@ export default class WorkerManager extends EventEmitter {
      * @property {Worker} value.worker - The worker instance.
      * @property {string} value.id - The unique identifier for the worker instance.
      */
-    private RunningCache: Collection<string, { type: string, worker: Worker, id: string }> = new Collection();
+    private RunningCache: Collection<string, WorkerHandle> = new Collection();
+    private waitingQueues: Map<string, WorkerWaiter[]> = new Map();
+    private keepAliveTimers: Map<string, NodeJS.Timeout> = new Map();
+    private reservations: Set<string> = new Set();
     /**
      * Constructs a new instance of the WorkerManager.
      * 
@@ -37,7 +47,7 @@ export default class WorkerManager extends EventEmitter {
      * @param cachePublic - A flag indicating whether the cache is public. Default is false.
      * @param typeLimit - The limit on the number of types. Default is 10.
      */
-    constructor(public IDLength: number = 20, private cachePublic: boolean = false, public readonly typeLimit = 10) {
+    constructor(public IDLength: number = 20, private cachePublic: boolean = false, public readonly typeLimit = 10, private keepAliveIntervalMs = 30000) {
         super();
     }
     /**
@@ -46,7 +56,7 @@ export default class WorkerManager extends EventEmitter {
      * @param id - The unique identifier of the worker.
      * @returns An object containing the worker's ID and data if found, otherwise `null`.
      */
-    public getWorker(id: string): { id: string, workerData: { type: string, worker: Worker } } | null {
+    public getWorker(id: string): { id: string, workerData: WorkerHandle } | null {
         const worker = this.Cache.get(id);
         return worker ? { id, workerData: worker } : null;
     };
@@ -58,14 +68,25 @@ export default class WorkerManager extends EventEmitter {
      * @param type - The type of worker to wait for.
      * @returns A promise that resolves with the found worker.
      */
-    public async AwaitAvailableWorker(type: string) {
+    public async AwaitAvailableWorker(type: string, timeout?: number): Promise<WorkerHandle> {
+        const available = this.getAvailableWorker(type);
+        if (available) {
+            this.reservations.add(available.id);
+            return available;
+        }
         return new Promise((resolve, reject) => {
-            do {
-                const foundWorker = this.getAvailableWorker(type);
-                if (!foundWorker) continue;
-                else { resolve(foundWorker); break; }
+            const waiter: WorkerWaiter = {
+                resolve: (worker) => resolve(worker),
+                reject: (error) => reject(error)
+            };
+            if (typeof timeout === "number" && timeout > 0) {
+                waiter.timeoutHandle = setTimeout(() => {
+                    this.removeWaiter(type, waiter);
+                    reject(new Error(`Timed out while waiting for a ${type} worker`));
+                }, timeout);
             }
-            while (true)
+            this.enqueueWaiter(type, waiter);
+            this.fulfillWaiters(type);
         });
     }
 
@@ -76,7 +97,7 @@ export default class WorkerManager extends EventEmitter {
      * @returns The first available worker of the specified type that is not currently running, or undefined if no such worker is found.
      */
     public getAvailableWorker(type: string) {
-        return this.Cache.find(w => w.type === type && !this.RunningCache.has(w.id));
+        return this.Cache.find(w => w.type === type && !this.RunningCache.has(w.id) && !this.reservations.has(w.id));
     };
 
     /**
@@ -89,20 +110,29 @@ export default class WorkerManager extends EventEmitter {
      * @param data - Optional data to be passed to the worker.
      * @returns An object containing the worker's ID, the worker instance, and its type.
      */
-    public createWorker(path: string, type: string, force: boolean = false, options?: WorkerOptions, data?: any) {
+    public createWorker(path: string, type: string, force: boolean = false, options?: WorkerOptions, data?: any): WorkerHandle | null {
         const id = this.GenerateID(this.IDLength);
-        if (this.Cache.filter(w => w.type === type).size >= this.typeLimit && !force) return this.getAvailableWorker(type);
+        if (this.Cache.filter(w => w.type === type).size >= this.typeLimit && !force) {
+            return this.getAvailableWorker(type) ?? null;
+        }
         const worker = new Worker(path, { ...options, workerData: { id, data: data ?? undefined } });
         this.Cache.set(id, { type, worker, id });
-        worker.on("online", () => Log.info(`Worker with ID ${id} and type ${type} online and running on ${path}${this.Cache.filter(w => w.type === type).size > this.typeLimit ? `. The workers type limit has been exceeded by the ${type} type..` : this.Cache.filter(w => w.type === type).size === this.typeLimit ? `. The workers type limit has been reached by the type ${type}` : ""}`, { workerId: id, workerType: type }));
+        worker.on("online", () => {
+            Log.info(`Worker with ID ${id} and type ${type} online and running on ${path}${this.Cache.filter(w => w.type === type).size > this.typeLimit ? `. The workers type limit has been exceeded by the ${type} type..` : this.Cache.filter(w => w.type === type).size === this.typeLimit ? `. The workers type limit has been reached by the type ${type}` : ""}`, { workerId: id, workerType: type });
+            this.scheduleKeepAlive(id, type);
+            this.fulfillWaiters(type);
+        });
         worker.on("message", message => {
-            if (this.RunningCache.has(id)) this.RunningCache.delete(id);
+            this.markWorkerIdle(id, type);
             this.emit("message", { id, message });
         });
         worker.on("exit", c => { 
             Log.info(`Worker with ID ${id} and type ${type} exited with code ${c}`, { workerId: id, workerType: type, exitCode: c }); 
             this.Cache.delete(id); 
-            this.RunningCache.delete(id) 
+            this.RunningCache.delete(id);
+            this.reservations.delete(id);
+            this.clearKeepAliveTimer(id);
+            this.fulfillWaiters(type);
         });
         return { id, worker, type };
     };
@@ -116,11 +146,13 @@ export default class WorkerManager extends EventEmitter {
      * @throws Will throw an error if the worker with the given ID is not found.
      */
     public postMessage(id: string, message: any): string {
-        if (!this.getWorker(id)) throw new Error("Unknown worker");
         const worker = this.getWorker(id);
+        if (!worker) throw new Error("Unknown worker");
         const messageId = this.GenerateID(this.IDLength);
-        worker?.workerData.worker.postMessage({ id: messageId, data: message });
-        this.RunningCache.set(id, { type: (worker as any).workerData.type as string, id, worker: (worker as any).workerData.worker as Worker });
+        this.reservations.delete(id);
+        this.clearKeepAliveTimer(id);
+        worker.workerData.worker.postMessage({ id: messageId, data: message });
+        this.RunningCache.set(id, { type: worker.workerData.type, id, worker: worker.workerData.worker });
         return messageId;
     }
 
@@ -171,15 +203,19 @@ export default class WorkerManager extends EventEmitter {
      * @param id - The unique identifier of the worker to be terminated.
      */
     public terminateWorker(id: string): void {
-        if (this.getWorker(id)) {
-            const workerData = this.getWorker(id)?.workerData;
-            this.getWorker(id)?.workerData.worker.terminate();
+        const stored = this.getWorker(id);
+        if (stored) {
+            const workerData = stored.workerData;
+            workerData.worker.terminate();
             this.Cache.delete(id);
             if (this.RunningCache.has(id)) {
                 Log.warn(`Worker with ID ${id} and type ${workerData?.type} was running a task when terminated.`, { workerId: id, workerType: workerData?.type });
                 this.RunningCache.delete(id);
             }
             else Log.info(`Worker with ID ${id} and type ${workerData?.type} was terminated.`, { workerId: id, workerType: workerData?.type });
+            this.reservations.delete(id);
+            this.clearKeepAliveTimer(id);
+            this.fulfillWaiters(workerData.type);
         }
     };
 
@@ -236,11 +272,12 @@ export default class WorkerManager extends EventEmitter {
      * @param data - Optional data to pass to the workers.
      * @returns An array of objects, each containing the type, worker instance, and id of the created workers.
      */
-    public bulkCreateWorkers(path: string, type: string, amount: number, options?: WorkerOptions, data?: any) {
+    public bulkCreateWorkers(path: string, type: string, amount: number, options?: WorkerOptions, data?: any): WorkerHandle[] {
         if (amount > this.typeLimit) amount = this.typeLimit;
-        const workers = [];
+        const workers: WorkerHandle[] = [];
         for (let i = 0; i < amount; i++) {
-            workers.push((this.createWorker(path, type, true, options, data) as unknown) as { type: string, worker: Worker, id: string });
+            const created = this.createWorker(path, type, true, options, data);
+            if (created) workers.push(created);
         }
         return workers;
     }
@@ -257,5 +294,93 @@ export default class WorkerManager extends EventEmitter {
      */
     public terminateAllWorkers(): void {
         this.Cache.forEach(w => this.terminateWorker(w.id));
+    }
+
+    private enqueueWaiter(type: string, waiter: WorkerWaiter): void {
+        const queue = this.waitingQueues.get(type) ?? [];
+        queue.push(waiter);
+        this.waitingQueues.set(type, queue);
+    }
+
+    private removeWaiter(type: string, waiter: WorkerWaiter): void {
+        const queue = this.waitingQueues.get(type);
+        if (!queue) return;
+        const index = queue.indexOf(waiter);
+        if (index !== -1) {
+            queue.splice(index, 1);
+        }
+        if (waiter.timeoutHandle) {
+            clearTimeout(waiter.timeoutHandle);
+            waiter.timeoutHandle = undefined;
+        }
+        if (queue.length === 0) this.waitingQueues.delete(type);
+        else this.waitingQueues.set(type, queue);
+    }
+
+    private fulfillWaiters(type: string): void {
+        const queue = this.waitingQueues.get(type);
+        if (!queue || queue.length === 0) return;
+        let next = this.getAvailableWorker(type);
+        while (next && queue.length > 0) {
+            const waiter = queue.shift();
+            if (!waiter) break;
+            if (waiter.timeoutHandle) {
+                clearTimeout(waiter.timeoutHandle);
+                waiter.timeoutHandle = undefined;
+            }
+            this.reservations.add(next.id);
+            try {
+                waiter.resolve(next);
+            }
+            catch (error) {
+                Log.warn(`Failed to resolve waiter for worker type ${type}`, { error: error instanceof Error ? error.message : String(error) });
+            }
+            next = this.getAvailableWorker(type);
+        }
+        if (queue.length === 0) this.waitingQueues.delete(type);
+        else this.waitingQueues.set(type, queue);
+    }
+
+    private markWorkerIdle(id: string, type: string): void {
+        if (!this.Cache.has(id)) return;
+        this.RunningCache.delete(id);
+        this.reservations.delete(id);
+        this.scheduleKeepAlive(id, type);
+        this.fulfillWaiters(type);
+    }
+
+    private clearKeepAliveTimer(id: string): void {
+        const timer = this.keepAliveTimers.get(id);
+        if (timer) {
+            clearTimeout(timer);
+            this.keepAliveTimers.delete(id);
+        }
+    }
+
+    private scheduleKeepAlive(id: string, type: string): void {
+        if (this.keepAliveIntervalMs <= 0) return;
+        if (!this.Cache.has(id) || this.RunningCache.has(id) || this.reservations.has(id)) return;
+        this.clearKeepAliveTimer(id);
+        const timer = setTimeout(() => {
+            this.keepAliveTimers.delete(id);
+            this.sendKeepAlive(id, type).catch(error => {
+                if (this.Cache.has(id)) {
+                    Log.warn(`Keep-alive ping failed for worker ${id}`, { workerId: id, workerType: type, error: error instanceof Error ? error.message : String(error) });
+                }
+            });
+        }, this.keepAliveIntervalMs);
+        if (typeof timer.unref === "function") timer.unref();
+        this.keepAliveTimers.set(id, timer);
+    }
+
+    private async sendKeepAlive(id: string, type: string): Promise<void> {
+        if (!this.Cache.has(id) || this.RunningCache.has(id) || this.reservations.has(id)) return;
+        try {
+            const messageId = this.postMessage(id, "ping");
+            await this.awaitResponse(id, messageId, Math.max(1000, this.keepAliveIntervalMs));
+        }
+        catch (error) {
+            if (this.Cache.has(id)) throw error;
+        }
     }
 }

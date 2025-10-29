@@ -7,7 +7,7 @@ async function run(text, from, to) {
 
 parentPort.on("message", async allData => {
     if (allData.data === "ping") {
-        return parentPort.postMessage("pong");
+        return parentPort.postMessage({ id: allData.id, type: "ping", pong: true });
     };
     const { text, from, to } = allData.data;
     try {

@@ -1,4 +1,4 @@
-import { Attachment, AttachmentPayload, Collection, Guild, JSONEncodable, Message, User, WebhookClient } from "discord.js";
+import { Attachment, Collection, Guild, JSONEncodable, Message, User, WebhookClient } from "discord.js";
 import client from "..";
 import db from "../mysql/database";
 import EventEmitter from "events";
@@ -12,10 +12,11 @@ const DefaultChatManagerOptions: ChatManagerOptions = {
     time: 10000,
     ratelimit_time: 60000
 }
-const blacklist: string[] = ["1204899276229058625"];
+const blacklist = new Set<string>(["1204899276229058625"]);
 const GUILD_CACHE_TTL = 15000;
 const LANGUAGE_CACHE_TTL = 600000;
 const LINK_REGEX = /(http|https):\/\/[\w-]+(\.[\w-]+)+([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])?/g;
+const LANGUAGE_NAME_CACHE = new Map<string, string>();
 
 export default class ChatManager extends EventEmitter {
     private cache = new Collection<string, any>();
@@ -50,10 +51,10 @@ export default class ChatManager extends EventEmitter {
         }
     };
     public async processMessage(message: Message<true>): Promise<any> {
-        if (blacklist.includes(message.author.id)) { message.reply("No."); return Log.info("Ignoring blacklisted user.", { userId: message.author.id }) }
+        if (blacklist.has(message.author.id)) { message.reply("No."); return Log.info("Ignoring blacklisted user.", { userId: message.author.id }) }
         if (this.isRatelimited(message.author.id)) return Log.info(`Ignoring user ${message.author.username} as they're ratelimited.`, { userId: message.author.id, username: message.author.username });
         const start = Date.now();
-        const reactionPromise = message.react("875107406462472212").catch(error => {
+        const reactionPromise = message.react(data.bot.loadingEmoji.id).catch(error => {
             Log.warn(`Failed to add processing reaction to message ${message.id}`, { messageId: message.id, error: error?.message ?? error });
             return null;
         });
@@ -63,7 +64,7 @@ export default class ChatManager extends EventEmitter {
             this.resolveMessageContent(message)
         ]);
         const normalizedUserLanguage = userLanguage.toLowerCase();
-        const languageName = langs.where("1", userLanguage)?.name ?? userLanguage;
+        const languageName = this.resolveLanguageName(userLanguage);
         const hasTextContent = baseContent.trim().length > 0;
         let sanitizedDefaultContent = this.sanitizeContent(baseContent);
         if (!sanitizedDefaultContent || !sanitizedDefaultContent.trim().length) sanitizedDefaultContent = "*Attachment*";
@@ -147,7 +148,7 @@ export default class ChatManager extends EventEmitter {
         const normalizedLanguage = (language ?? "en").toLowerCase();
         const sourceLanguageName = langs.where("1", language)?.name ?? language;
         const hasTextContent = message.trim().length > 0;
-        let sanitizedDefaultContent = this.sanitizeContent(message);
+        let sanitizedDefaultContent = message;
         if (!sanitizedDefaultContent || !sanitizedDefaultContent.trim().length) sanitizedDefaultContent = "*Attachment*";
         const getTranslatedContent = this.createTranslationResolver(
             message,
@@ -225,6 +226,15 @@ export default class ChatManager extends EventEmitter {
     }
     private sanitizeContent(content: string): string {
         return content.replace(LINK_REGEX, "[LINK]");
+    }
+    private resolveLanguageName(languageCode: string): string {
+        if (!languageCode) return languageCode;
+        const normalized = languageCode.toLowerCase();
+        const cached = LANGUAGE_NAME_CACHE.get(normalized);
+        if (cached) return cached;
+        const resolved = langs.where("1", languageCode)?.name ?? languageCode;
+        LANGUAGE_NAME_CACHE.set(normalized, resolved);
+        return resolved;
     }
     private async getActiveGuilds(): Promise<any[]> {
         const now = Date.now();

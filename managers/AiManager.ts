@@ -7,6 +7,7 @@ import AIFunctions from "../AIFunctions";
 import { Message } from "discord.js";
 import * as fs from "fs";
 import path from "path";
+import data from "../data";
 const genAI = new GoogleGenerativeAI(String(process.env.AI_API_KEY));
 
 class AiManager extends EventEmitter {
@@ -64,7 +65,7 @@ class AiManager extends EventEmitter {
         const chat = await this.GetChat(id, "");
         const func: any = utils.AIFunctions[name as keyof typeof utils.AIFunctions];
         if (!func) {
-            await message.edit("The AI requested an unknown function, attempting to recover... <a:discordproloading:875107406462472212>");
+            await message.edit(`The AI requested an unknown function, attempting to recover... ${data.bot.loadingEmoji.mention}`);
             const rsp = await chat.sendMessage([
                 {
                     functionResponse: {
@@ -76,7 +77,7 @@ class AiManager extends EventEmitter {
                 }
             ]);
             if (rsp.response.functionCalls()?.length) {
-                await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} <a:discordproloading:875107406462472212>`);
+                await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} ${data.bot.loadingEmoji.mention}`);
                 return this.ExecuteFunction(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
             }
         }
@@ -130,7 +131,7 @@ class AiManager extends EventEmitter {
             }
         ]);
         if (rsp.response.functionCalls()?.length) {
-            await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} <a:discordproloading:875107406462472212>`);
+            await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} ${data.bot.loadingEmoji.mention}`);
             return this.ExecuteFunction(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
         }
         reply = rsp.response.text();
@@ -170,9 +171,9 @@ class AiManager extends EventEmitter {
             const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
             chat = model.startChat({
                 generationConfig: {
-                    maxOutputTokens: 480,
-                    temperature: 0.9,
-                    topP: 0.9,
+                    maxOutputTokens: 800,
+                    temperature: 0.7,
+                    topP: 0.8,
                     topK: 40,
                 },
                 tools: AIFunctions

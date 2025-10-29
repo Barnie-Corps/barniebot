@@ -164,73 +164,69 @@ client.on("messageCreate", async (message): Promise<any> => {
         case "eval": {
             // Check if the user is an owner
             if (!data.bot.owners.includes(message.author.id)) return message.reply('no');
-            const targetCode = args.slice(0).join(' '); // Get the code to eval from the message content
-            if (!targetCode) return message.reply('You must provide a code to eval.');
+            
+            const targetCode = args.join(' ');
+            if (!targetCode) return message.reply('You must provide code to evaluate.');
+            
             try {
-            // Evaluate the code
-            const start = Date.now();
-            let evalued = eval(targetCode);
-            
-            // Handle promises
-            if (evalued instanceof Promise) {
-                evalued = await evalued;
-            }
-            
-            const done = Date.now() - start;
-            const output = inspect(evalued, { depth: 1, maxArrayLength: 100 });
-            
-            // Truncate output if too long
-            const truncatedOutput = output.length > 1900 ? `${output.substring(0, 1900)}...` : output;
-            
-            const embed = new EmbedBuilder()
-                .setColor("Green")
-                .setTitle('Code evaluated')
-                .addFields(
-                {
-                    name: "**Output Type**:",
-                    value: `\`\`\`prolog\n${typeof (evalued)}\`\`\``,
-                    inline: true
-                },
-                {
-                    name: "**Evaluated in:**",
-                    value: `\`\`\`yaml\n${done}ms\`\`\``,
-                    inline: true
-                },
-                {
-                    name: "**Input**",
-                    value: `\`\`\`js\n${targetCode.length > 1000 ? `${targetCode.substring(0, 1000)}...` : targetCode}\`\`\``
-                },
-                {
-                    name: "**Output**",
-                    value: `\`\`\`js\n${truncatedOutput}\`\`\``
+                const start = Date.now();
+                let evalued = eval(targetCode);
+                
+                // Handle promises
+                if (evalued instanceof Promise) {
+                    evalued = await evalued;
                 }
-                );
-            
-            await message.reply({ embeds: [embed] });
-            break;
+                
+                const done = Date.now() - start;
+                const outputType = typeof evalued;
+                const output = inspect(evalued, { depth: 1, maxArrayLength: 100 });
+                
+                // Create response embed
+                const embed = new EmbedBuilder()
+                    .setColor("Green")
+                    .setTitle('Code Evaluated Successfully')
+                    .addFields(
+                        {
+                            name: "Type",
+                            value: `\`\`\`prolog\n${outputType}\`\`\``,
+                            inline: true
+                        },
+                        {
+                            name: "Time",
+                            value: `\`\`\`yaml\n${done}ms\`\`\``,
+                            inline: true
+                        },
+                        {
+                            name: "Input",
+                            value: `\`\`\`js\n${targetCode.length > 1000 ? `${targetCode.substring(0, 1000)}...` : targetCode}\`\`\``
+                        },
+                        {
+                            name: "Output",
+                            value: `\`\`\`js\n${output.length > 1900 ? `${output.substring(0, 1900)}...` : output}\`\`\``
+                        }
+                    );
+                
+                await message.reply({ embeds: [embed] });
+            } catch (error: any) {
+                const errorMessage = error?.stack || error?.message || String(error);
+                
+                const errorEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setTitle('Evaluation Error')
+                    .addFields(
+                        {
+                            name: "Input",
+                            value: `\`\`\`js\n${targetCode.length > 1000 ? `${targetCode.substring(0, 1000)}...` : targetCode}\`\`\``
+                        },
+                        {
+                            name: "Error",
+                            value: `\`\`\`js\n${errorMessage.length > 1900 ? `${errorMessage.substring(0, 1900)}...` : errorMessage}\`\`\``
+                        }
+                    );
+                
+                await message.reply({ embeds: [errorEmbed] });
             }
-            // Catch any errors that may occur while evaluating the code and reply with the error
-            catch (error: any) {
-            const errorMessage = error?.stack || error?.message || String(error);
-            const truncatedError = errorMessage.length > 1900 ? `${errorMessage.substring(0, 1900)}...` : errorMessage;
-            
-            const errorEmbed = new EmbedBuilder()
-                .setColor('Red')
-                .setTitle('ERROR')
-                .addFields(
-                {
-                    name: "Input",
-                    value: `\`\`\`js\n${targetCode.length > 1000 ? `${targetCode.substring(0, 1000)}...` : targetCode}\`\`\``
-                },
-                {
-                    name: "Error",
-                    value: `\`\`\`js\n${truncatedError}\`\`\``
-                }
-                );
-            
-            await message.reply({ embeds: [errorEmbed] });
             break;
-            }
         }
         case "active_guilds": {
             const guilds = [...(function () {
@@ -314,7 +310,7 @@ client.on("messageCreate", async (message): Promise<any> => {
             break;
         }
         case "fetch_guilds_members": {
-            const msg = await message.reply("<a:discordproloading:875107406462472212> Fetching members from guilds...");
+            const msg = await message.reply(`${data.bot.loadingEmoji.mention} Fetching members from guilds...`);
             for (const g of client.guilds.cache.values()) {
                 await g.members.fetch();
             }
@@ -368,7 +364,8 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             return await interaction.reply({ content: "```\n" + `/${interaction.commandName}\n ${utils.createArrows(`${interaction.command?.name}`.length)}\n\nERR: Unknown slash command` + "\n```", ephemeral: true });
         }
         try {
-            await interaction.reply({ content: Lang !== "en" ? `${texts.loading} <a:discordproloading:875107406462472212>` : `<a:discordproloading:875107406462472212>`, flags: cmd.ephemeral ?  MessageFlags.Ephemeral : undefined }); // Reply with a loading message
+            const loadingReply = Lang !== "en" ? `${texts.loading} ${data.bot.loadingEmoji.mention}` : data.bot.loadingEmoji.mention;
+            await interaction.reply({ content: loadingReply, flags: cmd.ephemeral ?  MessageFlags.Ephemeral : undefined }); // Reply with a loading message
             await cmd.execute(interaction, Lang);
             await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE"); // Update the last command executed
             await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]); // Insert the executed command into the executed_commands table

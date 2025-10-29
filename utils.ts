@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 import * as async from "async";
 import Workers from "./Workers";
+import type { WorkerHandle } from "./managers/WorkerManager";
 import path from "path";
 import db from "./mysql/database";
 import { ChatSession } from "@google/generative-ai";
@@ -652,8 +653,13 @@ const utils = {
       return { text: await shared };
     }
     const task = (async () => {
-      const worker = Workers.getAvailableWorker(TRANSLATE_WORKER_TYPE) ?? (Workers.createWorker(TRANSLATE_WORKER_PATH, TRANSLATE_WORKER_TYPE) as unknown as { type: string; worker: Worker; id: string } | undefined);
-      if (!worker) throw new Error("Unable to acquire translate worker");
+      let worker: WorkerHandle | null | undefined = Workers.getAvailableWorker(TRANSLATE_WORKER_TYPE);
+      if (!worker) {
+        worker = Workers.createWorker(TRANSLATE_WORKER_PATH, TRANSLATE_WORKER_TYPE) ?? undefined;
+      }
+      if (!worker) {
+        worker = await Workers.AwaitAvailableWorker(TRANSLATE_WORKER_TYPE, TRANSLATE_TIMEOUT);
+      }
       const messageId = Workers.postMessage(worker.id, { text, from, to: target });
       const response = await Workers.awaitResponse(worker.id, messageId, TRANSLATE_TIMEOUT);
       if (response.message?.error) throw new Error(response.message.error);
@@ -710,7 +716,7 @@ const utils = {
     );
     let crypted = cipher.update(data, "utf8", "hex");
     crypted += cipher.final("hex");
-    return iv.toString() + ":" + crypted;
+    return Buffer.from(iv).toString('hex') + ":" + crypted;
   },
   decryptWithAES: (key: string, data: string): string | null => {
     const textParts = data.split(":");

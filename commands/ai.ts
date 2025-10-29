@@ -93,7 +93,7 @@ export default {
                             return;
                         }
                     }
-                    const msg = await message.reply(response.call ? `Executing function ${(response.call as FunctionCall).name} <a:discordproloading:875107406462472212>` : response.text);
+                    const msg = await message.reply(response.call ? `Executing function ${(response.call as FunctionCall).name} ${data.bot.loadingEmoji.mention}` : response.text);
                     if (response.call) {
                         await ai.ExecuteFunction(interaction.user.id, (response.call as FunctionCall).name!, (response.call as FunctionCall).args, msg);
                     }

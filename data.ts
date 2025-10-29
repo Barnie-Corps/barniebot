@@ -19,6 +19,11 @@ const data: DataType = {
             id: "thumbsdown",
             emoji: "👎"
         }],
+        loadingEmoji: {
+            id: "875107406462472212",
+            mention: "<a:discordproloading:875107406462472212>",
+            name: "discordproloading"
+        },
         token: String(process.env.TOKEN),
         commands: new Collection(),
         encryption_key: String(process.env.ENCRYPTION_KEY),

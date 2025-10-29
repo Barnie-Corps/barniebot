@@ -10,6 +10,11 @@ export interface DataType {
     bot: {
         owners: string[];
         emojis: BotEmoji[];
+        loadingEmoji: {
+            id: string;
+            mention: string;
+            name: string;
+        };
         token: string;
         commands: Collection<string, any>;
         encryption_key: string;
