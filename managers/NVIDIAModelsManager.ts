@@ -210,7 +210,7 @@ message WordInfo {
                         }
                     }
                     
-                    resolve(""); // No speech detected
+                    resolve("");
                 });
             });
 
@@ -218,5 +218,221 @@ message WordInfo {
             console.error("Error in GetSpeechToText:", error);
             throw new Error(`Failed to transcribe audio: ${error instanceof Error ? error.message : String(error)}`);
         }
+    }
+
+    public GetTextToSpeech = async (
+        text: string,
+        voice: string = "Magpie-Multilingual.EN-US.Aria",
+        languageCode: string = "en-US",
+        timeoutMs: number = 15000,
+        functionId?: string
+    ): Promise<Buffer> => {
+        try {
+            const protoPath = path.join(__dirname, "..", "protos", "riva_tts.proto");
+            const fs = require("fs");
+            const protoDir = path.join(__dirname, "..", "protos");
+            
+            if (!fs.existsSync(protoDir)) {
+                fs.mkdirSync(protoDir, { recursive: true });
+            }
+            
+            const protoContent = `
+syntax = "proto3";
+package nvidia.riva.tts;
+
+service RivaSpeechSynthesis {
+  rpc Synthesize(SynthesizeSpeechRequest) returns (SynthesizeSpeechResponse) {}
+  rpc SynthesizeOnline(SynthesizeSpeechRequest) returns (stream SynthesizeSpeechResponse) {}
+  rpc ListVoices(ListVoicesRequest) returns (ListVoicesResponse) {}
+}
+
+message SynthesizeSpeechRequest {
+  string text = 1;
+  string language_code = 2;
+  AudioEncoding encoding = 3;
+  int32 sample_rate_hertz = 4;
+  string voice_name = 5;
+}
+
+message SynthesizeSpeechResponse {
+  bytes audio = 1;
+}
+
+message ListVoicesRequest {
+  string language_code = 1;
+}
+
+message ListVoicesResponse {
+  repeated Voice voices = 1;
+}
+
+message Voice {
+  string name = 1;
+  string language_code = 2;
+  int32 sample_rate_hertz = 3;
+}
+
+enum AudioEncoding {
+  ENCODING_UNSPECIFIED = 0;
+  LINEAR_PCM = 1;
+  FLAC = 2;
+  MULAW = 3;
+  OGGOPUS = 4;
+  ALAW = 20;
+}
+`;
+            
+            if (!fs.existsSync(protoPath)) {
+                fs.writeFileSync(protoPath, protoContent);
+            }
+
+            const packageDefinition = protoLoader.loadSync(protoPath, {
+                keepCase: true,
+                longs: String,
+                enums: String,
+                defaults: true,
+                oneofs: true
+            });
+
+            const protoDescriptor = grpc.loadPackageDefinition(packageDefinition) as any;
+            const rivaPackage = protoDescriptor.nvidia.riva.tts;
+
+            const metadata = new grpc.Metadata();
+            metadata.add("authorization", `Bearer ${this.apiKey}`);
+            
+            const finalFunctionId = functionId || process.env.NVIDIA_TTS_FUNCTION_ID;
+            if (finalFunctionId) {
+                metadata.add("function-id", finalFunctionId);
+            }
+
+            const sslCreds = grpc.credentials.createSsl();
+            const callCreds = grpc.credentials.createFromMetadataGenerator((params, callback) => {
+                callback(null, metadata);
+            });
+            const credentials = grpc.credentials.combineChannelCredentials(sslCreds, callCreds);
+
+            const client = new rivaPackage.RivaSpeechSynthesis(
+                "grpc.nvcf.nvidia.com:443",
+                credentials
+            );
+
+            const request = {
+                text,
+                language_code: languageCode,
+                encoding: "LINEAR_PCM",
+                sample_rate_hertz: 22050,
+                voice_name: voice
+            };
+
+            return new Promise((resolve, reject) => {
+                const deadline = new Date(Date.now() + timeoutMs);
+                
+                client.Synthesize(request, { deadline }, (error: Error | null, response: any) => {
+                    if (error) {
+                        console.error("Error during speech synthesis:", error);
+                        reject(new Error(`Speech synthesis failed: ${error.message}`));
+                        return;
+                    }
+
+                    if (response?.audio) {
+                        resolve(Buffer.from(response.audio));
+                    } else {
+                        reject(new Error("No audio data received"));
+                    }
+                });
+            });
+
+        } catch (error) {
+            console.error("Error in GetTextToSpeech:", error);
+            throw new Error(`Failed to synthesize speech: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    public GetBestMaleVoice = (languageCode: string): string | null => {
+        const voices = this.GetAvailableVoices();
+        const maleVoices = voices.filter(v => 
+            v.languageCode === languageCode && 
+            (v.description.includes("Male") || v.name.includes("Jason") || v.name.includes("Leo") || v.name.includes("Diego") || v.name.includes("Pascal"))
+        );
+        
+        if (maleVoices.length === 0) return null;
+        
+        const happyVoice = maleVoices.find(v => v.name.includes(".Happy"));
+        if (happyVoice) return happyVoice.name;
+        
+        const neutralVoice = maleVoices.find(v => v.name.includes(".Neutral") || !v.name.includes("."));
+        if (neutralVoice) return neutralVoice.name;
+        
+        return maleVoices[0].name;
+    }
+
+    public GetAvailableVoices = (): Array<{ name: string; languageCode: string; description: string }> => {
+        return [
+            { name: "Magpie-Multilingual.EN-US.Mia", languageCode: "en-US", description: "English (US) - Female - Neutral" },
+            { name: "Magpie-Multilingual.EN-US.Mia.Angry", languageCode: "en-US", description: "English (US) - Female - Angry" },
+            { name: "Magpie-Multilingual.EN-US.Mia.Calm", languageCode: "en-US", description: "English (US) - Female - Calm" },
+            { name: "Magpie-Multilingual.EN-US.Mia.Happy", languageCode: "en-US", description: "English (US) - Female - Happy" },
+            { name: "Magpie-Multilingual.EN-US.Mia.Neutral", languageCode: "en-US", description: "English (US) - Female - Neutral" },
+            { name: "Magpie-Multilingual.EN-US.Mia.Sad", languageCode: "en-US", description: "English (US) - Female - Sad" },
+            { name: "Magpie-Multilingual.EN-US.Jason", languageCode: "en-US", description: "English (US) - Male - Neutral" },
+            { name: "Magpie-Multilingual.EN-US.Jason.Angry", languageCode: "en-US", description: "English (US) - Male - Angry" },
+            { name: "Magpie-Multilingual.EN-US.Jason.Calm", languageCode: "en-US", description: "English (US) - Male - Calm" },
+            { name: "Magpie-Multilingual.EN-US.Jason.Happy", languageCode: "en-US", description: "English (US) - Male - Happy" },
+            { name: "Magpie-Multilingual.EN-US.Jason.Neutral", languageCode: "en-US", description: "English (US) - Male - Neutral" },
+            { name: "Magpie-Multilingual.EN-US.Aria", languageCode: "en-US", description: "English (US) - Female - Neutral (Default)" },
+            { name: "Magpie-Multilingual.EN-US.Aria.Angry", languageCode: "en-US", description: "English (US) - Female - Angry" },
+            { name: "Magpie-Multilingual.EN-US.Aria.Calm", languageCode: "en-US", description: "English (US) - Female - Calm" },
+            { name: "Magpie-Multilingual.EN-US.Aria.Fearful", languageCode: "en-US", description: "English (US) - Female - Fearful" },
+            { name: "Magpie-Multilingual.EN-US.Aria.Happy", languageCode: "en-US", description: "English (US) - Female - Happy" },
+            { name: "Magpie-Multilingual.EN-US.Aria.Neutral", languageCode: "en-US", description: "English (US) - Female - Neutral" },
+            { name: "Magpie-Multilingual.EN-US.Aria.Sad", languageCode: "en-US", description: "English (US) - Female - Sad" },
+            { name: "Magpie-Multilingual.EN-US.Leo", languageCode: "en-US", description: "English (US) - Male - Neutral" },
+            { name: "Magpie-Multilingual.EN-US.Leo.Angry", languageCode: "en-US", description: "English (US) - Male - Angry" },
+            { name: "Magpie-Multilingual.EN-US.Leo.Calm", languageCode: "en-US", description: "English (US) - Male - Calm" },
+            { name: "Magpie-Multilingual.EN-US.Leo.Fearful", languageCode: "en-US", description: "English (US) - Male - Fearful" },
+            { name: "Magpie-Multilingual.EN-US.Leo.Neutral", languageCode: "en-US", description: "English (US) - Male - Neutral" },
+            { name: "Magpie-Multilingual.EN-US.Leo.Sad", languageCode: "en-US", description: "English (US) - Male - Sad" },
+            { name: "Magpie-Multilingual.ES-US.Diego", languageCode: "es-US", description: "Spanish (US) - Male" },
+            { name: "Magpie-Multilingual.ES-US.Isabela", languageCode: "es-US", description: "Spanish (US) - Female" },
+            { name: "Magpie-Multilingual.FR-FR.Pascal", languageCode: "fr-FR", description: "French - Male - Neutral" },
+            { name: "Magpie-Multilingual.FR-FR.Pascal.Angry", languageCode: "fr-FR", description: "French - Male - Angry" },
+            { name: "Magpie-Multilingual.FR-FR.Pascal.Calm", languageCode: "fr-FR", description: "French - Male - Calm" },
+            { name: "Magpie-Multilingual.FR-FR.Pascal.Disgusted", languageCode: "fr-FR", description: "French - Male - Disgusted" },
+            { name: "Magpie-Multilingual.FR-FR.Pascal.Happy", languageCode: "fr-FR", description: "French - Male - Happy" },
+            { name: "Magpie-Multilingual.FR-FR.Pascal.Neutral", languageCode: "fr-FR", description: "French - Male - Neutral" },
+            { name: "Magpie-Multilingual.FR-FR.Pascal.Sad", languageCode: "fr-FR", description: "French - Male - Sad" },
+            { name: "Magpie-Multilingual.FR-FR.Louise", languageCode: "fr-FR", description: "French - Female - Neutral" },
+            { name: "Magpie-Multilingual.FR-FR.Louise.Calm", languageCode: "fr-FR", description: "French - Female - Calm" },
+            { name: "Magpie-Multilingual.FR-FR.Louise.Disgusted", languageCode: "fr-FR", description: "French - Female - Disgusted" },
+            { name: "Magpie-Multilingual.FR-FR.Louise.Fearful", languageCode: "fr-FR", description: "French - Female - Fearful" },
+            { name: "Magpie-Multilingual.FR-FR.Louise.Happy", languageCode: "fr-FR", description: "French - Female - Happy" },
+            { name: "Magpie-Multilingual.FR-FR.Louise.Neutral", languageCode: "fr-FR", description: "French - Female - Neutral" },
+            { name: "Magpie-Multilingual.FR-FR.Louise.Sad", languageCode: "fr-FR", description: "French - Female - Sad" },
+            { name: "Magpie-Multilingual.DE-DE.Aria", languageCode: "de-DE", description: "German - Female - Neutral" },
+            { name: "Magpie-Multilingual.DE-DE.Aria.Angry", languageCode: "de-DE", description: "German - Female - Angry" },
+            { name: "Magpie-Multilingual.DE-DE.Aria.Calm", languageCode: "de-DE", description: "German - Female - Calm" },
+            { name: "Magpie-Multilingual.DE-DE.Aria.Fearful", languageCode: "de-DE", description: "German - Female - Fearful" },
+            { name: "Magpie-Multilingual.DE-DE.Aria.Happy", languageCode: "de-DE", description: "German - Female - Happy" },
+            { name: "Magpie-Multilingual.DE-DE.Aria.Neutral", languageCode: "de-DE", description: "German - Female - Neutral" },
+            { name: "Magpie-Multilingual.DE-DE.Aria.Sad", languageCode: "de-DE", description: "German - Female - Sad" },
+            { name: "Magpie-Multilingual.DE-DE.Jason", languageCode: "de-DE", description: "German - Male - Neutral" },
+            { name: "Magpie-Multilingual.DE-DE.Jason.Angry", languageCode: "de-DE", description: "German - Male - Angry" },
+            { name: "Magpie-Multilingual.DE-DE.Jason.Calm", languageCode: "de-DE", description: "German - Male - Calm" },
+            { name: "Magpie-Multilingual.DE-DE.Jason.Happy", languageCode: "de-DE", description: "German - Male - Happy" },
+            { name: "Magpie-Multilingual.DE-DE.Jason.Neutral", languageCode: "de-DE", description: "German - Male - Neutral" },
+            { name: "Magpie-Multilingual.DE-DE.Leo", languageCode: "de-DE", description: "German - Male - Neutral" },
+            { name: "Magpie-Multilingual.DE-DE.Leo.Angry", languageCode: "de-DE", description: "German - Male - Angry" },
+            { name: "Magpie-Multilingual.DE-DE.Leo.Calm", languageCode: "de-DE", description: "German - Male - Calm" },
+            { name: "Magpie-Multilingual.DE-DE.Leo.Fearful", languageCode: "de-DE", description: "German - Male - Fearful" },
+            { name: "Magpie-Multilingual.DE-DE.Leo.Neutral", languageCode: "de-DE", description: "German - Male - Neutral" },
+            { name: "Magpie-Multilingual.DE-DE.Leo.Sad", languageCode: "de-DE", description: "German - Male - Sad" },
+            { name: "Magpie-Multilingual.DE-DE.Diego", languageCode: "de-DE", description: "German - Male" },
+            { name: "Magpie-Multilingual.ZH-CN.Mia", languageCode: "zh-CN", description: "Chinese - Female" },
+            { name: "Magpie-Multilingual.ZH-CN.Aria", languageCode: "zh-CN", description: "Chinese - Female" },
+            { name: "Magpie-Multilingual.ZH-CN.Diego", languageCode: "zh-CN", description: "Chinese - Male" },
+            { name: "Magpie-Multilingual.ZH-CN.Isabela", languageCode: "zh-CN", description: "Chinese - Female" },
+            { name: "Magpie-Multilingual.ZH-CN.Pascal", languageCode: "zh-CN", description: "Chinese - Male" },
+            { name: "Magpie-Multilingual.ZH-CN.Louise", languageCode: "zh-CN", description: "Chinese - Female" }
+        ];
     }
 };

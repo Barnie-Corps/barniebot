@@ -93,8 +93,8 @@ class AiManager extends EventEmitter {
                     preparedArgs = {
                         ...args,
                         requesterId: id,
-                        guildId: message.guild?.id ?? null,
-                        channelId: message.channel?.id ?? null
+                        guildId: message?.guild?.id ?? null,
+                        channelId: message?.channel?.id ?? null
                     };
                 }
             } else if (preparedArgs === null || preparedArgs === undefined || preparedArgs === "") {
@@ -131,7 +131,9 @@ class AiManager extends EventEmitter {
             }
         ]);
         if (rsp.response.functionCalls()?.length) {
-            await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} ${data.bot.loadingEmoji.mention}`);
+            if (message) {
+                await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} ${data.bot.loadingEmoji.mention}`);
+            }
             return this.ExecuteFunction(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
         }
         reply = rsp.response.text();
@@ -144,11 +146,13 @@ class AiManager extends EventEmitter {
             fs.writeFileSync(filename, reply);
             filesPayload.push({ attachment: filename, name: path.basename(filename) });
             try {
-                await message.edit({
-                    content: "The response from the AI was too long, so it has been sent as a file.",
-                    files: filesPayload,
-                    attachments: []
-                });
+                if (message) {
+                    await message.edit({
+                        content: "The response from the AI was too long, so it has been sent as a file.",
+                        files: filesPayload,
+                        attachments: []
+                    });
+                }
             } finally {
                 try {
                     fs.unlinkSync(filename);
@@ -158,12 +162,14 @@ class AiManager extends EventEmitter {
             }
             return;
         }
-        if (filesPayload.length > 0) {
-            await message.edit({ content: reply.length ? reply : " ", files: filesPayload, attachments: [] });
-        } else {
-            await message.edit(reply.length ? reply : " ");
+        if (message) {
+            if (filesPayload.length > 0) {
+                await message.edit({ content: reply.length ? reply : " ", files: filesPayload, attachments: [] });
+            } else {
+                await message.edit(reply.length ? reply : " ");
+            }
         }
-        return;
+        return reply; // Return the reply text so voice mode can use it for TTS
     }
     private async GetChat(id: string, text: string): Promise<ChatSession> {
         let chat = this.chats.get(id);

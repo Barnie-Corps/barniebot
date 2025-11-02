@@ -1,4 +1,4 @@
-function stereoToMono(buffer: Buffer): Buffer {
+export function stereoToMono(buffer: Buffer): Buffer {
     const samples = buffer.length / 4;
     const monoBuffer = Buffer.alloc(samples * 2);
 
@@ -12,7 +12,7 @@ function stereoToMono(buffer: Buffer): Buffer {
     return monoBuffer;
 }
 
-function resampleAudio(buffer: Buffer, fromRate: number, toRate: number, channels: number): Buffer {
+export function resampleAudio(buffer: Buffer, fromRate: number, toRate: number, channels: number): Buffer {
     if (fromRate === toRate) {
         return buffer;
     }
