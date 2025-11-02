@@ -79,6 +79,15 @@ export default class ChatManager extends EventEmitter {
             hasTextContent
         );
         let failed = false;
+        const uniqueTargets = new Set<string>();
+        for (const graw of guilds) {
+            if (graw.guild === message.guildId) continue;
+            const targetLanguage = typeof graw.language === "string" ? graw.language : String(graw.language ?? "");
+            const shouldTranslate = Boolean(graw.autotranslate) && targetLanguage && targetLanguage.toLowerCase() !== normalizedUserLanguage;
+            if (shouldTranslate) uniqueTargets.add((targetLanguage ?? "").toLowerCase());
+        }
+        const primeTranslations: Promise<string>[] = Array.from(uniqueTargets.values()).map(tl => getTranslatedContent(tl));
+
         const tasks = guilds
             .filter((graw: any) => graw.guild !== message.guildId)
             .map(async (graw: any) => {
@@ -159,6 +168,14 @@ export default class ChatManager extends EventEmitter {
         );
         const botUsername = client.user?.username;
         const botAvatarURL = client.user?.displayAvatarURL();
+        const uniqueTargets = new Set<string>();
+        for (const graw of guilds) {
+            const targetLanguage = typeof graw.language === "string" ? graw.language : String(graw.language ?? "");
+            const shouldTranslate = Boolean(graw.autotranslate) && targetLanguage && targetLanguage.toLowerCase() !== normalizedLanguage;
+            if (shouldTranslate) uniqueTargets.add((targetLanguage ?? "").toLowerCase());
+        }
+        const primeTranslations: Promise<string>[] = Array.from(uniqueTargets.values()).map(tl => getTranslatedContent(tl));
+
         const tasks = guilds.map(async (graw: any) => {
             const guild = client.guilds.cache.get(graw.guild) as Guild | undefined;
             if (!guild) {

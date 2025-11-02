@@ -30,6 +30,7 @@ import Workers from "./Workers"; // Workers for background tasks
 import path from "path";
 import { inspect } from "util"; // Used for eval command
 import langs from "langs"; // Used for language codes
+import NVIDIAModels from "./NVIDIAModels";
 const manager = new ChatManager();
 // Catch unhandled errors
 process.on("uncaughtException", (err: any) => {
@@ -364,8 +365,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             return await interaction.reply({ content: "```\n" + `/${interaction.commandName}\n ${utils.createArrows(`${interaction.command?.name}`.length)}\n\nERR: Unknown slash command` + "\n```", ephemeral: true });
         }
         try {
-            const loadingReply = Lang !== "en" ? `${texts.loading} ${data.bot.loadingEmoji.mention}` : data.bot.loadingEmoji.mention;
-            await interaction.reply({ content: loadingReply, flags: cmd.ephemeral ?  MessageFlags.Ephemeral : undefined }); // Reply with a loading message
+            await interaction.reply({ content: data.bot.loadingEmoji.mention, flags: cmd.ephemeral ?  MessageFlags.Ephemeral : undefined }); // Reply with a loading message
             await cmd.execute(interaction, Lang);
             await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE"); // Update the last command executed
             await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]); // Insert the executed command into the executed_commands table
@@ -394,6 +394,8 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 catch (err: any) {
                     Log.error("Error sending message to user", new Error(`Failed to send error message to ${interaction.user.username}`));
                     await (interaction.channel as TextChannel).send(`<@${interaction.user.id}>, ${texts.error} https://discord.gg/BKFa6tFYJx`);
+                    Log.error("Slash command execution failed", new Error(`Error executing command ${cmd.data.name}`));
+                    console.error(err.stack, err);
                 }
             }
             else {
@@ -608,6 +610,12 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (message.channelId !== chatdb[0].channel) return;
     const { author, channel, guild, content } = message;
     if (author.bot) return;
+    const safetyCheck = await NVIDIAModels.GetConversationSafety([ { role: "user", content } ]);
+    if (!safetyCheck.safe) {
+        await message.react("❎");
+        await channel.send(`<@${author.id}>, your message was detected as unsafe and was not sent to the global chat.\nReasons: ${safetyCheck.reason || "No reason(s) provided."}`);
+        return;
+    }
     await manager.processUser(author);
     await manager.processMessage(message);
 });

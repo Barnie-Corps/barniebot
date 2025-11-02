@@ -5,6 +5,7 @@ import data from "../data";
 import ai from "../ai";
 import * as fs from "fs";
 import { FunctionCall } from "@google/genai";
+import NVIDIAModels from "../NVIDIAModels";
 
 export default {
     data: new SlashCommandBuilder()
@@ -29,6 +30,7 @@ export default {
                 not_vip: "You must be a VIP to use this feature.",
                 no_response: "Oh no! I couldn't generate a reply. Try repeating what you said, maybe changing a couple of words.",
                 long_response: "Oh no! The response is too long. I'll send it as a Markdown-formatted text file.",
+                unsafe_message: "Your message was flagged as unsafe. Conversation cannot continue and it'll be ended. You can reach out in our support server if you believe this was a mistake made the safety check model.",
             },
             common: {
                 question: "Your question was:",
@@ -37,6 +39,8 @@ export default {
                 stopped_ai: "The chat with the AI has been disabled.",
                 can_take_time: "Remember that the AI's reply can take a bit of time. If you send multiple messages before getting a response or start flooding the chat, you'll lose access to this command indefinitely.",
                 ai_left: "The AI decided to end the conversation. Here's the reason it gave.",
+                reasons: "Razones",
+                no_reasons: "No reason provided."
             },
             success: {}
         }
@@ -46,7 +50,7 @@ export default {
         const subcmd = interaction.options.getSubcommand();
         switch (subcmd) {
             case "ask": {
-                return await interaction.editReply("Temporary unavailable due to high demand. Please use the chat command.");
+                return await interaction.replied ? interaction.editReply("Temporary unavailable due to high demand. Please use the chat command.") : null;
                 await interaction.editReply(texts.common.thinking);
                 const question = interaction.options.getString("question") as string;
                 const response = await ai.GetSingleResponse(interaction.user.id, `Answer the following question as briefly as possible and in the language used in the question: ${question}`);
@@ -57,20 +61,32 @@ export default {
                     await interaction.editReply({ content: texts.errors.long_response, files: [filename] });
                     fs.unlinkSync(filename);
                     return;
-                }   
+                }
                 await interaction.editReply(response);
                 break;
             }
             case "chat": {
                 if (!await utils.isVIP(interaction.user.id) && !data.bot.owners.includes(interaction.user.id)) return await interaction.editReply(texts.errors.not_vip);
-                const collector = (interaction.channel as any).createMessageCollector({ 
-                    filter: (m: { author: { id: string } }) => m.author.id === interaction.user.id 
+                const collector = (interaction.channel as any).createMessageCollector({
+                    filter: (m: { author: { id: string } }) => m.author.id === interaction.user.id
                 });
                 await interaction.editReply(`${texts.common.started_chat} \`stop ai, ai stop, stop chat, end ai\`\n${texts.common.can_take_time}`);
                 collector?.on("collect", async (message: any): Promise<any> => {
                     await (interaction.channel as TextChannel).sendTyping?.();
                     if (["stop ai", "ai stop", "stop chat", "end ai"].some(stop => message.content.toLowerCase().includes(stop))) {
                         await interaction.followUp(texts.common.stopped_ai);
+                        collector?.stop();
+                        return;
+                    }
+                    const safety = await NVIDIAModels.GetConversationSafety([
+                        { role: "user", content: message.content }
+                    ]);
+                    if (!safety.safe) {
+                        if (lang !== "en") {
+                            safety.reason = (await utils.translate(safety.reason || "", "en", lang)).text;
+                        }
+                        const reason = safety.reason ? `\n${texts.common.reasons}: ${safety.reason}` : "";
+                        await message.reply(`${texts.errors.unsafe_message}${reason}`);
                         collector?.stop();
                         return;
                     }

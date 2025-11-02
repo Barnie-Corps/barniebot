@@ -40,6 +40,8 @@ export default class WorkerManager extends EventEmitter {
     private waitingQueues: Map<string, WorkerWaiter[]> = new Map();
     private keepAliveTimers: Map<string, NodeJS.Timeout> = new Map();
     private reservations: Set<string> = new Set();
+    private byType: Map<string, Set<string>> = new Map();
+    private availableByType: Map<string, Set<string>> = new Map();
     /**
      * Constructs a new instance of the WorkerManager.
      * 
@@ -96,8 +98,24 @@ export default class WorkerManager extends EventEmitter {
      * @param type - The type of worker to retrieve.
      * @returns The first available worker of the specified type that is not currently running, or undefined if no such worker is found.
      */
-    public getAvailableWorker(type: string) {
-        return this.Cache.find(w => w.type === type && !this.RunningCache.has(w.id) && !this.reservations.has(w.id));
+    public getAvailableWorker(type: string): WorkerHandle | undefined {
+        const pool = this.availableByType.get(type);
+        if (!pool || pool.size === 0) return undefined;
+        // Get one id from the set
+        const id = pool.values().next().value as string | undefined;
+        if (!id) return undefined;
+        const handle = this.Cache.get(id);
+        if (!handle) {
+            pool.delete(id);
+            return undefined;
+        }
+        // Double-check it's not running or reserved
+        if (this.RunningCache.has(id) || this.reservations.has(id)) {
+            // Not actually available, remove and try again recursively
+            pool.delete(id);
+            return this.getAvailableWorker(type);
+        }
+        return handle;
     };
 
     /**
@@ -117,8 +135,11 @@ export default class WorkerManager extends EventEmitter {
         }
         const worker = new Worker(path, { ...options, workerData: { id, data: data ?? undefined } });
         this.Cache.set(id, { type, worker, id });
+        // Register in type indices as pending/idle (will be made available on 'online')
+        this.byType.set(type, (this.byType.get(type) ?? new Set()).add(id));
         worker.on("online", () => {
             Log.info(`Worker with ID ${id} and type ${type} online and running on ${path}${this.Cache.filter(w => w.type === type).size > this.typeLimit ? `. The workers type limit has been exceeded by the ${type} type..` : this.Cache.filter(w => w.type === type).size === this.typeLimit ? `. The workers type limit has been reached by the type ${type}` : ""}`, { workerId: id, workerType: type });
+            this.addAvailable(id, type);
             this.scheduleKeepAlive(id, type);
             this.fulfillWaiters(type);
         });
@@ -131,6 +152,7 @@ export default class WorkerManager extends EventEmitter {
             this.Cache.delete(id); 
             this.RunningCache.delete(id);
             this.reservations.delete(id);
+            this.removeFromIndices(id, type);
             this.clearKeepAliveTimer(id);
             this.fulfillWaiters(type);
         });
@@ -153,6 +175,8 @@ export default class WorkerManager extends EventEmitter {
         this.clearKeepAliveTimer(id);
         worker.workerData.worker.postMessage({ id: messageId, data: message });
         this.RunningCache.set(id, { type: worker.workerData.type, id, worker: worker.workerData.worker });
+        // Mark as no longer available
+        this.removeAvailable(id, worker.workerData.type);
         return messageId;
     }
 
@@ -214,6 +238,7 @@ export default class WorkerManager extends EventEmitter {
             }
             else Log.info(`Worker with ID ${id} and type ${workerData?.type} was terminated.`, { workerId: id, workerType: workerData?.type });
             this.reservations.delete(id);
+            this.removeFromIndices(id, workerData.type);
             this.clearKeepAliveTimer(id);
             this.fulfillWaiters(workerData.type);
         }
@@ -345,6 +370,7 @@ export default class WorkerManager extends EventEmitter {
         if (!this.Cache.has(id)) return;
         this.RunningCache.delete(id);
         this.reservations.delete(id);
+        this.addAvailable(id, type);
         this.scheduleKeepAlive(id, type);
         this.fulfillWaiters(type);
     }
@@ -382,5 +408,33 @@ export default class WorkerManager extends EventEmitter {
         catch (error) {
             if (this.Cache.has(id)) throw error;
         }
+    }
+
+    // --- Fast index helpers ---
+    private addAvailable(id: string, type: string): void {
+        if (!this.Cache.has(id)) return;
+        let pool = this.availableByType.get(type);
+        if (!pool) {
+            pool = new Set<string>();
+            this.availableByType.set(type, pool);
+        }
+        pool.add(id);
+    }
+
+    private removeAvailable(id: string, type: string): void {
+        const pool = this.availableByType.get(type);
+        if (pool) {
+            pool.delete(id);
+            if (pool.size === 0) this.availableByType.delete(type);
+        }
+    }
+
+    private removeFromIndices(id: string, type: string): void {
+        const set = this.byType.get(type);
+        if (set) {
+            set.delete(id);
+            if (set.size === 0) this.byType.delete(type);
+        }
+        this.removeAvailable(id, type);
     }
 }
