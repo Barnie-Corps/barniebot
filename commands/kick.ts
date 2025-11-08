@@ -2,10 +2,10 @@ import { ChatInputCommandInteraction, PermissionFlagsBits, SlashCommandBuilder }
 
 export default {
     data: new SlashCommandBuilder()
-    .setName("kick")
-    .setDescription("Kicks a user from the server")
-    .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
-    .addUserOption(o => o.setName("user").setDescription("The target user.").setRequired(true)),
+        .setName("kick")
+        .setDescription("Kicks a user from the server")
+        .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
+        .addUserOption(o => o.setName("user").setDescription("The target user.").setRequired(true)),
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         if (!interaction.guild) return await interaction.reply("No.");
         await interaction.deferReply({ ephemeral: true });

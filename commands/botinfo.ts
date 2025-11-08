@@ -16,30 +16,30 @@ export default {
         const users: any = await db.query("SELECT * FROM discord_users");
         let texts = {
             embed: {
-            title: "General Information",
-            description: "Here you will see general bot statistics.",
-            footer: "Santiago Morales © 2020 - 2025 All rights reserved.",
+                title: "General Information",
+                description: "Here you will see general bot statistics.",
+                footer: "Santiago Morales © 2020 - 2025 All rights reserved.",
             },
             fields: {
-            database: {
-                users: "Users",
-                title: "Database",
-                last_command: "Last executed command",
-                normal_messages: "Normal messages",
-                global_messages: "Global messages"
-            },
-            system: {
-                cpu: "CPU Load",
-                storage: "Available storage",
-                title: "System"
-            },
-            bot: {
-                cachedUsers: "Cached users",
-                totalUsers: "Total users",
-                guilds: "Servers",
-                channels: "Channels"
-            },
-            messages: "Messages"
+                database: {
+                    users: "Users",
+                    title: "Database",
+                    last_command: "Last executed command",
+                    normal_messages: "Normal messages",
+                    global_messages: "Global messages"
+                },
+                system: {
+                    cpu: "CPU Load",
+                    storage: "Available storage",
+                    title: "System"
+                },
+                bot: {
+                    cachedUsers: "Cached users",
+                    totalUsers: "Total users",
+                    guilds: "Servers",
+                    channels: "Channels"
+                },
+                messages: "Messages"
             }
         }
         let needTranslation: boolean = false;

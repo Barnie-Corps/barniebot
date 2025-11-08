@@ -34,13 +34,13 @@ export default {
                 )
                 .addStringOption(o =>
                     o.setName("task")
-                    .setDescription("The type of question or reasoning task (for better context handling and model selection)")
-                    .setRequired(true)
-                    .addChoices(
-                        { name: "General Question", value: "chat" },
-                        { name: "Math Problem", value: "reasoning" },
-                        { name: "Programming Help", value: "programming" },
-                    )
+                        .setDescription("The type of question or reasoning task (for better context handling and model selection)")
+                        .setRequired(true)
+                        .addChoices(
+                            { name: "General Question", value: "chat" },
+                            { name: "Math Problem", value: "reasoning" },
+                            { name: "Programming Help", value: "programming" },
+                        )
                 )
         )
         .addSubcommand(s =>
@@ -100,7 +100,7 @@ export default {
             case "ask": {
                 await reply(texts.common.thinking);
                 const question = interaction.options.getString("question") as string;
-                const response = await NVIDIAModels.GetModelChatResponse([ { role: "user", content: `Answer the following question as briefly as possible and in the language used in the question: ${question}\n${"-".repeat(20)}\n Please avoid using complex markdown elements (i.e mathematical elements) as Discord does not support them. Only basic Markdown styling is supported in Discord.` } ], 20000, interaction.options.getString("task") as string);
+                const response = await NVIDIAModels.GetModelChatResponse([{ role: "user", content: `Answer the following question as briefly as possible and in the language used in the question: ${question}\n${"-".repeat(20)}\n Please avoid using complex markdown elements (i.e mathematical elements) as Discord does not support them. Only basic Markdown styling is supported in Discord.` }], 20000, interaction.options.getString("task") as string);
                 if (response.content.length < 1) return await reply(texts.errors.no_response);
                 if (response.content.length > 2000) {
                     const filename = `./ai-response-${Date.now()}.md`;

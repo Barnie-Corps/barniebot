@@ -41,7 +41,7 @@ export default {
                 }
             }),
         })
-        .setColor("Purple");
+            .setColor("Purple");
         await interaction.editReply({ embeds: [embed], content: "" });
     }
 }

@@ -11,7 +11,7 @@ export default {
             "📦 **Repository**: https://github.com/Barnie-Corps/barniebot\n" +
             "💬 **Optional Message**: https://github.com/Barnie-Corps/barniebot/blob/master/based.txt\n\n" +
             "Feel free to star ⭐ the repo if you find it useful!";
-        
+
         if (lang !== "en") {
             message = (await utils.translate(message, "en", lang)).text;
         }
