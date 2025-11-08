@@ -1,71 +1,72 @@
-# Security Policy
+# BarnieBot Security Policy
 
-## Supported Versions
+Version support is now continuous; we focus on securing current `master` rather than maintaining version-specific matrices.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| > 1.0   | :white_check_mark: |
-| < 1.0   | :x:                |
+## Philosophy
+BarnieBot’s security posture centers on least privilege, fast containment, and transparent remediation. We aim to:
+- Minimize sensitive data retention.
+- Segregate CPU-intensive tasks (workers) from privileged logic.
+- Provide clear audit trails for staff actions (warnings, mutes, blacklists).
 
-## Reporting a Security Vulnerability
+## Threat Model (High-Level)
+| Vector | Mitigation |
+|--------|-----------|
+| Token compromise | Environment variable storage; rotate on suspicion. |
+| Privilege escalation | Owner ID list enforced; staff rank checks block higher/equal modifications. |
+| Global chat abuse | Rate limits + worker offloaded decrements; blacklist/mute tables. |
+| Impersonation | Automatic stripping of spoofed staff suffix tags from non-staff. |
+| Sensitive message leakage | AES-256-CBC encryption of global chat content at rest. |
+| Dependency exploits | Encourage timely updates; no unreviewed runtime execution beyond restricted eval (owners only). |
+| Injection in filters/custom responses | Controlled by guild admins; user input sanitized before dispatch. |
 
-We take the security of BarnieBot seriously. If you discover a security vulnerability, please follow these steps:
+## Reporting Vulnerabilities
+Please email: **barniecorps@gmail.com**
+Include:
+- Summary & impact
+- Reproduction steps (minimal)
+- Affected components (e.g. global chat, staff cases UI)
+- Suggested fix (optional)
 
-1. **DO NOT** disclose the issue publicly
-2. Email us at barniecorps@gmail.com with:
-   - A description of the vulnerability
-   - Steps to reproduce
-   - Potential impact
-   - Any suggested fixes (if available)
+Do not disclose publicly until we acknowledge and provide a remediation timeline.
 
-## Response Timeline
+## Response Targets
+- Acknowledgment: 48 hours
+- Triage & initial assessment: 5 business days
+- Patch / mitigation: Severity-dependent; critical issues prioritized immediately.
 
-- Initial Response: Within 48 hours
-- Status Update: Within 5 business days
-- Fix Implementation: Timeline will be communicated based on severity
+## Secure Development Practices
+1. No hardcoded secrets (.env only).
+2. Avoid dynamic `eval` outside the controlled owner-only command.
+3. Validate all user-supplied identifiers before DB access.
+4. Use parameterized queries exclusively (already implemented).
+5. Keep worker messages scoped (no passing token/secrets across threads).
+6. Encrypt global chat payloads before persistence.
 
-## Security Best Practices
+## Data Protection
+- Global messages encrypted with AES-256-CBC (see `utils.encryptWithAES`).
+- Moderation actions (warnings, mutes, blacklists) stored in dedicated tables; limited fields.
+- No persistent storage of AI session transcripts beyond ephemeral memory.
 
-### For Bot Administrators
-1. **Token Security**
-   - Never share your bot token
-   - Rotate tokens if compromised
-   - Use environment variables
+## Logging & Monitoring
+- Structured logs via `Log` helper categorize events (RateLimit, GuildSystem, etc.).
+- Slow dispatches flagged (> ~900ms) for performance regression detection.
+- Worker failures lead to automatic recreation, reducing silent lapses.
 
-2. **Permissions**
-   - Use minimal required permissions
-   - Regularly audit bot permissions
-   - Implement role-based access control
+## Contributor Guidance
+- Run TypeScript build and lint before PR.
+- Note any security impact explicitly in PR description.
+- Refrain from broad refactors that obscure audit-sensitive areas without prior discussion.
 
-3. **Monitoring**
-   - Enable audit logging
-   - Monitor unusual activity
-   - Keep logs secure
-
-### For Contributors
-1. **Code Security**
-   - No hardcoded credentials
-   - Input validation
-   - Secure error handling
-   - Regular dependency updates
-
-2. **Development**
-   - Use separate development tokens
-   - Test in isolated environments
-   - Follow secure coding guidelines
-
-## Bug Bounty Program
-
-Currently, we do not offer a formal bug bounty program. However, we appreciate security researchers and will acknowledge contributors in our Hall of Fame.
-
-## Acknowledgments
-
-We'd like to thank all security researchers who have helped improve BarnieBot's security. Contributors will be listed here unless they wish to remain anonymous.
+## Vulnerability Classes of Interest
+- Authentication bypass of staff rank checks.
+- Leakage of decrypted global messages.
+- Injection into SQL queries (should be prevented by parameterization).
+- RCE via owner eval path (should be owner-only; sandbox improvement suggestions welcome).
+- Worker-based DoS (e.g., translation queue flooding).
 
 ## Contact
-
-- Security Email: barniecorps@gmail.com
-- Discord Server: [Join for Support](https://discord.com/invite/58Tt83kX9K)
+- Email: **barniecorps@gmail.com**
+- Discord: **r3tr00_**
 
 ---
 BarnieCorps Security Team

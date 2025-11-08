@@ -17,7 +17,7 @@ global.Headers = require("node-fetch").Headers;
 globalThis.fetch = require("node-fetch");
 import * as dotenv from "dotenv";
 dotenv.config();
-import { EmbedBuilder, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, WebhookClient, TextChannel, Message, time, TimestampStyles, Collection, MessageFlags } from "discord.js";
+import { EmbedBuilder, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, WebhookClient, TextChannel, Message, time, TimestampStyles, Collection, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import * as fs from "fs";
 import data from "./data"; // Data file for storing bot data
 import Log from "./Log"; // Log object for logging
@@ -72,13 +72,18 @@ client.on("clientReady", async (): Promise<any> => {
         username: client.user?.tag
     });
     queries();
-    client.user?.setPresence({ activities: [{ name: `V ${String(process.env.VERSION)}`, type: ActivityType.Playing }] });
+    // Set a simple presence (versioning removed)
+    client.user?.setPresence({ activities: [{ name: `to be a bot`, type: ActivityType.Playing }] });
     await load_slash(); // Load slash commands
     Log.info(`Cache status`, { 
         component: "Bot",
         usersCacheSize: client.users.cache.size
     });
     data.bot.owners.push(...String(process.env.OWNERS).trim().split(",")); // Load owners from .env
+    // Ensure staff table entries for owners
+    for (const ownerId of data.bot.owners) {
+        try { await db.query("INSERT IGNORE INTO staff SET ?", [{ uid: ownerId, rank: "Owner" }]); } catch {}
+    }
     Log.info("Owners data loaded", { component: "Initialization" });
     Log.info("Loading workers...", { component: "Initialization" });
     // Check if the bot was safely shutted down or not
@@ -555,6 +560,88 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 embed.setDescription(EmbedDescription());
                 await imessage.edit({ embeds: [embed], content: stexts.success.done });
             }
+            case "staffcases": {
+                // Format: staffcases-<action>-<authorId>-<targetUserId>-<page>
+                const [action, authorId, targetUserId, pageStr] = args;
+                if (authorId !== interaction.user.id) {
+                    if (interaction.isRepliable()) await interaction.reply({ content: "You're not the requester of this view.", ephemeral: true });
+                    return;
+                }
+                const page = Math.max(1, parseInt(pageStr || "1", 10) || 1);
+                const PAGE_SIZE = 10;
+                const offset = (page - 1) * PAGE_SIZE;
+                const toSeconds = (val: any): number => {
+                    if (val == null) return 0;
+                    const n = typeof val === "string" ? parseInt(val, 10) : Number(val);
+                    if (!isFinite(n)) return 0;
+                    return n > 1_000_000_000_000 ? Math.floor(n / 1000) : Math.floor(n);
+                };
+                try {
+                    const user = await client.users.fetch(targetUserId);
+                    const warnCountRows: any = await db.query("SELECT COUNT(*) AS c FROM global_warnings WHERE userid = ?", [user.id]);
+                    const warnCount = Array.isArray(warnCountRows) && warnCountRows.length ? (warnCountRows[0].c ?? 0) : 0;
+                    const warns: any = await db.query(
+                        "SELECT userid, authorid, reason, createdAt FROM global_warnings WHERE userid = ? ORDER BY createdAt DESC LIMIT ? OFFSET ?",
+                        [user.id, PAGE_SIZE, offset]
+                    );
+                    const bansRows: any = await db.query("SELECT active, times FROM global_bans WHERE id = ? LIMIT 1", [user.id]);
+                    const ban = Array.isArray(bansRows) && bansRows.length ? bansRows[0] : null;
+                    const muteRows: any = await db.query(
+                        "SELECT reason, authorid, createdAt, until FROM global_mutes WHERE id = ? LIMIT 1",
+                        [user.id]
+                    );
+                    const mute = Array.isArray(muteRows) && muteRows.length ? muteRows[0] : null;
+                    const embed = new EmbedBuilder().setTitle(`Cases for ${user.username}`).setColor("Purple");
+                    const blStatus = ban ? `${ban.active ? "Active" : "Inactive"}${typeof ban.times === "number" ? ` (times ${ban.times})` : ""}` : "None";
+                    let muteStatus = "None";
+                    if (mute) {
+                        const untilSec = toSeconds(mute.until);
+                        const nowSec = Math.floor(Date.now() / 1000);
+                        const active = untilSec === 0 || untilSec > nowSec;
+                        muteStatus = active
+                            ? (untilSec === 0 ? "Active (indefinite)" : `Active until <t:${untilSec}:R>`) + (mute.reason ? ` — ${mute.reason}` : "")
+                            : `Expired ${untilSec ? `<t:${untilSec}:R>` : ""}`;
+                    }
+                    embed.setDescription(`Blacklist: ${blStatus}\nMute: ${muteStatus}`);
+                    let totalPages = 1;
+                    if (warnCount === 0) {
+                        embed.addFields({ name: "Warnings", value: "No warnings.", inline: false });
+                    } else {
+                        totalPages = Math.max(1, Math.ceil(warnCount / PAGE_SIZE));
+                        const list = Array.isArray(warns) ? warns : [];
+                        list.forEach((w: any, i: number) => {
+                            const createdSec = toSeconds(w.createdAt);
+                            const idx = offset + i + 1;
+                            const header = `#${idx} • by <@${w.authorid || "unknown"}> • ${createdSec ? `<t:${createdSec}:R>` : ""}`;
+                            const value = (w.reason && String(w.reason).trim().length) ? String(w.reason).slice(0, 1024) : "(no reason)";
+                            embed.addFields({ name: header, value, inline: false });
+                        });
+                        embed.setFooter({ text: `Warnings ${Math.min(offset + 1, warnCount)}-${Math.min(offset + list.length, warnCount)} of ${warnCount} • Page ${page}/${totalPages}` });
+                    }
+                    const prev = new ButtonBuilder()
+                        .setCustomId(`staffcases-prev-${authorId}-${user.id}-${Math.max(1, page - 1)}`)
+                        .setLabel("Previous")
+                        .setStyle(ButtonStyle.Secondary)
+                        .setDisabled(page <= 1);
+                    const next = new ButtonBuilder()
+                        .setCustomId(`staffcases-next-${authorId}-${user.id}-${Math.min(totalPages, page + 1)}`)
+                        .setLabel("Next")
+                        .setStyle(ButtonStyle.Secondary)
+                        .setDisabled(page >= totalPages);
+                    const close = new ButtonBuilder()
+                        .setCustomId(`staffcases-close-${authorId}`)
+                        .setLabel("Close")
+                        .setStyle(ButtonStyle.Danger);
+                    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(prev, next, close);
+                    if (interaction.isRepliable()) await interaction.deferUpdate();
+                    await interaction.message.edit({ embeds: [embed], components: [row] });
+                } catch (_e) {
+                    if (interaction.isRepliable()) await interaction.reply({ content: "Failed to update cases.", ephemeral: true });
+                }
+                break;
+            }
+            case "staffcases": // fallback
+                break;
         }
         return;
     }
@@ -610,12 +697,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (message.channelId !== chatdb[0].channel) return;
     const { author, channel, guild, content } = message;
     if (author.bot) return;
-    const safetyCheck = await NVIDIAModels.GetConversationSafety([ { role: "user", content } ]);
-    if (!safetyCheck.safe) {
-        await message.react("❎");
-        await channel.send(`<@${author.id}>, your message was detected as unsafe and was not sent to the global chat.\nReasons: ${safetyCheck.reason || "No reason(s) provided."}`);
-        return;
-    }
+    // Safety check removed per request (was previously blocking unsafe messages)
     await manager.processUser(author);
     await manager.processMessage(message);
 });
@@ -717,7 +799,7 @@ client.on("messageCreate", async (message): Promise<any> => {
 
 manager.on("limit-reached", async u => {
     const user = await client.users.fetch(u.uid);
-    Log.info("User approaching rate limit", { 
+    Log.info("User approaching to rate limit", { 
         component: "RateLimit",
         username: user?.username,
         status: "warning"
@@ -737,3 +819,4 @@ manager.on("limit-exceed", async u => {
 client.login(data.bot.token);
 
 export default client;
+export { manager };

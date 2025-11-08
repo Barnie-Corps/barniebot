@@ -1,97 +1,203 @@
 # BarnieBot
 
-![GitHub license](https://img.shields.io/github/license/Barnie-Corps/barniebot?style=flat-square)
-![GitHub issues](https://img.shields.io/github/issues/Barnie-Corps/barniebot?style=flat-square)
+A powerful TypeScript Discord bot that bridges communities through global chat, AI assistance, and comprehensive moderation tools.
 
-BarnieBot is a TypeScript-powered Discord bot that links communities together with global chat, AI-assisted conversations, moderation tooling, and rich server analytics.
+## What It Does
 
-## Highlights
-- AI chat built on Google Gemini with optional function calling for automation
-- Opt-in global chat network with automatic translation workers and AES-encrypted logging
-- Message filters, custom responses, and VIP-only perks to tailor each guild experience
-- Owner tooling (`b.` prefix commands) for announcements, restarts, data exports, and VIP management
-- MySQL-backed storage with worker-thread powered translation and SMTP email delivery
+**Global Chat Network** – Connect multiple Discord servers with encrypted cross-guild messaging, automatic translation (20+ languages), staff rank suffixes, and anti-impersonation protection.
 
-## Requirements
-- Node.js 18 LTS or newer (Discord.js v14 requirement)
-- npm 9+ or compatible package manager
-- MySQL 5.7+ (InnoDB) with a database dedicated to BarnieBot
-- Google Generative AI key (Gemini) for the `/ai` commands
-- SMTP account capable of sending transactional mail (Gmail supported)
+**AI Powered** – Google Gemini integration for conversational chat (`/ai chat`), quick questions (`/ai ask`), and voice conversations with speech-to-text.
 
-## Setup
-1. **Clone the repository**
-	```bash
-	git clone https://github.com/Barnie-Corps/barniebot.git
-	cd barniebot
-	```
-2. **Install dependencies**
-	```bash
-	npm install
-	npm install --save-dev typescript ts-node
-	```
-	The codebase assumes TypeScript tooling is locally available; the commands above add it if you do not already have it.
-3. **Provision the database**
-	- Create a MySQL database and user with full privileges.
-	- The bot auto-creates tables on startup through `mysql/queries.ts`.
-4. **Create a `.env` file** (example values below):
-	```env
-	TOKEN=your-discord-bot-token
-	DISCORD_BOT_ID=your-application-id
-	OWNERS=123456789012345678,234567890123456789
-	VERSION=1.0.0
-	DB_HOST=127.0.0.1
-	DB_USER=barniebot
-	DB_PASSWORD=super-secret
-	DB_NAME=barniebot
-	ENCRYPTION_KEY=base64-encoded-32-byte-key
-	AI_API_KEY=your-google-gemini-key
-	EMAIL_PASSWORD=app-specific-password
-	NOTIFY_STARTUP=1
-	SAFELY_SHUTTED_DOWN=1
-	TEST=0
-	INGORE_GLOBAL_CHAT=0
-	SEARCH_ENGINE_API_KEY=optional-google-custom-search-key
-	SEARCH_ENGINE_CX=optional-google-custom-search-engine-id
-	SYSTEM_IP=optional-public-ip-for-masking
-	```
-	- `OWNERS` controls who may run privileged `b.` prefixed commands.
-	- `ENCRYPTION_KEY` must be a base64 string representing 32 random bytes for AES-256-CBC.
-	- Leave optional keys blank if you do not use that feature.
+**Staff & Moderation System** – Eight-tier staff hierarchy (Support → Owner) with global enforcement tools: blacklists, warnings, mutes. Interactive pagination for case history (`/staff cases`).
 
-## Running Locally
-- **Compile and run**
-  ```bash
-  npx tsc
-  node dist/index.js
-  ```
-- **or run with ts-node during development**
-  ```bash
-  npx ts-node index.ts
-  ```
+**Guild Customization** – Per-server content filters with protected words, custom command responses (regex or literal), language preferences, and webhook-based dispatch.
 
-On first boot, BarnieBot registers slash commands, ensures database tables exist, and spins up translation workers. Use the `OWNERS` accounts to run `b.` commands if you need to announce restarts or seed VIP access.
+## Core Features
+- **Global Chat**: Encrypted messages, per-guild language settings, optional auto-translate, staff suffix display
+- **Moderation**: Interactive warning viewer, global blacklists, timed/indefinite mutes, action audit trail
+- **AI Functions**: Session-based chat, function calling for server info/user lookup/guild management, VIP-gated features
+- **Content Filter**: Word-based filtering, single-word vs substring matching, protected words, log webhooks
+- **Custom Responses**: Guild-specific commands with regex support
+- **Worker Pools**: Translation and rate-limit processing off the main loop (dynamic sizing, prewarm, keep-alive)
+- **VIP System**: Time-based subscriptions for extended AI access
 
-## Key Systems
-- **Global Chat**: Bridges configured channels across guilds, optionally auto-translating messages before dispatch. Messages are encrypted at rest and can be exported by staff for moderation.
-- **AI Chat**: `/ai chat` maintains a contextual session using Google Gemini; `/ai ask` provides single-shot answers. VIP status (stored in MySQL) gates access.
-- **Moderation Tools**: `/filter`, `/globalchat`, `/custom_responses`, and `/setlang` commands store guild settings in MySQL and surface across restarts.
-- **Owner Tools**: `b.shutdown`, `b.announce`, `b.messages`, `b.guilds`, `b.eval`, `b.add_vip`, `b.remove_vip`, and `b.fetch_guilds_members` require an ID in `OWNERS` and are intended for staff operations only.
-- **Workers & Utilities**: Translation runs inside worker threads (`workers/translate.js`) to keep Discord events responsive; long-lived caches and AES helpers live in `utils.ts`.
+## Tech Stack
+- **Runtime**: Node.js 18+ with TypeScript
+- **Discord**: Discord.js v14 (Gateway + Interactions)
+- **Database**: MySQL 5.7+ with auto-migration
+- **AI**: Google Gemini API (chat + safety checks), NVIDIA models for reasoning
+- **Workers**: Node.js worker threads for translation and rate limiting
+- **Security**: AES-256-CBC encryption, parameterized queries, staff impersonation stripping
+- **Mail**: Gmail SMTP for notifications
 
-## Contributing
-We welcome pull requests! Review the [Contributing Guidelines](CONTRIBUTING.md) and open an issue before tackling larger changes. Please follow the coding conventions defined in the existing TypeScript files and add documentation for new commands or policies.
+## Quick Start
+```bash
+git clone https://github.com/Barnie-Corps/barniebot.git
+cd barniebot
+npm install
+cp .env.example .env  # Configure secrets below
+npx ts-node index.ts
+```
+
+### Environment Configuration
+**Required:**
+```
+TOKEN=your-discord-bot-token
+DISCORD_BOT_ID=your-app-id
+OWNERS=owner1-id,owner2-id
+DB_HOST=localhost
+DB_USER=barniebot
+DB_PASSWORD=your-db-password
+DB_NAME=barniebot
+ENCRYPTION_KEY=base64-encoded-32-bytes
+AI_API_KEY=google-gemini-key
+EMAIL_PASSWORD=gmail-app-password
+```
+
+**Optional:**
+```
+TRANSLATE_WORKERS=10               # Translation pool size (default: CPU count)
+NOTIFY_STARTUP=1                   # Notify on unclean shutdown
+SAFELY_SHUTTED_DOWN=1              # Set by b.shutdown
+TEST=0                             # Owner-only mode if 1
+IGNORE_GLOBAL_CHAT=0               # Skip global chat processing
+SEARCH_ENGINE_API_KEY=             # Google custom search (AI function)
+SEARCH_ENGINE_CX=                  # Custom search engine ID
+```
+
+**Notes:**
+- `ENCRYPTION_KEY`: Generate with `openssl rand -base64 32`
+- `OWNERS`: Comma-separated Discord IDs for `b.` prefix commands
+- `EMAIL_PASSWORD`: Gmail app-specific password (not account password)
+
+## Commands
+
+### Slash Commands (Everyone)
+| Command | Description |
+|---------|-------------|
+| `/ai ask` | Single AI question (task-specific models) |
+| `/ai chat` | Start contextual AI session (VIP only) |
+| `/ai voice` | Voice conversation in VC (VIP only) |
+| `/globalchat set` | Configure global chat channel (Manage Channels) |
+| `/globalchat toggle` | Enable/disable global chat (Manage Channels) |
+| `/globalchat autotranslate` | Toggle auto-translation (Manage Channels) |
+| `/globalchat language` | Set guild language (Manage Channels) |
+| `/setlang` | Set personal language preference |
+| `/filter setup` | Initialize filter wizard (Manage Messages) |
+| `/filter add` | Add filtered word (Manage Messages) |
+| `/filter remove` | Remove word by ID (Manage Messages) |
+| `/filter view` | List all filtered words (Manage Messages) |
+| `/filter search` | Search filter by query (Manage Messages) |
+| `/filter toggle` | Enable/disable filter (Manage Messages) |
+| `/custom_responses add` | Add custom command (Manage Guild) |
+| `/custom_responses remove` | Remove custom command (Manage Guild) |
+| `/custom_responses list` | List custom commands (Manage Guild) |
+| `/ping` | Check bot latency |
+| `/botinfo` | System stats and info |
+| `/userinfo` | User profile and stats |
+| `/github` | Repository link |
+| `/privacy` | Privacy policy link |
+| `/avatar` | Get user avatar |
+| `/meme` | Random meme |
+| `/top` | Server leaderboard |
+
+### Staff Commands
+| Command | Required Rank | Description |
+|---------|---------------|-------------|
+| `/staff set` | Chief of Moderation+ | Assign/remove staff ranks |
+| `/staff info` | Anyone | View user's rank |
+| `/staff list` | Anyone | List all staff |
+| `/staff cases` | Anyone | View moderation history (interactive pagination) |
+| `/globalmod blacklist` | Chief of Moderation+ | Ban from global chat |
+| `/globalmod unblacklist` | Chief of Moderation+ | Unban from global chat |
+| `/globalmod warn` | Chief of Moderation+ | Issue warning |
+| `/globalmod mute` | Chief of Moderation+ | Mute in global chat (timed/indefinite) |
+| `/globalmod unmute` | Chief of Moderation+ | Remove mute |
+| `/globalmod status` | Chief of Moderation+ | Check user status |
+| `/workers` | Anyone | Worker pool health stats |
+
+### Owner Commands (prefix: `b.`)
+**Access:** Restricted to Discord IDs in `OWNERS` environment variable.
+
+| Command | Arguments | Description |
+|---------|-----------|-------------|
+| `b.shutdown` | none | Gracefully stop bot |
+| `b.announce` | `<lang> <message>` | Broadcast to global chat |
+| `b.messages` | `<user-id>` | Export user's global messages (decrypted) |
+| `b.guilds` | none | Export guild list (name, member count, ID) |
+| `b.eval` | `<code>` | Execute JavaScript (use with extreme caution) |
+| `b.add_vip` | `<user-id> <time> <unit>` | Grant VIP (`unit`: days, hours, weeks, months) |
+| `b.remove_vip` | `<user-id>` | Revoke VIP |
+| `b.invite` | `<guild-id>` | Generate invite for specified guild |
+| `b.fetch_guilds_members` | none | Cache all guild members |
+
+**Security Warning:** `b.eval` runs arbitrary code in the bot's process. Owner verification is enforced, but exercise extreme caution.
+
+## Staff Hierarchy
+From lowest to highest authority:
+1. **Support** – Basic assistance (suffix: SUPPORT)
+2. **Moderator** – Standard moderation (MOD)
+3. **Senior Moderator** – Experienced moderation (SR MOD)
+4. **Chief of Moderation** – Moderation team lead (CoM)
+5. **Probationary Administrator** – Trial admin (pADMIN)
+6. **Administrator** – Full admin (ADMIN)
+7. **Chief of Staff** – Staff leadership (CoS)
+8. **Owner** – Bot operators (OWNER)
+
+**Permissions:**
+- Chief of Moderation+ can manage lower ranks and use moderation commands
+- Staff cannot modify peers or superiors
+- Owner status derived from `.env` automatically syncs to database
 
 ## Security & Privacy
-- Sensitive operations (global chat exports, VIP changes, eval) are locked to owners.
-- Global messages are AES-256 encrypted before storage in MySQL.
-- The [privacy policy](privacy.md) and [usage policy](usage_policy.md) describe what is collected and how staff commands operate.
-- Report security concerns through the process defined in [SECURITY.md](SECURITY.md).
+**Encryption:** Global messages use AES-256-CBC before MySQL storage.
 
-## Support & Contact
-- Email: barniecorps@gmail.com
-- GitHub: [@Barnie-Corps](https://github.com/Barnie-Corps)
-- Discord Invite: https://discord.com/invite/58Tt83kX9K
+**Moderation Records:** Warnings permanent, mutes auto-expire, blacklists toggleable via `active` flag.
+
+**Impersonation Protection:** Non-staff names automatically stripped of fake bracketed tags like `[MOD]`.
+
+**Data Retention:** See `privacy.md` for full details. Global chat logs indefinite (abuse tracing), AI sessions ephemeral.
+
+**Audit Trail:** All moderation actions record author ID and timestamp.
+
+Full details in `SECURITY.md` and `privacy.md`.
+
+## Worker Architecture
+**Translation Pool:** Dynamic sizing (env `TRANSLATE_WORKERS` or CPU count), prewarmed at startup, jittered keep-alive (750-1250ms), moving average latency tracking.
+
+**Rate Limit Worker:** Single prewarmed instance offloads user cache and timer decrement loops, fallback to inline processing on failure.
+
+**Benefits:** Prevents cold-start lag, keeps Discord event loop responsive during burst traffic.
+
+## Development
+See `CONTRIBUTING.md` for setup, coding standards, and PR guidelines.
+
+**Prerequisites:**
+- Node.js 18+
+- MySQL 5.7+
+- TypeScript 5+
+
+**Build:**
+```bash
+npm run build  # Compiles TypeScript
+npm start      # Run compiled JS
+```
+
+**Test Mode:**
+```bash
+# Set TEST=1 in .env to restrict all features to owners only
+```
+
+## Links
+- **GitHub:** https://github.com/Barnie-Corps/barniebot
+- **Privacy Policy:** [privacy.md](./privacy.md)
+- **Security Policy:** [SECURITY.md](./SECURITY.md)
+- **Usage Policy:** [usage_policy.md](./usage_policy.md)
+
+## Contact
+- **Email:** barniecorps@gmail.com
+- **Discord:** r3tr00_
+- **Issues:** https://github.com/Barnie-Corps/barniebot/issues
 
 ---
-Made with ❤️ by BarnieCorps
+Made with ❤️ by Santiago Morales (Lead Developer & Founder, BarnieCorps)

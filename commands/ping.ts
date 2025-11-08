@@ -3,9 +3,9 @@ import utils from "../utils";
 
 export default {
     data: new SlashCommandBuilder()
-    .setName("ping")
-    .setDescription("Shows bot's latency"),
-    async execute (interaction: ChatInputCommandInteraction, lang: string) {
+        .setName("ping")
+        .setDescription("Shows bot's latency"),
+    async execute(interaction: ChatInputCommandInteraction, lang: string) {
         let texts = {
             socket: "Socket latency",
             http: "HTTP API latency"

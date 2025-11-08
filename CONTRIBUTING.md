@@ -16,36 +16,25 @@ Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md). We expect all 
 ## Development Setup
 
 ### Prerequisites
-- Node.js 16.x or higher
-- TypeScript
-- MySQL database
-- A Discord application and bot token
+- Node.js 18+ (Discord.js v14 baseline)
+- TypeScript (local install is fine; no global requirement)
+- MySQL 5.7+ / MariaDB with a dedicated database
+- Discord application & bot token
 
 ### Initial Setup
-1. Fork and clone the repository:
 ```bash
-git clone https://github.com/yourusername/barniebot.git
+git clone https://github.com/Barnie-Corps/barniebot.git
 cd barniebot
-```
-
-2. Install global dependencies:
-```bash
-npm install --location=global typescript @types/node ts-node
-```
-
-3. Install project dependencies:
-```bash
 npm install
+cp .env.example .env   # then edit secrets
+npx ts-node index.ts   # dev run
 ```
 
-4. Configure your development environment:
-   - Copy `.env.example` to `.env`
-   - Fill in your Discord bot token and other required values
-
-### Important Notes
-- Never remove the `global.ReadbleStream = require('web-streams-polyfill').ReadableStream;` line from `index.ts`
-- Replace the comment header in `index.ts` with content from `based.txt`
-- Use `ts-node` for development to speed up testing
+### Notes
+- Keep the polyfill lines at the top of `index.ts` (web streams & fetch).
+- The project no longer tracks a runtime version variable; remove any lingering references when contributing.
+- Use feature branches (`feature/<name>` or `fix/<name>`). Avoid committing directly to `master`.
+- Keep commits focused—prefer multiple small commits over one giant diff.
 
 ## Contribution Process
 
@@ -66,32 +55,33 @@ git checkout -b feature/your-feature-name
 
 ## Coding Standards
 
-- Use TypeScript features appropriately
-- Follow existing code formatting
-- Comment complex logic
-- Use meaningful variable/function names
-- Keep functions focused and concise
-- Add JSDoc comments for public APIs
+- Favor clarity over cleverness; avoid deep nesting by early returns.
+- Use `async/await`; do not introduce new promise libraries.
+- Keep public helper functions documented with brief JSDoc (inputs, outputs, error modes).
+- Apply single-responsibility: one concern per function.
+- Avoid hardcoding secrets or tokens in commits.
+- Match existing indentation & style; do not mass reformat unrelated areas.
 
 ## Pull Request Process
 
-1. Update your fork with the latest main branch changes
-2. Ensure all tests pass
-3. Write a clear PR description:
-   - What changes were made
-   - Why they were necessary
-   - How to test them
-4. Link any related issues
-5. Wait for review and address feedback
+1. Sync with `master` before opening.
+2. Ensure the bot boots locally without TypeScript errors.
+3. Describe:
+   - Motivation (problem / enhancement)
+   - Implementation summary (key files, data flows)
+   - Any schema changes (tables / columns)
+4. Include manual test notes or screenshots for UI (embeds, buttons).
+5. Security / privacy impact (if any) — e.g., new stored data.
+6. Respond to review comments within a reasonable timeframe.
 
 ## Bug Reports
 
-When reporting bugs, please include:
-- Clear description of the issue
-- Steps to reproduce
-- Expected vs actual behavior
-- Bot version and environment details
-- Relevant logs or screenshots
+Include:
+- Precise reproduction steps
+- Expected vs actual output
+- Environment (OS, Node.js version)
+- Relevant logs (avoid posting secrets)
+- If worker related: indicate if issue occurs after idle period.
 
 ## Questions or Need Help?
 
@@ -99,7 +89,7 @@ When reporting bugs, please include:
 - Email us at barniecorps@gmail.com
 - Check existing issues and discussions
 
-Thank you for contributing to BarnieBot! 🚀
+Thank you for helping improve BarnieBot! 🚀
 
 ---
 BarnieCorps Team

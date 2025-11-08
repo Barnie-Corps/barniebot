@@ -1,6 +1,6 @@
 # BarnieBot Privacy Policy
 
-*Last updated: October 21, 2025*
+Last Updated: November 8, 2025
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -25,20 +25,26 @@ BarnieBot is a Discord bot developed by BarnieCorps. This Privacy Policy explain
 - Guild IDs, channel IDs, and webhook identifiers for configured features.
 
 ### Operational Records
-- **Command execution logs** (`executed_commands`, `message_count`): command name, user ID, execution timestamp, and aggregate message counts.
-- **Language preferences** (`languages` table) chosen through `/setlang`.
-- **Global chat messages** (`global_messages`): encrypted body, author ID, language code, and timestamps.
-- **Filter configuration data** (`filter_configs`, `filter_words`, `filter_webhooks`): guild-level moderation settings and reviewed terms.
-- **VIP subscriptions** (`vip_users`): Discord ID plus start and end timestamps for premium feature access.
-- **AI memories** (`ai_memories`): opt-in snippets created through AI interactions.
-- **Registered RPG accounts** (`registered_accounts`, `logins`): email address, encrypted password payload, verification code, token, and login audit trail when using the optional RPG module.
+- Command executions (`executed_commands`, `message_count`): command name, user ID, timestamps, aggregate counts.
+- Language preferences (`languages`): per-user language code.
+- Global chat messages (`global_messages`): AES-256-CBC encrypted content, author ID, language code, timestamp.
+- Filter configuration (`filter_configs`, `filter_words`, `filter_webhooks`).
+- VIP subscriptions (`vip_users`): Discord ID, start/end epoch.
+- Staff ranks (`staff`): user ID and rank string.
+- Moderation actions:
+	- Warnings (`global_warnings`): user ID, author ID, reason, timestamp.
+	- Blacklists (`global_bans`): user ID, active flag, times counter.
+	- Mutes (`global_mutes`): user ID, reason, author ID, creation timestamp, expiry (or 0 for indefinite).
+- AI memories (`ai_memories`): user-added contextual memory strings.
 
-### Feature-Specific Notes
-- **AI Chat Sessions**: Conversations with `/ai chat` live only in memory for the duration of the session. When the user or AI ends the chat—or the process restarts—the conversation state is discarded. Function calls requested by the AI may log input arguments.
-- **Global Chat**: Messages are encrypted via AES-256-CBC before database storage. Owner-only commands (`b.messages`) allow exporting decrypted transcripts for moderation purposes.
-- **Email Delivery**: BarnieBot uses a Gmail SMTP transporter to send verification codes. The SMTP username and app password are stored as environment variables; mail contents are not kept after delivery except for standard provider logs.
+#### Feature-Specific Notes
+- **AI Chat Sessions**: Conversation history ephemeral; cleared on session end or bot restart. Function call execution metadata (arguments, user IDs) may be logged for diagnostics, but not full transcripts.
+- **Global Chat**: Messages encrypted (AES-256-CBC) before storage. Owner commands like `b.messages` can export decrypted logs for a specific user (moderation/abuse investigation only). Spoofed staff suffixes automatically stripped from non-staff before broadcast.
+- **Staff System**: Ranks stored in `staff` table. Moderation actions (warnings, mutes, blacklists) permanently recorded with author IDs and timestamps. No passwords or authentication credentials associated with staff status.
+- **Email Delivery**: SMTP used for notifications; message bodies not retained after send.
+- **Filter & Custom Responses**: Guild-controlled configurations; no cross-guild data sharing.
 
-We do **not** collect Discord passwords, billing details, or direct messages outside guilds where BarnieBot is present.
+We do **not** collect Discord account passwords, payment details, private DM content (outside global chat network), or voice channel audio (AI voice mode processes in memory only).
 
 ## How We Use Your Information
 - Authenticate and tailor responses for commands, leaderboards, and guild configuration.
@@ -50,29 +56,30 @@ We do **not** collect Discord passwords, billing details, or direct messages out
 We do not sell personal information. Limited metadata may be shared with Discord or law enforcement when required by applicable law.
 
 ## Data Retention
-- **Global chat logs**: Retained indefinitely for abuse investigations and network safety; exports are limited to BarnieBot owners.
-- **Command execution history**: Last command is flagged for quick reference; historical entries may persist up to 90 days.
-- **Message counts and language preferences**: Retained while a guild actively uses BarnieBot. Data is purged when a guild removes the Bot or upon verified deletion requests.
-- **AI memories**: Stored until deleted by a staff member or via a verified request from the associated user.
-- **RPG registration records**: Maintained while the account remains active. Verification codes are cleared after successful verification.
+- Global chat logs: Indefinite (abuse tracing); encrypted.
+- Command executions & message counts: Up to ~90 days rolling.
+- Language preferences: Retained while user active or until deletion request.
+- Moderation actions: Warnings permanent; mutes auto-removed post-expiry; blacklist rows retained with active flag.
+- AI memories: User-controlled deletion.
+- VIP records: Retained through subscription + short audit window.
 
-Requests for deletion or export can be sent to barniecorps@gmail.com. We may decline deletion when the data is necessary to detect abuse or comply with legal obligations.
+Requests for deletion or export can be sent to barniecorps@gmail.com. We may decline deletion where retention is required for abuse tracing or legal obligations (e.g., persistent warning history).
 
 ## Data Security Measures
-- AES-256-CBC encryption for sensitive message content (see `utils.encryptWithAES`).
-- TLS-secured connections to Discord, Gmail SMTP, Google APIs, and MySQL.
-- Access to owner commands is limited to the IDs defined in the `OWNERS` environment variable.
-- Worker threads sanitize translations and AI inputs before forwarding to third-party APIs.
-- Operational logs are monitored for misuse; `global_bans` can block repeat offenders across all guilds.
+- AES-256-CBC encrypted global messages.
+- Parameterized SQL queries.
+- Worker thread isolation (no secrets across messages).
+- Staff impersonation stripping in global dispatch.
+- TLS-secured external service calls.
 
 Despite these measures, no system can be 100% secure. Use BarnieBot at your own risk and avoid sharing highly sensitive information through its features.
 
 ## Third-Party Services
-- **Discord** (hosting platform and API).
-- **Google Generative AI** for `/ai` features.
-- **Google Translate API (unofficial wrapper)** for multilingual global chat.
-- **Gmail SMTP** for account verification emails.
-- **Meme API (meme-api.com)** when invoking `/meme`.
+- Discord (platform & API)
+- Google Gemini (AI chat/functions)
+- Unofficial Google Translate wrapper (multilingual dispatch)
+- Gmail SMTP (mail delivery)
+- Meme API (optional `/meme` command)
 
 These services receive the minimum necessary data to complete requests (for example, prompt text, translated message content). Each provider's privacy policy governs their handling of the data.
 
@@ -93,7 +100,7 @@ We may revise this Privacy Policy to reflect new capabilities in `index.ts`, add
 
 ## Contact Us
 - Email: barniecorps@gmail.com
-- Discord: [Support Server](https://discord.com/invite/58Tt83kX9K)
+- Discord: r3tr00_ (direct handle)
 - GitHub Issues: https://github.com/Barnie-Corps/barniebot/issues
 
 By using BarnieBot you consent to the practices described in this Privacy Policy.

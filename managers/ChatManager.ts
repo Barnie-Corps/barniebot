@@ -51,7 +51,14 @@ export default class ChatManager extends EventEmitter {
         }
     };
     public async processMessage(message: Message<true>): Promise<any> {
-        if (blacklist.has(message.author.id)) { message.reply("No."); return Log.info("Ignoring blacklisted user.", { userId: message.author.id }) }
+        // Check blacklist and mute status (DB-driven) before proceeding
+        if (blacklist.has(message.author.id) || await utils.isUserBlacklisted(message.author.id)) {
+            message.reply("No.");
+            return Log.info("Ignoring blacklisted user.", { userId: message.author.id });
+        }
+        if (await utils.isUserMuted(message.author.id)) {
+            return Log.info("Ignoring muted user message.", { userId: message.author.id });
+        }
         if (this.isRatelimited(message.author.id)) return Log.info(`Ignoring user ${message.author.username} as they're ratelimited.`, { userId: message.author.id, username: message.author.username });
         const start = Date.now();
         const reactionPromise = message.react(data.bot.loadingEmoji.id).catch(error => {
@@ -69,7 +76,11 @@ export default class ChatManager extends EventEmitter {
         let sanitizedDefaultContent = this.sanitizeContent(baseContent);
         if (!sanitizedDefaultContent || !sanitizedDefaultContent.trim().length) sanitizedDefaultContent = "*Attachment*";
         const files = message.attachments.size ? Array.from(message.attachments.values()) : undefined;
-        const senderUsername = data.bot.owners.includes(message.author.id) ? `[OWNER] ${message.author.displayName}` : message.author.displayName;
+    // Resolve staff suffix for sender and prevent impersonation for non-staff
+    const rank = await utils.getUserStaffRank(message.author.id);
+    const suffix = utils.getRankSuffix(rank);
+    const baseName = message.member?.nickname ?? message.author.displayName;
+    const senderUsername = suffix ? `[${suffix}] ${baseName}` : utils.sanitizeStaffImpersonation(baseName);
         const senderAvatarURL = message.author.displayAvatarURL();
         const getTranslatedContent = this.createTranslationResolver(
             baseContent,

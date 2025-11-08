@@ -48,6 +48,9 @@ void (async () => {
     await Workers.prewarmType(TRANSLATE_WORKER_TYPE, TRANSLATE_WORKER_POOL_SIZE, 1500);
   } catch {}
 })();
+// Ensure at least one ratelimit worker exists and is prewarmed at startup to avoid cold starts
+Workers.bulkCreateWorkers(RATELIMIT_WORKER_PATH, RATELIMIT_WORKER_TYPE, 1);
+void (async () => { try { await Workers.prewarmType(RATELIMIT_WORKER_TYPE, 1, 1000); } catch {} })();
 
 // Small helper to process ratelimits via worker
 async function processRateLimitsWorker(users: Array<{ uid: string; time_left: number }>, limits: Array<{ uid: string; time_left: number; username: string }>, decrementMs = 1000) {
@@ -734,6 +737,85 @@ const utils = {
     return newObj;
   },
   processRateLimitsWorker,
+  // --- Staff utilities ---
+  getStaffRanks: (): Array<string> => [
+    "Support",
+    "Moderator",
+    "Senior Moderator",
+    "Chief of Moderation",
+    "Probationary Administrator",
+    "Administrator",
+    "Chief of Staff",
+    "Owner"
+  ],
+  getStaffRankIndex: (rank?: string | null): number => {
+    const ordered = utils.getStaffRanks();
+    if (!rank) return -1;
+    return ordered.findIndex(r => r.toLowerCase() === String(rank).toLowerCase());
+  },
+  getRankSuffix: (rank?: string | null): string => {
+    if (!rank) return "";
+    const map: Record<string, string> = {
+      "Support": "SUPPORT",
+      "Moderator": "MOD",
+      "Senior Moderator": "SR MOD",
+      "Chief of Moderation": "CoM",
+      "Probationary Administrator": "pADMIN",
+      "Administrator": "ADMIN",
+      "Chief of Staff": "CoS",
+      "Owner": "OWNER"
+    };
+    return map[rank] ?? rank.toUpperCase();
+  },
+  sanitizeStaffImpersonation: (name: string): string => {
+    // Remove leading staff-like bracketed tags if user is not actually staff.
+    // Patterns we consider impersonation tokens (case-insensitive): SUPPORT, MOD, SR MOD, CoM, pADMIN, ADMIN, CoS, OWNER
+    const pattern = /^\[(SUPPORT|MOD|SR MOD|COM|PADMIN|ADMIN|COS|OWNER)\]\s*/i;
+    let sanitized = name;
+    // Strip multiple chained tags if present
+    let guard = 0;
+    while (pattern.test(sanitized) && guard < 5) {
+      sanitized = sanitized.replace(pattern, "");
+      guard++;
+    }
+    return sanitized.trim();
+  },
+  getUserStaffRank: async (userId: string): Promise<string | null> => {
+    const res: any = await db.query("SELECT rank FROM staff WHERE uid = ?", [userId]);
+    if (Array.isArray(res) && res[0]?.rank) return String(res[0].rank);
+    // Consider .env owners as Owners even if not in DB
+    try {
+      if (data.bot.owners.includes(userId)) return "Owner";
+    } catch {}
+    return null;
+  },
+  setUserStaffRank: async (userId: string, rank: string | null): Promise<void> => {
+    if (!rank) {
+      await db.query("DELETE FROM staff WHERE uid = ?", [userId]);
+      return;
+    }
+    const existing: any = await db.query("SELECT * FROM staff WHERE uid = ?", [userId]);
+    if (existing?.length) await db.query("UPDATE staff SET ? WHERE uid = ?", [{ rank: utils.getStaffRanks()[utils.getStaffRankIndex(rank)] }, userId]);
+    else await db.query("INSERT INTO staff SET ?", [{ uid: userId, rank: utils.getStaffRanks()[utils.getStaffRankIndex(rank)] }]);
+  },
+  // Blacklist / mute helpers for global chat
+  isUserBlacklisted: async (userId: string): Promise<boolean> => {
+    const res: any = await db.query("SELECT * FROM global_bans WHERE id = ? AND active = TRUE", [userId]);
+    return Array.isArray(res) && res.length > 0;
+  },
+  isUserMuted: async (userId: string): Promise<boolean> => {
+    const now = Date.now();
+    const res: any = await db.query("SELECT * FROM global_mutes WHERE id = ?", [userId]);
+    if (!Array.isArray(res) || !res[0]) return false;
+    const mute = res[0];
+    if (mute.until && Number(mute.until) > 0) {
+      if (now >= Number(mute.until)) {
+        await db.query("DELETE FROM global_mutes WHERE id = ?", [userId]);
+        return false;
+      }
+    }
+    return true;
+  },
   /**
    * Parallel translation for nested objects with breadth-first batching.
    * Avoids deep recursion blocking and maximizes concurrency across available workers.
