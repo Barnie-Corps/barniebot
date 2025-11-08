@@ -6,7 +6,7 @@ A powerful TypeScript Discord bot that bridges communities through global chat, 
 
 **Global Chat Network** – Connect multiple Discord servers with encrypted cross-guild messaging, automatic translation (20+ languages), staff rank suffixes, and anti-impersonation protection.
 
-**AI Powered** – Google Gemini integration for conversational chat (`/ai chat`), quick questions (`/ai ask`), and voice conversations with speech-to-text.
+**AI Powered** – Google Gemini and NVIDIA AI models integration for conversational chat (`/ai chat`), quick and reasoning questions (`/ai ask`), and voice conversations with speech-to-text.
 
 **Staff & Moderation System** – Eight-tier staff hierarchy (Support → Owner) with global enforcement tools: blacklists, warnings, mutes. Interactive pagination for case history (`/staff cases`).
 
