@@ -42,6 +42,8 @@ export default class WorkerManager extends EventEmitter {
     private reservations: Set<string> = new Set();
     private byType: Map<string, Set<string>> = new Map();
     private availableByType: Map<string, Set<string>> = new Map();
+    // Lightweight health/latency metrics per worker
+    private metrics: Map<string, { lastPingMs?: number; avgPingMs?: number; failures: number; lastActiveAt?: number }> = new Map();
     /**
      * Constructs a new instance of the WorkerManager.
      * 
@@ -144,6 +146,9 @@ export default class WorkerManager extends EventEmitter {
             this.fulfillWaiters(type);
         });
         worker.on("message", message => {
+            const m = this.metrics.get(id) ?? { failures: 0 };
+            m.lastActiveAt = Date.now();
+            this.metrics.set(id, m);
             this.markWorkerIdle(id, type);
             this.emit("message", { id, message });
         });
@@ -154,6 +159,7 @@ export default class WorkerManager extends EventEmitter {
             this.reservations.delete(id);
             this.removeFromIndices(id, type);
             this.clearKeepAliveTimer(id);
+            this.metrics.delete(id);
             this.fulfillWaiters(type);
         });
         return { id, worker, type };
@@ -257,11 +263,41 @@ export default class WorkerManager extends EventEmitter {
         return new Promise((resolve, reject) => {
             const callback = (m: any) => {
                 if (m.id !== message) return;
-                resolve(Date.now() - start);
+                const latency = Date.now() - start;
+                const stats = this.metrics.get(id) ?? { failures: 0 };
+                stats.lastPingMs = latency;
+                // simple moving average
+                stats.avgPingMs = typeof stats.avgPingMs === "number" ? (stats.avgPingMs * 0.7 + latency * 0.3) : latency;
+                stats.failures = 0;
+                stats.lastActiveAt = Date.now();
+                this.metrics.set(id, stats);
+                resolve(latency);
                 worker?.workerData.worker.removeListener("message", callback);
             }
             worker?.workerData.worker.on("message", callback);
         });
+    }
+
+    /**
+     * Public wrapper to ping a worker and get latency.
+     */
+    public async pingWorker(id: string, timeout = 2000): Promise<number> {
+        const timed = Promise.race([
+            this.ping(id),
+            new Promise<number>((_, reject) => setTimeout(() => reject(new Error("Ping timed out")), timeout))
+        ]);
+        return timed as Promise<number>;
+    }
+
+    /**
+     * Prewarm a pool of workers of the given type by ensuring at least minWorkers exist
+     * and issuing a ping to each idle worker to keep the thread and module context warm.
+     */
+    public async prewarmType(type: string, minWorkers = 1, timeout = 2000): Promise<void> {
+        const pool = this.availableByType.get(type);
+        if (!pool || pool.size === 0) return;
+        const ids = Array.from(pool.values());
+        await Promise.allSettled(ids.map(id => this.pingWorker(id, timeout)));
     }
 
     /**
@@ -272,6 +308,38 @@ export default class WorkerManager extends EventEmitter {
     public get cache() {
         return this.cachePublic ? this.Cache : null;
     };
+
+    /**
+     * Returns a summary of workers and latency metrics for diagnostics.
+     */
+    public getWorkerStats(): {
+        total: number;
+        byType: Record<string, { total: number; available: number; running: number; avgPingMs?: number; lastPingMs?: number }>;
+    } {
+        const byTypeSummary: Record<string, { total: number; available: number; running: number; avgPingMs?: number; lastPingMs?: number }> = {};
+        for (const [type, ids] of this.byType.entries()) {
+            const available = this.availableByType.get(type)?.size ?? 0;
+            let running = 0;
+            let sumAvg = 0;
+            let sumLast = 0;
+            let countedAvg = 0;
+            let countedLast = 0;
+            for (const id of ids.values()) {
+                if (this.RunningCache.has(id)) running++;
+                const metric = this.metrics.get(id);
+                if (metric?.avgPingMs) { sumAvg += metric.avgPingMs; countedAvg++; }
+                if (metric?.lastPingMs) { sumLast += metric.lastPingMs; countedLast++; }
+            }
+            byTypeSummary[type] = {
+                total: ids.size,
+                available,
+                running,
+                avgPingMs: countedAvg ? +(sumAvg / countedAvg).toFixed(2) : undefined,
+                lastPingMs: countedLast ? +(sumLast / countedLast).toFixed(2) : undefined
+            };
+        }
+        return { total: this.Cache.size, byType: byTypeSummary };
+    }
 
     /**
      * Generates a random numeric ID of the specified length.
@@ -387,14 +455,18 @@ export default class WorkerManager extends EventEmitter {
         if (this.keepAliveIntervalMs <= 0) return;
         if (!this.Cache.has(id) || this.RunningCache.has(id) || this.reservations.has(id)) return;
         this.clearKeepAliveTimer(id);
+        // Add small jitter to avoid synchronized pings
+        const jitter = Math.floor(this.keepAliveIntervalMs * (0.85 + Math.random() * 0.3));
         const timer = setTimeout(() => {
             this.keepAliveTimers.delete(id);
             this.sendKeepAlive(id, type).catch(error => {
                 if (this.Cache.has(id)) {
                     Log.warn(`Keep-alive ping failed for worker ${id}`, { workerId: id, workerType: type, error: error instanceof Error ? error.message : String(error) });
+                    // If a keep-alive fails, terminate the worker so callers can recreate on demand.
+                    try { this.terminateWorker(id); } catch (_) {}
                 }
             });
-        }, this.keepAliveIntervalMs);
+        }, jitter);
         if (typeof timer.unref === "function") timer.unref();
         this.keepAliveTimers.set(id, timer);
     }
@@ -402,8 +474,13 @@ export default class WorkerManager extends EventEmitter {
     private async sendKeepAlive(id: string, type: string): Promise<void> {
         if (!this.Cache.has(id) || this.RunningCache.has(id) || this.reservations.has(id)) return;
         try {
-            const messageId = this.postMessage(id, "ping");
-            await this.awaitResponse(id, messageId, Math.max(1000, this.keepAliveIntervalMs));
+            const latency = await this.pingWorker(id, Math.max(1000, this.keepAliveIntervalMs));
+            const stats = this.metrics.get(id) ?? { failures: 0 };
+            // If latency is abnormally high, note it; we don't kill the worker immediately
+            if (latency > this.keepAliveIntervalMs * 1.5) {
+                Log.warn(`Worker ${id} high keep-alive latency: ${latency}ms`, { workerId: id, workerType: type, latency });
+            }
+            this.metrics.set(id, stats);
         }
         catch (error) {
             if (this.Cache.has(id)) throw error;

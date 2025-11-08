@@ -206,29 +206,52 @@ export default class ChatManager extends EventEmitter {
         await Promise.allSettled(tasks);
     }
     private async clear_times_function(): Promise<void> {
-        for (const [k, v] of this.cache.entries()) {
-            const newv = v;
-            if (v.time_left === 0) {
-                this.cache.delete(k);
-                continue;
+        try {
+            const users: Array<{ uid: string; time_left: number }> = [];
+            for (const [k, v] of this.cache.entries()) users.push({ uid: k, time_left: v.time_left });
+            if (users.length === 0) return;
+            const result: any = await utils.processRateLimitsWorker(users, [], 1000);
+            for (const uid of (result?.users?.expired ?? [])) this.cache.delete(uid);
+            for (const updated of (result?.users?.keep ?? [])) {
+                const original = this.cache.get(updated.uid) || {};
+                this.cache.set(updated.uid, { ...original, time_left: updated.time_left });
             }
-            newv.time_left -= 1000;
-            this.cache.set(k, newv);
-            continue;
+        } catch (_err) {
+            for (const [k, v] of this.cache.entries()) {
+                const newv = v;
+                if (v.time_left === 0) { this.cache.delete(k); continue; }
+                newv.time_left -= 1000;
+                this.cache.set(k, newv);
+            }
         }
     };
     private async clear_limit_times_function(): Promise<void> {
-        for (const [k, v] of this.ratelimits.entries()) {
-            const newv = v;
-            if (v.time_left === 0) {
-                this.ratelimits.delete(k);
-                Log.info(`User removed from ratelimit`, { userId: k });
-                await this.announce(`Ratelimit for user ${v.username} has been removed.`, "en");
-                continue;
+        try {
+            const limits: Array<{ uid: string; time_left: number; username: string }> = [];
+            for (const [k, v] of this.ratelimits.entries()) limits.push({ uid: k, time_left: v.time_left, username: v.username });
+            if (limits.length === 0) return;
+            const result: any = await utils.processRateLimitsWorker([], limits, 1000);
+            for (const exp of (result?.limits?.expired ?? [])) {
+                this.ratelimits.delete(exp.uid);
+                Log.info(`User removed from ratelimit`, { userId: exp.uid });
+                await this.announce(`Ratelimit for user ${exp.username} has been removed.`, "en");
             }
-            newv.time_left -= 1000;
-            this.ratelimits.set(k, newv);
-            continue;
+            for (const updated of (result?.limits?.keep ?? [])) {
+                const original = this.ratelimits.get(updated.uid) || {};
+                this.ratelimits.set(updated.uid, { ...original, time_left: updated.time_left, username: updated.username });
+            }
+        } catch (_err) {
+            for (const [k, v] of this.ratelimits.entries()) {
+                const newv = v;
+                if (v.time_left === 0) {
+                    this.ratelimits.delete(k);
+                    Log.info(`User removed from ratelimit`, { userId: k });
+                    await this.announce(`Ratelimit for user ${v.username} has been removed.`, "en");
+                    continue;
+                }
+                newv.time_left -= 1000;
+                this.ratelimits.set(k, newv);
+            }
         }
     };
     public isRatelimited(uid: string): boolean {

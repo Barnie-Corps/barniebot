@@ -6,6 +6,7 @@ import path from "path";
 import db from "./mysql/database";
 import { ChatSession } from "@google/generative-ai";
 import * as nodemailer from "nodemailer";
+import * as os from "os";
 import Log from "./Log";
 import AIFunctions from "./AIFunctions";
 import data from "./data";
@@ -16,8 +17,16 @@ import { exec as execCallback } from "child_process";
 import { promisify, inspect, TextDecoder, TextEncoder } from "util";
 import * as mathjs from "mathjs";
 const TRANSLATE_WORKER_TYPE = "translate";
+const RATELIMIT_WORKER_TYPE = "ratelimit";
 const TRANSLATE_WORKER_PATH = path.join(__dirname, "workers/translate.js");
-const TRANSLATE_WORKER_POOL_SIZE = 4;
+const RATELIMIT_WORKER_PATH = path.join(__dirname, "workers/ratelimit.js");
+// Dynamic pool size with sane caps; allow override via env TRANSLATE_WORKERS
+const TRANSLATE_WORKER_POOL_SIZE = (() => {
+  const fromEnv = Number(process.env.TRANSLATE_WORKERS);
+  if (!Number.isNaN(fromEnv) && fromEnv > 0) return Math.max(1, Math.min(16, fromEnv));
+  const cores = Array.isArray(os.cpus()) ? os.cpus().length : 4;
+  return Math.max(2, Math.min(8, Math.ceil(cores / 2)));
+})();
 const TRANSLATE_TIMEOUT = 15000;
 const TRANSLATE_CACHE_TTL = 300000;
 const TRANSLATE_CACHE_LIMIT = 500;
@@ -31,7 +40,24 @@ const execPromise = promisify(execCallback);
 const ALLOWED_SANDBOX_MODULES = new Map<string, unknown>([
   ["mathjs", mathjs]
 ]);
+// Create the initial pool and prewarm it to avoid cold-start latency after inactivity
 Workers.bulkCreateWorkers(TRANSLATE_WORKER_PATH, TRANSLATE_WORKER_TYPE, TRANSLATE_WORKER_POOL_SIZE);
+// Fire-and-forget warmup pings; ignore failures (workers will be recreated on-demand if needed)
+void (async () => {
+  try {
+    await Workers.prewarmType(TRANSLATE_WORKER_TYPE, TRANSLATE_WORKER_POOL_SIZE, 1500);
+  } catch {}
+})();
+
+// Small helper to process ratelimits via worker
+async function processRateLimitsWorker(users: Array<{ uid: string; time_left: number }>, limits: Array<{ uid: string; time_left: number; username: string }>, decrementMs = 1000) {
+  let worker = Workers.getAvailableWorker(RATELIMIT_WORKER_TYPE);
+  if (!worker) worker = Workers.createWorker(RATELIMIT_WORKER_PATH, RATELIMIT_WORKER_TYPE) ?? undefined;
+  if (!worker) worker = await Workers.AwaitAvailableWorker(RATELIMIT_WORKER_TYPE, 2000);
+  const msgId = Workers.postMessage(worker.id, { type: "process", users, limits, decrement: decrementMs });
+  const response = await Workers.awaitResponse(worker.id, msgId, 2000);
+  return response.message;
+}
 const trimTranslationCache = () => {
   while (translationCache.size > TRANSLATE_CACHE_LIMIT) {
     const firstKey = translationCache.keys().next().value;
@@ -706,6 +732,49 @@ const utils = {
       newObj[vk] = translated.text;
     }));
     return newObj;
+  },
+  processRateLimitsWorker,
+  /**
+   * Parallel translation for nested objects with breadth-first batching.
+   * Avoids deep recursion blocking and maximizes concurrency across available workers.
+   */
+  autoTranslateParallel: async (obj: any, language: string, target: string): Promise<typeof obj> => {
+    if (typeof obj !== "object" || Array.isArray(obj)) throw new TypeError(`autoTranslateParallel expects an object, got ${Array.isArray(obj) ? "Array" : typeof obj}`);
+    if (typeof language !== "string") throw new TypeError(`autoTranslateParallel expects language as string, got ${typeof language}`);
+    const root = { ...obj };
+    const queue: { path: string[]; value: any }[] = [{ path: [], value: root }];
+    const translateTasks: Array<Promise<void>> = [];
+    const assign = (container: any, path: string[], newValue: any) => {
+      let current = container;
+      for (let i = 0; i < path.length - 1; i++) current = current[path[i]];
+      current[path[path.length - 1]] = newValue;
+    };
+    while (queue.length) {
+      const batchSize = queue.length;
+      const batch: { path: string[]; value: any }[] = [];
+      for (let i = 0; i < batchSize; i++) batch.push(queue.shift()!);
+      for (const item of batch) {
+        const val = item.value;
+        if (typeof val !== "object" || Array.isArray(val)) continue;
+        for (const [k, v] of Object.entries(val)) {
+          if (typeof v === "string") {
+            // Schedule translation
+            translateTasks.push((async () => {
+              try {
+                const translated = await utils.translate(v, language, target);
+                assign(root, [...item.path, k], translated.text);
+              } catch (e) {
+                // Fallback: keep original if translation fails
+              }
+            })());
+          } else if (typeof v === "object" && !Array.isArray(v)) {
+            queue.push({ path: [...item.path, k], value: v });
+          }
+        }
+      }
+    }
+    if (translateTasks.length) await Promise.allSettled(translateTasks);
+    return root;
   },
   encryptWithAES: (key: string, data: string): string => {
     const iv = Uint8Array.from(crypto.randomBytes(16));

@@ -13,10 +13,122 @@ const genAI = new GoogleGenerativeAI(String(process.env.AI_API_KEY));
 class AiManager extends EventEmitter {
     private ratelimits: Map<string, Ratelimit> = new Map();
     private chats: Map<string, ChatSession> = new Map();
+    private voiceChats: Map<string, ChatSession> = new Map();
     constructor(private ratelimit: number, private max: number, private timeout: number) {
         Log.info("AiManager initialized", { component: "AiManager" });
         setInterval(() => this.ClearTimeouts(), 1000);
         super();
+    }
+    public async ExecuteFunctionVoice(id: string, name: string, args: any, message: Message | null): Promise<any> {
+        if (await this.RatelimitUser(id)) return { error: "You are sending too many messages, please wait a few seconds before sending another message." };
+        const chat = await this.GetVoiceChat(id);
+        const func: any = utils.AIFunctions[name as keyof typeof utils.AIFunctions];
+        if (!func) {
+            if (message) await message.edit(`The AI requested an unknown function, attempting to recover... ${data.bot.loadingEmoji.mention}`);
+            const rsp = await chat.sendMessage([
+                {
+                    functionResponse: {
+                        name,
+                        response: {
+                            result: { error: "Unknown function" }
+                        }
+                    }
+                }
+            ]);
+            if (rsp.response.functionCalls()?.length) {
+                if (message) await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} ${data.bot.loadingEmoji.mention}`);
+                return this.ExecuteFunctionVoice(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
+            }
+        }
+        let preparedArgs: any = args;
+        if (["current_guild_info", "on_guild"].includes(name)) {
+            preparedArgs = message as any;
+        } else {
+            const isPlainObject = typeof args === "object" && args !== null && !Array.isArray(args);
+            if (isPlainObject) {
+                if (Object.keys(args).length === 0) {
+                    preparedArgs = id;
+                } else {
+                    preparedArgs = {
+                        ...args,
+                        requesterId: id,
+                        guildId: message?.guild?.id ?? null,
+                        channelId: message?.channel?.id ?? null
+                    };
+                }
+            } else if (preparedArgs === null || preparedArgs === undefined || preparedArgs === "") {
+                preparedArgs = id;
+            }
+        }
+        let rawResult: any;
+        try {
+            rawResult = await func(preparedArgs);
+        } catch (error: any) {
+            Log.error(`AI function ${name} threw an exception`, error instanceof Error ? error : new Error(String(error)));
+            rawResult = { error: error instanceof Error ? error.message : String(error) };
+        }
+        let attachments: Array<{ path: string; name?: string }> = [];
+        let sanitizedResult = rawResult;
+        if (rawResult && typeof rawResult === "object" && !Array.isArray(rawResult)) {
+            const { __attachments, ...rest } = rawResult as any;
+            if (Array.isArray(__attachments)) {
+                attachments = __attachments
+                    .filter((item: any) => item && typeof item.path === "string")
+                    .map((item: any) => ({ path: item.path, name: item.name }));
+            }
+            sanitizedResult = rest;
+        }
+        let reply = "";
+        const rsp = await chat.sendMessage([
+            {
+                functionResponse: {
+                    name,
+                    response: {
+                        result: sanitizedResult
+                    }
+                }
+            }
+        ]);
+        if (rsp.response.functionCalls()?.length) {
+            if (message) {
+                await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} ${data.bot.loadingEmoji.mention}`);
+            }
+            return this.ExecuteFunctionVoice(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
+        }
+        reply = rsp.response.text();
+        const filesPayload = attachments.map(att => ({
+            attachment: att.path,
+            name: att.name ?? path.basename(att.path)
+        }));
+        if (reply.length > 2000) {
+            const filename = `./ai-response-${Date.now()}.md`;
+            fs.writeFileSync(filename, reply);
+            filesPayload.push({ attachment: filename, name: path.basename(filename) });
+            try {
+                if (message) {
+                    await message.edit({
+                        content: "The response from the AI was too long, so it has been sent as a file.",
+                        files: filesPayload,
+                        attachments: []
+                    });
+                }
+            } finally {
+                try {
+                    fs.unlinkSync(filename);
+                } catch (error) {
+                    Log.warn("Failed to remove temporary AI response file", { error: String(error) });
+                }
+            }
+            return;
+        }
+        if (message) {
+            if (filesPayload.length > 0) {
+                await message.edit({ content: reply.length ? reply : " ", files: filesPayload, attachments: [] });
+            } else {
+                await message.edit(reply.length ? reply : " ");
+            }
+        }
+        return reply;
     }
     public async RatelimitUser(id: string): Promise<boolean> {
         if (!this.ratelimits.has(id)) {
@@ -59,6 +171,12 @@ class AiManager extends EventEmitter {
         });
         const response = await utils.getAiResponse(text, tempChat);
         return response.text;
+    }
+    public async GetVoiceResponse(id: string, text: string): Promise<any> {
+        if (await this.RatelimitUser(id)) return { text: "You are sending too many messages, please wait a few seconds before sending another message.", call: null };
+        const chat = await this.GetVoiceChat(id);
+        const response = await utils.getAiResponse(text, chat);
+        return response;
     }
     public async ExecuteFunction(id: string, name: string, args: any, message: Message): Promise<any> {
         if (await this.RatelimitUser(id)) return { error: "You are sending too many messages, please wait a few seconds before sending another message." };
@@ -188,6 +306,28 @@ class AiManager extends EventEmitter {
         }
         return this.chats.get(id) as ChatSession;
     }
+    private async GetVoiceChat(id: string): Promise<ChatSession> {
+        let chat = this.voiceChats.get(id);
+        if (!chat) {
+            const model = genAI.getGenerativeModel({
+                model: "gemini-2.5-flash",
+                // Keep voice replies brief and natural; avoid heavy formatting in TTS
+                systemInstruction: "You are the assistant's voice mode. Respond concisely (ideally 1–2 short sentences or tight bullets). Use the user's language. Avoid long explanations, code blocks, and heavy markdown unless explicitly requested. If a tool is needed, call it."
+            });
+            chat = model.startChat({
+                history: [],
+                generationConfig: {
+                    maxOutputTokens: 256,
+                    temperature: 0.7,
+                    topP: 0.8,
+                    topK: 40,
+                },
+                tools: AIFunctions
+            });
+            this.voiceChats.set(id, chat);
+        }
+        return this.voiceChats.get(id) as ChatSession;
+    }
     private ClearTimeouts(): void {
         this.ratelimits.forEach((ratelimit) => {
             if (Date.now() - ratelimit.time > this.timeout) this.ratelimits.delete(ratelimit.id);
@@ -196,6 +336,7 @@ class AiManager extends EventEmitter {
 
     public async ClearChat(id: string): Promise<void> {
         this.chats.delete(id);
+        this.voiceChats.delete(id);
     }
 }
 export default AiManager;

@@ -33,6 +33,54 @@ export default class NVIDIAModelsManager {
             return { safe: true };
         }
     };
+    public GetModelChatResponse = async (messages: ChatCompletionMessageParam[], timeoutMs: number = 2000, task: string): Promise<{ content: string, reasoning?: string }> => {
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), Math.max(500, timeoutMs));
+            if (!this.GetTaskBasedModel(task).name) {
+                throw new Error(`No model found for task: ${task}`);
+            }
+            const response = await this.openai.chat.completions.create({
+                model: this.GetTaskBasedModel(task).name,
+                messages,
+                stream: false,
+                ...this.GetCustomTaskConfig(task)
+            }, { signal: controller.signal as any });
+            clearTimeout(timer);
+            return { content: response.choices[0]?.message?.content || "", reasoning: this.GetTaskBasedModel(task).hasReasoning ? (response.choices[0]?.message as any).reasoning_content : undefined };
+        } catch (error) {
+            console.error("Error getting reasoning response:", error);
+            return { content: "", reasoning: undefined };
+        }
+    }
+    private GetTaskBasedModel = (task: string): { name: string, hasReasoning: boolean } => {
+        const taskModels: { [key: string]: { name: string, hasReasoning: boolean } } = {
+            "chat": {
+                "name": "openai/gpt-oss-20b",
+                "hasReasoning": true,
+            },
+            "reasoning": {
+                "name": "openai/gpt-oss-120b",
+                "hasReasoning": true,
+            }
+        };
+        return taskModels[task] || { name: "", hasReasoning: false };
+    }
+    private GetCustomTaskConfig = (task: string): { max_tokens: number, top_p: number, temperature: number } => {
+        const taskConfigs: { [key: string]: { max_tokens: number, top_p: number, temperature: number } } = {
+            "chat": {
+                "max_tokens": 1024,
+                "top_p": 0.9,
+                "temperature": 0.7
+            },
+            "reasoning": {
+                "max_tokens": 2048,
+                "top_p": 0.9,
+                "temperature": 0.7
+            }
+        };
+        return taskConfigs[task] || { max_tokens: 1024, top_p: 0.9, temperature: 0.7 };
+    };
     /**
      * Transcribes audio to text using NVIDIA Parakeet ASR model
      * 
@@ -228,6 +276,48 @@ message WordInfo {
         functionId?: string
     ): Promise<Buffer> => {
         try {
+            // Validate and pre-process text
+            const raw = (text || "").toString().trim();
+            if (!raw) {
+                throw new Error("Empty text provided for TTS");
+            }
+
+            // Helper to split long text into <= 2000 char chunks (safe margin 1800)
+            // Prefer sentence boundaries, then words
+            const MAX_CHARS = 1800; // NVIDIA limit ~2000, keep margin
+            const sentences = raw
+                .replace(/\s+/g, " ")
+                .split(/(?<=[\.!?])\s+|\n+/g)
+                .filter(s => s && s.trim().length > 0);
+
+            const chunks: string[] = [];
+            let current = "";
+            const pushCurrent = () => {
+                const c = current.trim();
+                if (c.length) chunks.push(c);
+                current = "";
+            };
+            for (const s of sentences) {
+                if ((current + (current ? " " : "") + s).length <= MAX_CHARS) {
+                    current += (current ? " " : "") + s;
+                } else if (s.length <= MAX_CHARS) {
+                    pushCurrent();
+                    current = s;
+                } else {
+                    // Sentence is too long; split by words
+                    const words = s.split(/\s+/g);
+                    for (const w of words) {
+                        if ((current + (current ? " " : "") + w).length <= MAX_CHARS) {
+                            current += (current ? " " : "") + w;
+                        } else {
+                            pushCurrent();
+                            current = w;
+                        }
+                    }
+                }
+            }
+            pushCurrent();
+
             const protoPath = path.join(__dirname, "..", "protos", "riva_tts.proto");
             const fs = require("fs");
             const protoDir = path.join(__dirname, "..", "protos");
@@ -316,31 +406,45 @@ enum AudioEncoding {
                 credentials
             );
 
-            const request = {
-                text,
-                language_code: languageCode,
-                encoding: "LINEAR_PCM",
-                sample_rate_hertz: 22050,
-                voice_name: voice
-            };
-
-            return new Promise((resolve, reject) => {
+            // Synthesize each chunk sequentially and concatenate raw PCM audio
+            const synthOne = (part: string) => new Promise<Buffer>((resolve, reject) => {
                 const deadline = new Date(Date.now() + timeoutMs);
-                
+                const request = {
+                    text: part,
+                    language_code: languageCode,
+                    encoding: "LINEAR_PCM",
+                    sample_rate_hertz: 22050,
+                    voice_name: voice
+                };
                 client.Synthesize(request, { deadline }, (error: Error | null, response: any) => {
                     if (error) {
                         console.error("Error during speech synthesis:", error);
                         reject(new Error(`Speech synthesis failed: ${error.message}`));
                         return;
                     }
-
-                    if (response?.audio) {
+                    if (response?.audio && response.audio.length) {
                         resolve(Buffer.from(response.audio));
                     } else {
                         reject(new Error("No audio data received"));
                     }
                 });
             });
+
+            const audioParts: Buffer[] = [];
+            for (const [idx, part] of chunks.entries()) {
+                // Guard against accidental empty chunks
+                const t = (part || "").trim();
+                if (!t) continue;
+                // Synthesize chunk
+                const buf = await synthOne(t);
+                audioParts.push(buf);
+            }
+
+            if (audioParts.length === 0) {
+                throw new Error("TTS returned no audio for provided text");
+            }
+            // Concatenate raw PCM buffers (same format for all chunks)
+            return Buffer.concat(audioParts as any);
 
         } catch (error) {
             console.error("Error in GetTextToSpeech:", error);
