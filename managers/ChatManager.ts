@@ -223,7 +223,7 @@ export default class ChatManager extends EventEmitter {
             if (v.time_left === 0) {
                 this.ratelimits.delete(k);
                 Log.info(`User removed from ratelimit`, { userId: k });
-                await this.announce(`User ${v.username} ratelimit has been removed.`, "en");
+                await this.announce(`Ratelimit for user ${v.username} has been removed.`, "en");
                 continue;
             }
             newv.time_left -= 1000;
