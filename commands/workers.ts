@@ -33,7 +33,7 @@ export default {
     const embed = new EmbedBuilder()
       .setTitle(texts.title)
       .setDescription(texts.description)
-      .setColor("Blurple");
+      .setColor("Purple");
 
     const types = Object.entries(stats.byType);
     if (types.length === 0) {
@@ -51,7 +51,7 @@ export default {
 
     embed.addFields({ name: texts.totals, value: `${texts.totalWorkers}: ${stats.total}` });
     embed.setFooter({ text: texts.footer });
-    await interaction.editReply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed], content: null });
   },
   ephemeral: false
 };
