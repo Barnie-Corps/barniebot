@@ -4,9 +4,7 @@
   "description": "",
   "main": "index.ts",
   "dependencies": {
-    "@discordjs/opus": "^0.10.0",
     "@discordjs/rest": "^1.1.0",
-    "@discordjs/voice": "^0.19.0",
     "@google/genai": "^1.20.0",
     "@google/generative-ai": "^0.21.0",
     "@grpc/grpc-js": "^1.14.0",
@@ -241,5 +239,9 @@
   "bugs": {
     "url": "https://github.com/santiadjmc/barniebot/issues"
   },
-  "homepage": "https://github.com/santiadjmc/barniebot#readme"
+  "homepage": "https://github.com/santiadjmc/barniebot#readme",
+  "devDependencies": {
+    "@discordjs/opus": "^0.10.0",
+    "@discordjs/voice": "^0.19.0"
+  }
 }
