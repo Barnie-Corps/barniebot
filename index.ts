@@ -72,8 +72,14 @@ client.on("clientReady", async (): Promise<any> => {
         username: client.user?.tag
     });
     queries();
-    // Set a simple presence (versioning removed)
-    client.user?.setPresence({ activities: [{ name: `to be a bot`, type: ActivityType.Playing }] });
+    if (Number(process.env.FETCH_MEMBERS_ON_STARTUP) === 1) {
+        client.user?.setPresence({ activities: [{ name: `how many members are here? *finding out*`, type: ActivityType.Watching }], afk: true });
+        Log.info("Fetching members from guilds...", { component: "Initialization" });
+        for (const g of client.guilds.cache.values()) {
+            await g.members.fetch();
+        }
+    }
+    client.user?.setPresence({ activities: [{ name: `there are ${client.users.cache.size} users around!`, type: ActivityType.Watching }] });
     await load_slash(); // Load slash commands
     Log.info(`Cache status`, { 
         component: "Bot",
