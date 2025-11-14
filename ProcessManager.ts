@@ -19,6 +19,7 @@ export default class ProcessManager {
     private lastCrashTime: number = 0;
     private options: ProcessManagerOptions;
     private logStream: fs.WriteStream | null = null;
+    public maxRestarts: number;
 
     constructor(options: Partial<ProcessManagerOptions> = {}) {
         this.options = {
@@ -39,6 +40,7 @@ export default class ProcessManager {
             ],
             logFile: options.logFile
         };
+        this.maxRestarts = this.options.maxRestarts || 5;
 
         if (this.options.logFile) {
             this.logStream = fs.createWriteStream(this.options.logFile, { flags: "a" });
@@ -245,7 +247,7 @@ if (require.main === module) {
     const manager = new ProcessManager({
         script: path.join(__dirname, "index.ts"),
         autoRestart: true,
-        maxRestarts: 5,
+        maxRestarts: 15,
         restartDelay: 3000,
         logFile: path.join(__dirname, "logs", "process-manager.log")
     });
@@ -257,6 +259,7 @@ if (require.main === module) {
     console.log("✓ Auto-restart enabled");
     console.log("✓ Crash detection active");
     console.log("✓ Monitoring for fatal errors");
+    console.log(`✓ Maximum restarts set to ${manager.maxRestarts}`);
     console.log("");
     
     manager.start();
