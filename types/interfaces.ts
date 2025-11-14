@@ -19,6 +19,9 @@ export interface DataType {
         commands: Collection<string, any>;
         encryption_key: string;
         log_channel: string;
+        home_guild: string;
+        support_category: string;
+        transcripts_channel: string;
     }
 }
 export interface BotEmoji {

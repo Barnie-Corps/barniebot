@@ -1,25 +1,30 @@
 # BarnieBot
 
-A powerful TypeScript Discord bot that bridges communities through global chat, AI assistance, and comprehensive moderation tools.
+A powerful TypeScript Discord bot that bridges communities through global chat, AI assistance, comprehensive moderation tools, and a fully managed support ticket workflow.
 
 ## What It Does
 
-**Global Chat Network** – Connect multiple Discord servers with encrypted cross-guild messaging, automatic translation (20+ languages), staff rank suffixes, and anti-impersonation protection.
+**Global Chat Network** – Connect multiple Discord servers with encrypted cross-guild messaging, automatic translation (20+ languages), staff rank suffixes, anti-impersonation protection, and global custom commands (`b.rules`, `b.help`).
 
 **AI Powered** – Google Gemini and NVIDIA AI models integration for conversational chat (`/ai chat`), quick and reasoning questions (`/ai ask`), and voice conversations with speech-to-text.
 
-**Staff & Moderation System** – Eight-tier staff hierarchy (Support → Owner) with global enforcement tools: blacklists, warnings, mutes. Interactive pagination for case history (`/staff cases`).
+**Staff & Moderation System** – Eight-tier staff hierarchy (Support → Owner) with global enforcement tools: blacklists, warnings, mutes, ticket assignment & auditing. Interactive pagination for case history (`/staff cases`).
+
+**Support Tickets** – Users open tickets via `/support` (DM or guild); system creates a home-guild channel, relays messages bi‑directionally (user ↔ staff), auto-assigns available staff (fair workload), tracks first response time, exports TXT+HTML transcripts, and supports priority/category, internal staff notes, audit logging, and controlled closure.
 
 **Guild Customization** – Per-server content filters with protected words, custom command responses (regex or literal), language preferences, and webhook-based dispatch.
 
 ## Core Features
-- **Global Chat**: Encrypted messages, per-guild language settings, optional auto-translate, staff suffix display
+- **Global Chat**: Encrypted messages, per-guild language settings, optional auto-translate, staff suffix display, global custom commands (`b.rules [lang]`, `b.help`)
 - **Moderation**: Interactive warning viewer, global blacklists, timed/indefinite mutes, action audit trail
+- **Support Tickets**: `/support` creation, auto-assignment, priority & category, first response time tracking, HTML/TXT transcripts, user close button, confirmation dialogs, channel delete flow
+- **Staff Tools**: `/stafftools tickets|assign|priority|category|status|note|notes|search|auditlog` for queue management, workload balancing, notes & auditing
 - **AI Functions**: Session-based chat, function calling for server info/user lookup/guild management, VIP-gated features
 - **Content Filter**: Word-based filtering, single-word vs substring matching, protected words, log webhooks
 - **Custom Responses**: Guild-specific commands with regex support
 - **Worker Pools**: Translation and rate-limit processing off the main loop (dynamic sizing, prewarm, keep-alive)
 - **VIP System**: Time-based subscriptions for extended AI access
+- **Process Manager**: Optional resilient runner (`npm run start:managed`) with crash pattern detection, auto-restart, reboot flag & completion announcement
 
 ## Tech Stack
 - **Runtime**: Node.js 18+ with TypeScript
@@ -36,7 +41,10 @@ git clone https://github.com/Barnie-Corps/barniebot.git
 cd barniebot
 npm install
 cp .env.example .env  # Configure secrets below
-npx ts-node index.ts
+# Development (no auto-restart)
+npm run start
+# Production (with Process Manager auto-restart & reboot tracking)
+npm run start:managed
 ```
 
 ### Environment Configuration
@@ -59,6 +67,7 @@ EMAIL_PASSWORD=gmail-app-password
 TRANSLATE_WORKERS=10               # Translation pool size (default: CPU count)
 NOTIFY_STARTUP=1                   # Notify on unclean shutdown
 SAFELY_SHUTTED_DOWN=1              # Set by b.shutdown
+REBOOTING=0                        # Managed automatically for reboot completion announcement
 TEST=0                             # Owner-only mode if 1
 IGNORE_GLOBAL_CHAT=0               # Skip global chat processing
 SEARCH_ENGINE_API_KEY=             # Google custom search (AI function)
@@ -71,6 +80,16 @@ SEARCH_ENGINE_CX=                  # Custom search engine ID
 - `EMAIL_PASSWORD`: Gmail app-specific password (not account password)
 
 ## Commands
+
+### Global Chat Prefix Commands (Public)
+These are lightweight, globally broadcast informational commands executed in a configured global chat channel:
+
+| Command | Args | Description |
+|---------|------|-------------|
+| `b.rules` | `[lang]` | Show global chat rules (languages: en, es, fr, de, pt) |
+| `b.help` | none | Show available global commands & usage |
+
+`b.rules es` → sends Spanish rules to all connected guilds via the global relay.
 
 ### Slash Commands (Everyone)
 | Command | Description |
@@ -122,7 +141,37 @@ SEARCH_ENGINE_CX=                  # Custom search engine ID
 | Command | Arguments | Description |
 |---------|-----------|-------------|
 | `b.shutdown` | none | Gracefully stop bot |
+| `b.reboot` | none | Restart bot (ProcessManager required for auto-return) |
+| `b.status` | none | Show runtime stats (uptime, memory, guilds, users) |
 | `b.announce` | `<lang> <message>` | Broadcast to global chat |
+### Support Ticket Commands
+| Command | Description |
+|---------|-------------|
+| `/support` | Create a support ticket (DM recommended) |
+| `/globalmod closeticket` | Close a ticket (with transcript export) |
+
+### Staff Ticket Management (`/stafftools`)
+| Subcommand | Description |
+|------------|-------------|
+| `tickets [filter]` | View open tickets (all/unassigned/mine/high) |
+| `assign <ticket_id> [staff]` | Assign ticket to self or specified staff |
+| `priority <ticket_id> <level>` | Set priority (low/medium/high/urgent) |
+| `category <ticket_id> <type>` | Set category (general/technical/billing/report/appeal) |
+| `status <state> [message]` | Set personal availability (available/busy/away/offline) |
+| `note <user> <content>` | Add internal note about a user |
+| `notes <user>` | View stored notes about a user |
+| `search <query>` | Search open tickets (content/user) |
+| `auditlog [staff] [action] [days]` | View filtered staff action audit log |
+
+### Ticket Lifecycle Essentials
+- User runs `/support` → channel auto-created in home guild category
+- Auto-assignment picks least-loaded available staff (fair distribution)
+- Messages relayed: user → `\`username\``: content | staff → `[RANK] name: content`
+- First staff reply logs response time + announces metric in ticket channel
+- Closing requires confirmation; generates TXT & HTML transcripts, logs audit
+- Optional channel deletion via confirmed button flow
+- Priority/category mutable mid-flight for SLA & routing
+- Internal notes & audit trail improve accountability
 | `b.messages` | `<user-id>` | Export user's global messages (decrypted) |
 | `b.guilds` | none | Export guild list (name, member count, ID) |
 | `b.eval` | `<code>` | Execute JavaScript (use with extreme caution) |
@@ -159,6 +208,7 @@ From lowest to highest authority:
 **Data Retention:** See `privacy.md` for full details. Global chat logs indefinite (abuse tracing), AI sessions ephemeral.
 
 **Audit Trail:** All moderation actions record author ID and timestamp.
+**Staff Action Logging:** Ticket operations (assign/priority/category/status/close), moderation (warn/mute/blacklist), notes & searches captured in `staff_audit_log` with metadata JSON.
 
 Full details in `SECURITY.md` and `privacy.md`.
 
@@ -180,7 +230,8 @@ See `CONTRIBUTING.md` for setup, coding standards, and PR guidelines.
 **Build:**
 ```bash
 npm run build  # Compiles TypeScript
-npm start      # Run compiled JS
+npm start      # Run (no auto-restart)
+npm run start:managed  # Run with Process Manager (recommended production)
 ```
 
 **Test Mode:**

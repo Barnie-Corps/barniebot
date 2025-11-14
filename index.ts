@@ -17,6 +17,8 @@ global.Headers = require("node-fetch").Headers;
 globalThis.fetch = require("node-fetch");
 import * as dotenv from "dotenv";
 dotenv.config();
+// Ensure REBOOTING flag exists (0 = normal start, 1 = coming back from an intentional reboot)
+if (!process.env.REBOOTING) process.env.REBOOTING = "0";
 import { EmbedBuilder, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, WebhookClient, TextChannel, Message, time, TimestampStyles, Collection, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import * as fs from "fs";
 import data from "./data"; // Data file for storing bot data
@@ -26,12 +28,14 @@ import db from "./mysql/database"; // Database connection
 import utils from "./utils"; // Utils file for utility functions
 import load_slash from "./load_slash"; // Load slash commands
 import ChatManager from "./managers/ChatManager"; // Chat manager for global chat
+import GlobalCommandsManager from "./managers/GlobalCommandsManager"; // Global commands manager
 import Workers from "./Workers"; // Workers for background tasks
 import path from "path";
 import { inspect } from "util"; // Used for eval command
 import langs from "langs"; // Used for language codes
 import NVIDIAModels from "./NVIDIAModels";
 const manager = new ChatManager();
+const globalCommandsManager = new GlobalCommandsManager();
 // Catch unhandled errors
 process.on("uncaughtException", (err: any) => {
     console.log(`Unknown Error: ${err.stack}`);
@@ -59,7 +63,7 @@ const client = new Client({
         }
     }
     // Log the amount of commands loaded
-    Log.success(`Commands loaded successfully`, { 
+    Log.success(`Commands loaded successfully`, {
         component: "CommandLoader",
         loadedCommands: data.bot.commands.size,
         totalCommands: commandsDir.length
@@ -67,11 +71,18 @@ const client = new Client({
 })();
 
 client.on("clientReady", async (): Promise<any> => {
-    Log.success(`Bot logged in successfully`, { 
+    Log.success(`Bot logged in successfully`, {
         component: "Bot",
         username: client.user?.tag
     });
     queries();
+    const staffMembers: any = await db.query("SELECT * FROM staff");
+    for (const staff of staffMembers) {
+        try {
+            await client.users.fetch(staff.uid);
+        }
+        catch { }
+    }
     if (Number(process.env.FETCH_MEMBERS_ON_STARTUP) === 1) {
         client.user?.setPresence({ activities: [{ name: `how many members are here? *finding out*`, type: ActivityType.Watching }], afk: true });
         Log.info("Fetching members from guilds...", { component: "Initialization" });
@@ -79,16 +90,16 @@ client.on("clientReady", async (): Promise<any> => {
             await g.members.fetch();
         }
     }
-    client.user?.setPresence({ activities: [{ name: `there are ${client.users.cache.size} users around!`, type: ActivityType.Watching }] });
+    client.user?.setPresence({ activities: [{ name: Number(process.env.FETCH_MEMBERS_ON_STARTUP) === 1 ? `there are ${client.users.cache.size} users around!` : "How robotically mysterious!", type: ActivityType.Watching }] });
     await load_slash(); // Load slash commands
-    Log.info(`Cache status`, { 
+    Log.info(`Cache status`, {
         component: "Bot",
         usersCacheSize: client.users.cache.size
     });
     data.bot.owners.push(...String(process.env.OWNERS).trim().split(",")); // Load owners from .env
     // Ensure staff table entries for owners
     for (const ownerId of data.bot.owners) {
-        try { await db.query("INSERT IGNORE INTO staff SET ?", [{ uid: ownerId, rank: "Owner" }]); } catch {}
+        try { await db.query("INSERT IGNORE INTO staff SET ?", [{ uid: ownerId, rank: "Owner" }]); } catch { }
     }
     Log.info("Owners data loaded", { component: "Initialization" });
     Log.info("Loading workers...", { component: "Initialization" });
@@ -97,6 +108,21 @@ client.on("clientReady", async (): Promise<any> => {
         await manager.announce("Hey! I have been restarted. According to my records it was a forced restart, so I could not warn you in advance. We apologize for any inconvenience or downtime this may have caused.", "en");
     }
     else if (Number(process.env.NOTIFY_STARTUP) === 1) await manager.announce("I'm back! The global chat is online again.", "en");
+    if (process.env.REBOOTING === "1") {
+        try {
+            await manager.announce("✅ Reboot complete! I'm back online and ready.", "en");
+        } catch (e) {
+            Log.warn("Failed to send reboot completion announcement", { component: "Startup" });
+        }
+        process.env.REBOOTING = "0";
+        try {
+            const envContents = fs.readFileSync('./.env').toString();
+            let updated = envContents;
+            if (updated.includes("REBOOTING=1")) updated = updated.replace("REBOOTING=1", "REBOOTING=0");
+            else if (!updated.includes("REBOOTING=")) updated += "\nREBOOTING=0";
+            fs.writeFileSync('./.env', updated);
+        } catch { /* ignore */ }
+    }
     Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", 5); // Create 5 workers for translation tasks
     fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
     Log.info("Workers loaded", { component: "WorkerSystem" });
@@ -144,6 +170,42 @@ client.on("messageCreate", async (message): Promise<any> => {
             client.destroy();
             process.exit(0);
         } // Shutdown the bot
+        case "reboot": {
+            await manager.announce("🔄 Rebooting now! I'll be back in a few seconds.", "en");
+            // Update .env to mark safe shutdown + reboot intent
+            try {
+                const envContents = fs.readFileSync('./.env').toString();
+                let newEnv = envContents.includes("SAFELY_SHUTTED_DOWN=0") ? envContents.replace("SAFELY_SHUTTED_DOWN=0", "SAFELY_SHUTTED_DOWN=1") : envContents;
+                if (newEnv.includes("REBOOTING=0")) newEnv = newEnv.replace("REBOOTING=0", "REBOOTING=1");
+                else if (!newEnv.includes("REBOOTING=")) newEnv += "\nREBOOTING=1";
+                fs.writeFileSync('./.env', newEnv);
+                process.env.REBOOTING = "1";
+            } catch (e) {
+                Log.warn("Failed to set reboot flag", { component: "Reboot", error: (e as any)?.message });
+            }
+            await message.reply("✅ Reboot initiated. Process Manager will restart the bot automatically.");
+            
+            // Give time for the message to send
+            setTimeout(() => {
+                client.destroy();
+                process.exit(1); // Exit with code 1 to trigger ProcessManager restart
+            }, 1000);
+            break;
+        } // Reboot the bot (requires ProcessManager)
+        case "status": {
+            const uptime = process.uptime();
+            const hours = Math.floor(uptime / 3600);
+            const minutes = Math.floor((uptime % 3600) / 60);
+            const seconds = Math.floor(uptime % 60);
+            
+            await message.reply(`📊 **Bot Status**\n` +
+                `Uptime: ${hours}h ${minutes}m ${seconds}s\n` +
+                `Guilds: ${client.guilds.cache.size}\n` +
+                `Users: ${client.users.cache.size}\n` +
+                `Memory: ${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2)} MB\n` +
+                `Process ID: ${process.pid}`);
+            break;
+        } // Show bot status
         case "announce": {
             const [language, ...msg] = args;
             await manager.announce(msg.join(" "), language, message.attachments);
@@ -176,23 +238,23 @@ client.on("messageCreate", async (message): Promise<any> => {
         case "eval": {
             // Check if the user is an owner
             if (!data.bot.owners.includes(message.author.id)) return message.reply('no');
-            
+
             const targetCode = args.join(' ');
             if (!targetCode) return message.reply('You must provide code to evaluate.');
-            
+
             try {
                 const start = Date.now();
                 let evalued = eval(targetCode);
-                
+
                 // Handle promises
                 if (evalued instanceof Promise) {
                     evalued = await evalued;
                 }
-                
+
                 const done = Date.now() - start;
                 const outputType = typeof evalued;
                 const output = inspect(evalued, { depth: 1, maxArrayLength: 100 });
-                
+
                 // Create response embed
                 const embed = new EmbedBuilder()
                     .setColor("Green")
@@ -217,11 +279,11 @@ client.on("messageCreate", async (message): Promise<any> => {
                             value: `\`\`\`js\n${output.length > 1900 ? `${output.substring(0, 1900)}...` : output}\`\`\``
                         }
                     );
-                
+
                 await message.reply({ embeds: [embed] });
             } catch (error: any) {
                 const errorMessage = error?.stack || error?.message || String(error);
-                
+
                 const errorEmbed = new EmbedBuilder()
                     .setColor('Red')
                     .setTitle('Evaluation Error')
@@ -235,7 +297,7 @@ client.on("messageCreate", async (message): Promise<any> => {
                             value: `\`\`\`js\n${errorMessage.length > 1900 ? `${errorMessage.substring(0, 1900)}...` : errorMessage}\`\`\``
                         }
                     );
-                
+
                 await message.reply({ embeds: [errorEmbed] });
             }
             break;
@@ -376,7 +438,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             return await interaction.reply({ content: "```\n" + `/${interaction.commandName}\n ${utils.createArrows(`${interaction.command?.name}`.length)}\n\nERR: Unknown slash command` + "\n```", ephemeral: true });
         }
         try {
-            await interaction.reply({ content: data.bot.loadingEmoji.mention, flags: cmd.ephemeral ?  MessageFlags.Ephemeral : undefined }); // Reply with a loading message
+            await interaction.reply({ content: data.bot.loadingEmoji.mention, flags: cmd.ephemeral ? MessageFlags.Ephemeral : undefined }); // Reply with a loading message
             await cmd.execute(interaction, Lang);
             await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE"); // Update the last command executed
             await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]); // Insert the executed command into the executed_commands table
@@ -648,6 +710,350 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             }
             case "staffcases": // fallback
                 break;
+            case "close_ticket": {
+                const [ticketIdStr, originalUserId] = args;
+                const ticketId = parseInt(ticketIdStr);
+                
+                // Check if user is the ticket owner or staff
+                const isOwner = interaction.user.id === originalUserId;
+                const staffRank = await utils.getUserStaffRank(interaction.user.id);
+                const isStaff = staffRank !== null;
+                
+                if (!isOwner && !isStaff) {
+                    if (interaction.isRepliable()) await interaction.reply({ content: "You don't have permission to close this ticket.", ephemeral: true });
+                    return;
+                }
+                
+                try {
+                    const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [ticketId]);
+                    if (!ticketData[0]) {
+                        if (interaction.isRepliable()) await interaction.reply({ content: "Ticket not found.", ephemeral: true });
+                        return;
+                    }
+                    
+                    const ticket = ticketData[0];
+                    if (ticket.status === "closed") {
+                        if (interaction.isRepliable()) await interaction.reply({ content: "This ticket is already closed.", ephemeral: true });
+                        return;
+                    }
+                    
+                    // Show confirmation
+                    if (interaction.isRepliable()) {
+                        const confirmEmbed = new EmbedBuilder()
+                            .setColor("Orange")
+                            .setTitle("⚠️ Confirm Ticket Closure")
+                            .setDescription(`Are you sure you want to close ticket #${ticketId}?\n\nThis action will:\n• Generate and save transcripts\n• Notify the user\n• Mark the ticket as closed`)
+                            .setFooter({ text: "Click confirm to proceed" });
+                        
+                        const confirmRow = new ActionRowBuilder<ButtonBuilder>()
+                            .addComponents(
+                                new ButtonBuilder()
+                                    .setCustomId(`confirm_close-${ticketId}-${originalUserId}`)
+                                    .setLabel("Confirm Close")
+                                    .setStyle(ButtonStyle.Danger)
+                                    .setEmoji("✅"),
+                                new ButtonBuilder()
+                                    .setCustomId(`cancel_close-${ticketId}`)
+                                    .setLabel("Cancel")
+                                    .setStyle(ButtonStyle.Secondary)
+                                    .setEmoji("❌")
+                            );
+                        
+                        await interaction.reply({ embeds: [confirmEmbed], components: [confirmRow], ephemeral: true });
+                    }
+                } catch (error) {
+                    console.error("Failed to show close confirmation:", error);
+                    if (interaction.isRepliable()) await interaction.reply({ content: "Failed to process request.", ephemeral: true });
+                }
+                break;
+            }
+            case "cancel_close": {
+                if (interaction.isRepliable()) {
+                    await interaction.update({ content: "❌ Ticket closure cancelled.", embeds: [], components: [] });
+                }
+                break;
+            }
+            case "confirm_close": {
+                const [ticketIdStr, originalUserId] = args;
+                const ticketId = parseInt(ticketIdStr);
+                
+                try {
+                    const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [ticketId]);
+                    if (!ticketData[0]) {
+                        if (interaction.isRepliable()) await interaction.update({ content: "Ticket not found.", embeds: [], components: [] });
+                        return;
+                    }
+                    
+                    const ticket = ticketData[0];
+                    if (ticket.status === "closed") {
+                        if (interaction.isRepliable()) await interaction.update({ content: "This ticket is already closed.", embeds: [], components: [] });
+                        return;
+                    }
+                    
+                    if (interaction.isRepliable()) await interaction.update({ content: "🔄 Closing ticket and generating transcripts...", embeds: [], components: [] });
+                    
+                    // Generate transcript
+                    const messages: any = await db.query("SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY timestamp ASC", [ticketId]);
+                    const user = await client.users.fetch(ticket.user_id);
+                    
+                    // Calculate duration
+                    const durationMs = Date.now() - ticket.created_at;
+                    const hours = Math.floor(durationMs / 3600000);
+                    const minutes = Math.floor((durationMs % 3600000) / 60000);
+                    const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+                    
+                    // Create text transcript
+                    let textTranscript = `Support Ticket #${ticketId} - Transcript\n`;
+                    textTranscript += `User: ${user.tag} (${user.id})\n`;
+                    textTranscript += `Created: ${new Date(ticket.created_at).toISOString()}\n`;
+                    textTranscript += `Closed: ${new Date().toISOString()}\n`;
+                    textTranscript += `Duration: ${durationText}\n`;
+                    textTranscript += `Closed by: ${interaction.user.tag} (${interaction.user.id})\n`;
+                    textTranscript += `Origin: ${ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message"}\n`;
+                    textTranscript += `Initial Message: ${ticket.initial_message}\n`;
+                    textTranscript += `\n${"=".repeat(50)}\n\n`;
+                    
+                    for (const msg of messages) {
+                        const timestamp = new Date(msg.timestamp).toISOString();
+                        if (msg.is_staff) {
+                            const rankTag = utils.getRankSuffix(msg.staff_rank);
+                            textTranscript += `[${timestamp}] [${rankTag}] ${msg.username}: ${msg.content}\n`;
+                        } else {
+                            textTranscript += `[${timestamp}] ${msg.username}: ${msg.content}\n`;
+                        }
+                    }
+                    
+                    // Create HTML transcript
+                    const fs = await import("fs");
+                    let htmlTemplate = fs.readFileSync("./transcript_placeholder.html", "utf-8");
+                    
+                    let messagesHtml = "";
+                    for (const msg of messages) {
+                        const timestamp = new Date(msg.timestamp).toLocaleString();
+                        const initial = msg.username.charAt(0).toUpperCase();
+                        
+                        if (msg.is_staff) {
+                            const rankTag = utils.getRankSuffix(msg.staff_rank);
+                            messagesHtml += `
+                            <div class="message">
+                                <div class="avatar">${initial}</div>
+                                <div class="message-content">
+                                    <div class="message-header">
+                                        <span class="username">${msg.username}</span>
+                                        <span class="staff-badge">${rankTag}</span>
+                                        <span class="timestamp">${timestamp}</span>
+                                    </div>
+                                    <div class="message-text">${msg.content}</div>
+                                </div>
+                            </div>`;
+                        } else {
+                            messagesHtml += `
+                            <div class="message">
+                                <div class="avatar">${initial}</div>
+                                <div class="message-content">
+                                    <div class="message-header">
+                                        <span class="username">${msg.username}</span>
+                                        <span class="timestamp">${timestamp}</span>
+                                    </div>
+                                    <div class="message-text">${msg.content}</div>
+                                </div>
+                            </div>`;
+                        }
+                    }
+                    
+                    htmlTemplate = htmlTemplate
+                        .replace(/{ticketId}/g, ticketId.toString())
+                        .replace(/{username}/g, user.tag)
+                        .replace(/{userId}/g, user.id)
+                        .replace(/{status}/g, "Closed")
+                        .replace(/{statusClass}/g, "status-closed")
+                        .replace(/{createdAt}/g, new Date(ticket.created_at).toLocaleString())
+                        .replace(/{closedAt}/g, new Date().toLocaleString())
+                        .replace(/{origin}/g, ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message")
+                        .replace(/{initialMessage}/g, ticket.initial_message)
+                        .replace(/{messages}/g, messagesHtml);
+                    
+                    // Save transcripts to files
+                    fs.writeFileSync(`./transcript-${ticketId}.txt`, textTranscript);
+                    fs.writeFileSync(`./transcript-${ticketId}.html`, htmlTemplate);
+                    
+                    // Send transcripts to transcripts channel
+                    const transcriptsChannel = await client.channels.fetch(data.bot.transcripts_channel) as TextChannel;
+                    if (transcriptsChannel) {
+                        const transcriptEmbed = new EmbedBuilder()
+                            .setColor("Purple")
+                            .setTitle(`🎫 Ticket #${ticketId} - Closed`)
+                            .setDescription(`Ticket closed by ${interaction.user.tag}`)
+                            .addFields(
+                                { name: "User", value: `${user.tag} (${user.id})`, inline: true },
+                                { name: "Messages", value: messages.length.toString(), inline: true },
+                                { name: "Duration", value: durationText, inline: true }
+                            )
+                            .setTimestamp();
+                        
+                        await transcriptsChannel.send({
+                            embeds: [transcriptEmbed],
+                            files: [
+                                { attachment: `./transcript-${ticketId}.txt`, name: `transcript-${ticketId}.txt` },
+                                { attachment: `./transcript-${ticketId}.html`, name: `transcript-${ticketId}.html` }
+                            ]
+                        });
+                    }
+                    
+                    // Update ticket status
+                    const closedAt = Date.now();
+                    await db.query("UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ?", [closedAt, interaction.user.id, ticketId]);
+                    
+                    // Update the original embed in ticket channel
+                    try {
+                        const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel;
+                        if (ticketChannel && ticket.message_id) {
+                            const originalMessage = await ticketChannel.messages.fetch(ticket.message_id);
+                            const updatedEmbed = EmbedBuilder.from(originalMessage.embeds[0])
+                                .setColor("Red")
+                                .setTitle(`🔒 Ticket #${ticketId} - CLOSED`)
+                                .setFields(
+                                    originalMessage.embeds[0].fields.map(field => {
+                                        if (field.name.toLowerCase().includes("status")) {
+                                            return { name: field.name, value: "Closed", inline: field.inline };
+                                        }
+                                        return field;
+                                    })
+                                );
+                            
+                            await originalMessage.edit({ embeds: [updatedEmbed], components: [] });
+                        }
+                    } catch (error) {
+                        console.error("Failed to update ticket embed:", error);
+                    }
+                    
+                    // Notify user
+                    try {
+                        const closedEmbed = new EmbedBuilder()
+                            .setColor("Red")
+                            .setTitle("🔒 Support Ticket Closed")
+                            .setDescription(`Your support ticket #${ticketId} has been closed by ${interaction.user.tag}.`)
+                            .addFields(
+                                { name: "Duration", value: durationText, inline: true },
+                                { name: "Messages", value: messages.length.toString(), inline: true }
+                            )
+                            .setFooter({ text: "Thank you for contacting support!" })
+                            .setTimestamp();
+                        
+                        await user.send({ embeds: [closedEmbed] });
+                    } catch (error) {
+                        console.error("Failed to notify user of ticket closure:", error);
+                    }
+                    
+                    // Send message in ticket channel with delete option
+                    const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel;
+                    if (ticketChannel) {
+                        const closedNoticeEmbed = new EmbedBuilder()
+                            .setColor("Red")
+                            .setTitle("🔒 Ticket Closed")
+                            .setDescription(`This ticket has been closed by ${interaction.user.tag}.\n\nTranscripts have been saved and sent to <#${data.bot.transcripts_channel}>.\n\nYou can delete this channel using the button below.`)
+                            .setTimestamp();
+                        
+                        const deleteButton = new ActionRowBuilder<ButtonBuilder>()
+                            .addComponents(
+                                new ButtonBuilder()
+                                    .setCustomId(`delete_channel-${ticketId}`)
+                                    .setLabel("Delete Channel")
+                                    .setStyle(ButtonStyle.Danger)
+                                    .setEmoji("🗑️")
+                            );
+                        
+                        await ticketChannel.send({ embeds: [closedNoticeEmbed], components: [deleteButton] });
+                    }
+                    
+                    // Clean up transcript files
+                    fs.unlinkSync(`./transcript-${ticketId}.txt`);
+                    fs.unlinkSync(`./transcript-${ticketId}.html`);
+                    
+                    // Update the confirmation message
+                    try {
+                        await interaction.editReply({ content: `✅ Ticket #${ticketId} has been closed successfully!` });
+                    } catch (error) {
+                        // If edit fails, it's okay - the ticket is closed
+                        console.log("Could not update confirmation message:", error);
+                    }
+                    
+                } catch (error) {
+                    console.error("Failed to close ticket:", error);
+                    try {
+                        await interaction.editReply({ content: "Failed to close ticket." });
+                    } catch (e) {
+                        console.error("Could not send error message:", e);
+                    }
+                }
+                break;
+            }
+            case "delete_channel": {
+                const [ticketIdStr] = args;
+                const ticketId = parseInt(ticketIdStr);
+                
+                // Only staff can delete channels
+                const staffRank = await utils.getUserStaffRank(interaction.user.id);
+                if (!staffRank) {
+                    if (interaction.isRepliable()) await interaction.reply({ content: "Only staff can delete ticket channels.", ephemeral: true });
+                    return;
+                }
+                
+                // Show confirmation
+                if (interaction.isRepliable()) {
+                    const confirmEmbed = new EmbedBuilder()
+                        .setColor("Orange")
+                        .setTitle("⚠️ Confirm Channel Deletion")
+                        .setDescription(`Are you sure you want to delete this ticket channel?\n\nThis action cannot be undone. The channel will be deleted in 5 seconds after confirmation.`)
+                        .setFooter({ text: "Click confirm to proceed" });
+                    
+                    const confirmRow = new ActionRowBuilder<ButtonBuilder>()
+                        .addComponents(
+                            new ButtonBuilder()
+                                .setCustomId(`confirm_delete-${ticketId}`)
+                                .setLabel("Confirm Delete")
+                                .setStyle(ButtonStyle.Danger)
+                                .setEmoji("✅"),
+                            new ButtonBuilder()
+                                .setCustomId(`cancel_delete-${ticketId}`)
+                                .setLabel("Cancel")
+                                .setStyle(ButtonStyle.Secondary)
+                                .setEmoji("❌")
+                        );
+                    
+                    await interaction.reply({ embeds: [confirmEmbed], components: [confirmRow], ephemeral: true });
+                }
+                break;
+            }
+            case "cancel_delete": {
+                if (interaction.isRepliable()) {
+                    await interaction.update({ content: "❌ Channel deletion cancelled.", embeds: [], components: [] });
+                }
+                break;
+            }
+            case "confirm_delete": {
+                const [ticketIdStr] = args;
+                
+                try {
+                    if (interaction.isRepliable()) {
+                        await interaction.update({ content: "🗑️ Deleting channel in 5 seconds...", embeds: [], components: [] });
+                    }
+                    
+                    setTimeout(async () => {
+                        try {
+                            if (interaction.channel) {
+                                await (interaction.channel as TextChannel).delete();
+                            }
+                        } catch (error) {
+                            console.error("Failed to delete channel:", error);
+                        }
+                    }, 5000);
+                } catch (error) {
+                    console.error("Failed to confirm delete:", error);
+                    if (interaction.isRepliable()) await interaction.editReply({ content: "Failed to delete channel." });
+                }
+                break;
+            }
         }
         return;
     }
@@ -663,7 +1069,7 @@ client.on("guildCreate", async (guild): Promise<any> => {
     const channel = client.channels.cache.get(data.bot.log_channel) as TextChannel;
     if (!channel) return;
     await channel.send({ embeds: [embed] });
-    Log.info("Guild joined", { 
+    Log.info("Guild joined", {
         component: "GuildSystem",
         guildName: guild.name,
         guildId: guild.id
@@ -680,14 +1086,14 @@ client.on("guildDelete", async (guild): Promise<any> => {
     const channel = client.channels.cache.get(data.bot.log_channel) as TextChannel;
     if (!channel) return;
     await channel.send({ embeds: [embed] });
-    Log.info("Guild left", { 
+    Log.info("Guild left", {
         component: "GuildSystem",
         guildName: guild.name,
         guildId: guild.id
     });
     db.query("DELETE FROM filter_configs WHERE guild = ?", [guild.id]);
     db.query("DELETE FROM filter_words WHERE guild = ?", [guild.id]);
-    Log.info("Filter configs deleted", { 
+    Log.info("Filter configs deleted", {
         component: "FilterSystem",
         guildName: guild.name,
         guildId: guild.id
@@ -703,6 +1109,11 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (message.channelId !== chatdb[0].channel) return;
     const { author, channel, guild, content } = message;
     if (author.bot) return;
+    
+    // Check for global commands first
+    const isGlobalCommand = await globalCommandsManager.processMessage(message, manager);
+    if (isGlobalCommand) return; // If it's a global command, don't process as regular message
+    
     // Safety check removed per request (was previously blocking unsafe messages)
     await manager.processUser(author);
     await manager.processMessage(message);
@@ -769,7 +1180,7 @@ client.on("messageCreate", async (message): Promise<any> => {
             await tmpmsg.delete();
         }
         catch (e: any) {
-            Log.warn("Filter log send failed", { 
+            Log.warn("Filter log send failed", {
                 component: "FilterSystem",
                 guildName: message.guild.name
             });
@@ -805,7 +1216,7 @@ client.on("messageCreate", async (message): Promise<any> => {
 
 manager.on("limit-reached", async u => {
     const user = await client.users.fetch(u.uid);
-    Log.info("User approaching to rate limit", { 
+    Log.info("User approaching to rate limit", {
         component: "RateLimit",
         username: user?.username,
         status: "warning"
@@ -815,14 +1226,99 @@ manager.on("limit-reached", async u => {
 manager.on("limit-exceed", async u => {
     const user = await client.users.fetch(u.uid);
     manager.ratelimit(u.uid, user?.username);
-    Log.info("User rate limited", { 
+    Log.info("User rate limited", {
         component: "RateLimit",
         username: user?.username,
         duration: manager.options.ratelimit_time / 1000
     });
 });
 
+// Support ticket message relay system
+client.on("messageCreate", async (message): Promise<any> => {
+    if (message.author.bot) return;
+    
+    // Check if message is from a ticket channel
+    if (message.guild && message.guild.id === data.bot.home_guild) {
+        const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE channel_id = ? AND status = 'open'", [message.channelId]);
+        if (ticketData[0]) {
+            const ticket = ticketData[0];
+            const staffRank = await utils.getUserStaffRank(message.author.id);
+            
+            if (staffRank) {
+                // Staff message -> Send to user
+                const user = await client.users.fetch(ticket.user_id);
+                const rankTag = utils.getRankSuffix(staffRank);
+                const formattedMessage = `[${rankTag}] ${message.author.username}: ${message.content}`;
+                
+                try {
+                    await user.send(formattedMessage);
+                    
+                    // Track first response time if not already tracked
+                    if (!ticket.first_response_at) {
+                        const responseTime = Date.now();
+                        await db.query(
+                            "UPDATE support_tickets SET first_response_at = ?, first_response_by = ? WHERE id = ?",
+                            [responseTime, message.author.id, ticket.id]
+                        );
+                        
+                        // Calculate and display response time
+                        const minutesToRespond = Math.floor((responseTime - ticket.created_at) / 60000);
+                        const timeText = minutesToRespond < 60 
+                            ? `${minutesToRespond} minute(s)` 
+                            : `${Math.floor(minutesToRespond / 60)} hour(s) ${minutesToRespond % 60} minute(s)`;
+                        
+                        await message.channel.send(`✅ First response logged: ${timeText} response time by ${message.author.tag}.`);
+                    }
+                    
+                    // Save to transcript
+                    await db.query("INSERT INTO support_messages SET ?", [{
+                        ticket_id: ticket.id,
+                        user_id: message.author.id,
+                        username: message.author.tag,
+                        content: message.content,
+                        timestamp: Date.now(),
+                        is_staff: true,
+                        staff_rank: staffRank
+                    }]);
+                } catch (error) {
+                    await message.reply("⚠️ Failed to send message to user. They may have DMs disabled.");
+                }
+            }
+        }
+    }
+    
+    // Check if message is from a user with an open ticket in DMs
+    if (!message.guild) {
+        const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE user_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 1", [message.author.id]);
+        if (ticketData[0]) {
+            const ticket = ticketData[0];
+            const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel;
+            
+            if (ticketChannel) {
+                const formattedMessage = `\`${message.author.username}\`: ${message.content}`;
+                
+                try {
+                    await ticketChannel.send(formattedMessage);
+                    
+                    // Save to transcript
+                    await db.query("INSERT INTO support_messages SET ?", [{
+                        ticket_id: ticket.id,
+                        user_id: message.author.id,
+                        username: message.author.tag,
+                        content: message.content,
+                        timestamp: Date.now(),
+                        is_staff: false,
+                        staff_rank: null
+                    }]);
+                } catch (error) {
+                    console.error("Failed to relay user message to ticket channel:", error);
+                }
+            }
+        }
+    }
+});
+
 client.login(data.bot.token);
 
 export default client;
-export { manager };
+export { manager, globalCommandsManager };

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Support Ticket #{ticketId} - Transcript</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background: #36393f;
+            color: #dcddde;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: #2f3136;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .header {
+            background: #5865f2;
+            padding: 20px 30px;
+            border-bottom: 1px solid #202225;
+        }
+        .header h1 {
+            color: #fff;
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+        .header-info {
+            color: #b9bbbe;
+            font-size: 14px;
+        }
+        .ticket-info {
+            background: #202225;
+            padding: 20px 30px;
+            border-bottom: 1px solid #18191c;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        .info-item {
+            display: flex;
+            flex-direction: column;
+        }
+        .info-label {
+            color: #b9bbbe;
+            font-size: 12px;
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        .info-value {
+            color: #dcddde;
+            font-size: 14px;
+        }
+        .messages {
+            padding: 20px 30px;
+        }
+        .message {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 10px;
+            border-radius: 4px;
+            transition: background 0.1s;
+        }
+        .message:hover {
+            background: #32353b;
+        }
+        .avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #5865f2;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #fff;
+            flex-shrink: 0;
+        }
+        .message-content {
+            flex: 1;
+        }
+        .message-header {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            margin-bottom: 5px;
+        }
+        .username {
+            color: #fff;
+            font-weight: 500;
+            font-size: 16px;
+        }
+        .staff-badge {
+            background: #5865f2;
+            color: #fff;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .timestamp {
+            color: #72767d;
+            font-size: 12px;
+        }
+        .message-text {
+            color: #dcddde;
+            line-height: 1.375;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+        .system-message {
+            background: #2f3136;
+            border-left: 4px solid #faa61a;
+            padding: 10px 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .system-message-text {
+            color: #b9bbbe;
+            font-size: 14px;
+        }
+        .footer {
+            background: #202225;
+            padding: 20px 30px;
+            border-top: 1px solid #18191c;
+            text-align: center;
+            color: #72767d;
+            font-size: 12px;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .status-open {
+            background: #3ba55d;
+            color: #fff;
+        }
+        .status-closed {
+            background: #ed4245;
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎫 Support Ticket #{ticketId}</h1>
+            <div class="header-info">Support Transcript - BarnieBot Support System</div>
+        </div>
+        
+        <div class="ticket-info">
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">Ticket ID</div>
+                    <div class="info-value">#{ticketId}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">User</div>
+                    <div class="info-value">{username} ({userId})</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Status</div>
+                    <div class="info-value">
+                        <span class="status-badge {statusClass}">{status}</span>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Created At</div>
+                    <div class="info-value">{createdAt}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Closed At</div>
+                    <div class="info-value">{closedAt}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Origin</div>
+                    <div class="info-value">{origin}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="messages">
+            <div class="system-message">
+                <div class="system-message-text">📝 Initial Message: {initialMessage}</div>
+            </div>
+            
+            {messages}
+        </div>
+
+        <div class="footer">
+            <p>This transcript was generated by BarnieBot Support System</p>
+            <p>© 2025 BarnieCorps. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>
