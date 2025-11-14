@@ -74,8 +74,22 @@ export default class ChatManager extends EventEmitter {
         const languageName = this.resolveLanguageName(userLanguage);
         const hasTextContent = baseContent.trim().length > 0;
         let sanitizedDefaultContent = this.sanitizeContent(baseContent);
-        if (!sanitizedDefaultContent || !sanitizedDefaultContent.trim().length) sanitizedDefaultContent = "*Attachment*";
-        const files = message.attachments.size ? Array.from(message.attachments.values()) : undefined;
+        
+        // Handle attachments: append URLs to content for webhook compatibility
+        const hasAttachments = message.attachments.size > 0;
+        const attachmentUrls = hasAttachments ? message.attachments.map(att => att.url).join('\n') : '';
+        
+        if (hasAttachments) {
+            // Append attachment URLs to content (webhooks will auto-embed them)
+            sanitizedDefaultContent = sanitizedDefaultContent.trim() 
+                ? `${sanitizedDefaultContent}\n${attachmentUrls}` 
+                : attachmentUrls;
+        }
+        
+        // Fallback for truly empty messages
+        if (!sanitizedDefaultContent || !sanitizedDefaultContent.trim().length) {
+            sanitizedDefaultContent = "*Empty message*";
+        }
     // Resolve staff suffix for sender and prevent impersonation for non-staff
     const rank = await utils.getUserStaffRank(message.author.id);
     const suffix = utils.getRankSuffix(rank);
@@ -118,7 +132,6 @@ export default class ChatManager extends EventEmitter {
                     content: contentToSend,
                     allowedMentions: { parse: [] }
                 };
-                if (files) payload.files = files;
             try {
                 await webhook.send(payload);
             }
@@ -164,12 +177,28 @@ export default class ChatManager extends EventEmitter {
     public async announce(message: string, language: string, attachments?: Collection<string, Attachment>): Promise<void> {
         const guilds = await this.getActiveGuilds();
         if (guilds.length === 0) return;
-        const files = attachments?.size ? Array.from(attachments.values()) : undefined;
+        
+        // Handle attachments by appending URLs to content
+        const hasAttachments = attachments && attachments.size > 0;
+        const attachmentUrls = hasAttachments ? attachments.map(att => att.url).join('\n') : '';
+        
         const normalizedLanguage = (language ?? "en").toLowerCase();
         const sourceLanguageName = langs.where("1", language)?.name ?? language;
+        let sanitizedDefaultContent = message.trim();
+        
+        // Append attachment URLs to content
+        if (hasAttachments) {
+            sanitizedDefaultContent = sanitizedDefaultContent 
+                ? `${sanitizedDefaultContent}\n${attachmentUrls}` 
+                : attachmentUrls;
+        }
+        
+        // Fallback for truly empty messages
+        if (!sanitizedDefaultContent || !sanitizedDefaultContent.trim().length) {
+            sanitizedDefaultContent = "*Empty message*";
+        }
+        
         const hasTextContent = message.trim().length > 0;
-        let sanitizedDefaultContent = message;
-        if (!sanitizedDefaultContent || !sanitizedDefaultContent.trim().length) sanitizedDefaultContent = "*Attachment*";
         const getTranslatedContent = this.createTranslationResolver(
             message,
             language,
@@ -205,7 +234,6 @@ export default class ChatManager extends EventEmitter {
                 content: contentToSend,
                 allowedMentions: { parse: [] }
             };
-            if (files) payload.files = files;
             try {
                 await webhook.send(payload);
             }
