@@ -29,7 +29,7 @@ export default {
         .addSubcommand(s => s.setName("set")
             .setDescription("Set a user's staff rank")
             .addUserOption(o => o.setName("user").setDescription("User").setRequired(true))
-            .addStringOption(o => o.setName("rank").setDescription("Rank to assign (blank to remove)").setRequired(true)))
+            .addStringOption(o => o.setName("rank").setDescription("Rank to assign (blank to remove)")))
         .addSubcommand(s => s.setName("info")
             .setDescription("Show a user's staff rank")
             .addUserOption(o => o.setName("user").setDescription("User").setRequired(true)))
@@ -45,7 +45,7 @@ export default {
         switch (sub) {
             case "set": {
                 const user = interaction.options.getUser("user", true);
-                const desiredRankRaw = interaction.options.getString("rank", true).trim();
+                const desiredRankRaw = interaction.options.getString("rank")?.trim() || "";
                 const desiredRank = desiredRankRaw.length ? desiredRankRaw : null;
                 const targetRank = await utils.getUserStaffRank(user.id);
                 const perm = canManageRank(executorRank, targetRank, desiredRank);
