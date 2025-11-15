@@ -491,7 +491,7 @@ export default {
         await interaction.editReply("Searching, please wait...");
         for (const g of client.guilds.cache.values()) await g.members.fetch();
         const query = username.toLowerCase();
-        const allUsers = client.users.cache.filter(u => u.username.toLowerCase().includes(query));
+        const allUsers = client.users.cache.filter(u => u.username.toLowerCase().includes(query) && !u.bot);
         if (allUsers.size === 0) return interaction.editReply(`No users found matching '${username}'.`);
         const matches = Array.from(allUsers.values()).slice(0, 100);
         const userStatusCache: any[] = [];
