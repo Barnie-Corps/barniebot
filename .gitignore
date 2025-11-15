@@ -9,6 +9,8 @@ dist/
 logs/
 ai_workspace/
 protos/
+database_backups/
+temp/
 
 #Ignore vscode AI rules
 .github\instructions\codacy.instructions.md
