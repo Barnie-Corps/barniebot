@@ -1,7 +1,7 @@
 import Log from "../Log";
 import db from "./database";
 export default function queries(): void {
-    db.query("CREATE TABLE IF NOT EXISTS global_warnings (id INT NOT NULL PRIMARY KEY AUTO_INCREMENT, userid VARCHAR(255) NOT NULL, reason VARCHAR(255) NOT NULL DEFAULT 'no reason', authorid VARCHAR(255) NOT NULL, createdAt INT(255) NOT NULL)");
+    db.query("CREATE TABLE IF NOT EXISTS global_warnings (id INT NOT NULL PRIMARY KEY AUTO_INCREMENT, userid VARCHAR(255) NOT NULL, reason TEXT NOT NULL DEFAULT 'no reason', authorid VARCHAR(255) NOT NULL, createdAt BIGINT(255) NOT NULL, points INT NOT NULL DEFAULT 1, category VARCHAR(50) NOT NULL DEFAULT 'general', expires_at BIGINT(255) NOT NULL, active BOOLEAN NOT NULL DEFAULT TRUE, appealed BOOLEAN NOT NULL DEFAULT FALSE, appeal_status VARCHAR(20) DEFAULT NULL, appeal_reason TEXT DEFAULT NULL, appeal_reviewed_by VARCHAR(255) DEFAULT NULL, appeal_reviewed_at BIGINT(255) DEFAULT NULL)");
     db.query("CREATE TABLE IF NOT EXISTS staff (uid VARCHAR(255) NOT NULL PRIMARY KEY, rank VARCHAR(64) NOT NULL)");
     db.query("CREATE TABLE IF NOT EXISTS global_mutes (id VARCHAR(255) NOT NULL PRIMARY KEY, reason VARCHAR(255) NOT NULL DEFAULT 'no reason', authorid VARCHAR(255) NOT NULL, createdAt BIGINT(255) NOT NULL, until BIGINT(255) NOT NULL DEFAULT 0)");
     db.query("CREATE TABLE IF NOT EXISTS languages (userid VARCHAR(255) NOT NULL, lang VARCHAR(5) NOT NULL DEFAULT 'en')");

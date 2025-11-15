@@ -29,6 +29,7 @@ import utils from "./utils"; // Utils file for utility functions
 import load_slash from "./load_slash"; // Load slash commands
 import ChatManager from "./managers/ChatManager"; // Chat manager for global chat
 import GlobalCommandsManager from "./managers/GlobalCommandsManager"; // Global commands manager
+import WarningCleanup from "./WarningCleanup"; // Warning cleanup system
 import Workers from "./Workers"; // Workers for background tasks
 import path from "path";
 import { inspect } from "util"; // Used for eval command
@@ -126,6 +127,10 @@ client.on("clientReady", async (): Promise<any> => {
     Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", 5); // Create 5 workers for translation tasks
     fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
     Log.info("Workers loaded", { component: "WorkerSystem" });
+    
+    // Start warning cleanup scheduler
+    WarningCleanup.startWarningCleanupScheduler();
+    
     Log.info("Bot is ready", { component: "System" });
 });
 

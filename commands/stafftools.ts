@@ -115,7 +115,17 @@ export default {
                     { name: "Assignments", value: "ASSIGN" }
                 )
                 .setRequired(false))
-            .addIntegerOption(o => o.setName("days").setDescription("Filter by days ago (default: 7)").setRequired(false))),
+            .addIntegerOption(o => o.setName("days").setDescription("Filter by days ago (default: 7)").setRequired(false)))
+        .addSubcommand(s => s.setName("reviewappeals")
+            .setDescription("Review pending warning appeals")
+            .addIntegerOption(o => o.setName("warning_id").setDescription("Specific warning ID to review").setRequired(false))
+            .addStringOption(o => o.setName("decision")
+                .setDescription("Decision for the appeal")
+                .addChoices(
+                    { name: "Approve (Remove warning)", value: "approve" },
+                    { name: "Deny (Keep warning)", value: "deny" }
+                )
+                .setRequired(false))),
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         const sub = interaction.options.getSubcommand();
         const executor = interaction.user;
@@ -437,6 +447,140 @@ export default {
                 }
                 
                 await logStaffAction(executor.id, "VIEW_AUDIT_LOG", null, `Viewed audit log${staffUser ? ` for ${staffUser.tag}` : ""}`, { filter: actionFilter, days });
+                return interaction.editReply({ embeds: [embed] });
+            }
+            
+            case "reviewappeals": {
+                const perm = ensureModPlus(executorRank);
+                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+                
+                const warningId = interaction.options.getInteger("warning_id");
+                const decision = interaction.options.getString("decision");
+                
+                // If specific warning ID and decision provided, process it
+                if (warningId && decision) {
+                    const warningData: any = await db.query("SELECT * FROM global_warnings WHERE id = ? AND appealed = TRUE AND appeal_status = 'pending'", [warningId]);
+                    
+                    if (!warningData[0]) {
+                        return interaction.editReply(`Warning #${warningId} not found or not pending appeal.`);
+                    }
+                    
+                    const warning = warningData[0];
+                    const user = await client.users.fetch(warning.userid).catch(() => null);
+                    
+                    if (decision === "approve") {
+                        // Approve appeal - mark warning as inactive and approved
+                        await db.query("UPDATE global_warnings SET appeal_status = 'approved', active = FALSE, appeal_reviewed_by = ?, appeal_reviewed_at = ? WHERE id = ?", 
+                            [executor.id, Date.now(), warningId]);
+                        
+                        // Notify user
+                        if (user) {
+                            try {
+                                const { EmbedBuilder } = await import("discord.js");
+                                const approveEmbed = new EmbedBuilder()
+                                    .setColor("Green")
+                                    .setTitle("✅ Appeal Approved")
+                                    .setDescription(`Your appeal for warning #${warningId} has been **approved** by ${executor.username}.`)
+                                    .addFields(
+                                        { name: "Original Warning", value: warning.reason },
+                                        { name: "Status", value: "Warning removed and points deducted" }
+                                    )
+                                    .setTimestamp();
+                                
+                                await user.send({ embeds: [approveEmbed] });
+                            } catch {}
+                        }
+                        
+                        // Announce to staff
+                        const { manager } = await import("..");
+                        await manager.announce(`✅ **Appeal Approved**: Warning #${warningId} for ${user?.username || "Unknown"} has been removed by ${executor.username}.`, "en");
+                        
+                        await logStaffAction(executor.id, "APPROVE_APPEAL", warning.userid, `Approved appeal for warning #${warningId}`, { warningId, warning: warning.reason });
+                        
+                        return interaction.editReply(`✅ Appeal for warning #${warningId} has been **approved**. Warning removed.`);
+                    } else if (decision === "deny") {
+                        // Deny appeal - keep warning active
+                        await db.query("UPDATE global_warnings SET appeal_status = 'denied', appeal_reviewed_by = ?, appeal_reviewed_at = ? WHERE id = ?", 
+                            [executor.id, Date.now(), warningId]);
+                        
+                        // Notify user
+                        if (user) {
+                            try {
+                                const { EmbedBuilder } = await import("discord.js");
+                                const denyEmbed = new EmbedBuilder()
+                                    .setColor("Red")
+                                    .setTitle("❌ Appeal Denied")
+                                    .setDescription(`Your appeal for warning #${warningId} has been **denied** by ${executor.username}.`)
+                                    .addFields(
+                                        { name: "Original Warning", value: warning.reason },
+                                        { name: "Status", value: "Warning remains active. You cannot resubmit this appeal." }
+                                    )
+                                    .setTimestamp();
+                                
+                                await user.send({ embeds: [denyEmbed] });
+                            } catch {}
+                        }
+                        
+                        // Announce to staff
+                        const { manager } = await import("..");
+                        await manager.announce(`❌ **Appeal Denied**: Warning #${warningId} for ${user?.username || "Unknown"} remains active (reviewed by ${executor.username}).`, "en");
+                        
+                        await logStaffAction(executor.id, "DENY_APPEAL", warning.userid, `Denied appeal for warning #${warningId}`, { warningId, warning: warning.reason });
+                        
+                        return interaction.editReply(`❌ Appeal for warning #${warningId} has been **denied**. Warning remains active.`);
+                    }
+                }
+                
+                // If no specific decision, show pending appeals list
+                const pendingAppeals: any = await db.query("SELECT * FROM global_warnings WHERE appealed = TRUE AND appeal_status = 'pending' ORDER BY createdAt DESC LIMIT 10");
+                
+                if (pendingAppeals.length === 0) {
+                    return interaction.editReply("📋 No pending appeals to review.");
+                }
+                
+                const { EmbedBuilder } = await import("discord.js");
+                const embed = new EmbedBuilder()
+                    .setColor("Blue")
+                    .setTitle("📋 Pending Warning Appeals")
+                    .setDescription(`${pendingAppeals.length} appeal(s) pending review\n\nUse \`/stafftools reviewappeals <warning_id> <decision>\` to process an appeal.`)
+                    .setTimestamp();
+                
+                for (const appeal of pendingAppeals) {
+                    const user = await client.users.fetch(appeal.userid).catch(() => null);
+                    const author = await client.users.fetch(appeal.authorid).catch(() => null);
+                    
+                    const categoryEmojis: Record<string, string> = {
+                        spam: "📧",
+                        harassment: "😡",
+                        nsfw: "🔞",
+                        hate_speech: "🚫",
+                        impersonation: "🎭",
+                        advertising: "📢",
+                        doxxing: "🔍",
+                        raiding: "⚔️",
+                        disrespect: "😤",
+                        general: "⚠️"
+                    };
+                    
+                    const emoji = categoryEmojis[appeal.category] || "⚠️";
+                    const pointsText = appeal.points === 1 ? "1 pt" : `${appeal.points} pts`;
+                    
+                    let fieldValue = `**User:** ${user?.username || "Unknown"} (${appeal.userid})\n`;
+                    fieldValue += `**Original:** ${emoji} ${appeal.category} - ${pointsText}\n`;
+                    fieldValue += `**Reason:** ${appeal.reason}\n`;
+                    fieldValue += `**Issued by:** ${author?.username || "Unknown"}\n`;
+                    fieldValue += `**Issued:** <t:${Math.floor(appeal.createdAt / 1000)}:R>\n\n`;
+                    fieldValue += `**Appeal:**\n${appeal.appeal_reason}\n\n`;
+                    fieldValue += `To review: \`/stafftools reviewappeals ${appeal.id} <approve|deny>\``;
+                    
+                    embed.addFields({
+                        name: `Appeal #${appeal.id}`,
+                        value: fieldValue,
+                        inline: false
+                    });
+                }
+                
+                await logStaffAction(executor.id, "VIEW_APPEALS", null, "Viewed pending appeals");
                 return interaction.editReply({ embeds: [embed] });
             }
         }

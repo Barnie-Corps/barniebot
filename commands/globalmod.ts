@@ -19,6 +19,41 @@ async function logStaffAction(staffId: string, actionType: string, targetId: str
     }
 }
 
+// Calculate total active warning points and trigger auto-escalation
+async function checkUserPoints(userId: string, username: string, executorId: string, executorUsername: string): Promise<{ totalPoints: number; escalated: boolean; action?: string }> {
+    try {
+        // Get all active warnings (not expired, not appealed/approved)
+        const warnings: any = await db.query(
+            "SELECT * FROM global_warnings WHERE userid = ? AND active = TRUE AND (appeal_status IS NULL OR appeal_status != 'approved') AND expires_at > ?",
+            [userId, Date.now()]
+        );
+        
+        const totalPoints = warnings.reduce((sum: number, w: any) => sum + (w.points || 1), 0);
+        
+        // Auto-escalation thresholds
+        if (totalPoints >= 5) {
+            // Auto-ban at 5+ points
+            await db.query("INSERT INTO global_bans (id, active, times) VALUES (?, TRUE, 1) ON DUPLICATE KEY UPDATE active = TRUE, times = times + 1", [userId]);
+            await manager.announce(`⚠️ **AUTO-BAN**: User \`${username}\` has been automatically blacklisted due to reaching ${totalPoints} warning points.`, "en");
+            await logStaffAction(executorId, "AUTO_BAN", userId, `Auto-banned ${username} for ${totalPoints} points`, { totalPoints, threshold: 5 });
+            return { totalPoints, escalated: true, action: "ban" };
+        } else if (totalPoints >= 3) {
+            // Auto-mute at 3-4 points (24 hours)
+            const until = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+            await db.query("INSERT INTO global_mutes SET ? ON DUPLICATE KEY UPDATE reason = VALUES(reason), authorid = VALUES(authorid), createdAt = VALUES(createdAt), until = VALUES(until)", 
+                [{ id: userId, reason: "Automatic mute due to warning points", authorid: executorId, createdAt: Date.now(), until }]);
+            await manager.announce(`⚠️ **AUTO-MUTE**: User \`${username}\` has been automatically muted for 24h due to reaching ${totalPoints} warning points.`, "en");
+            await logStaffAction(executorId, "AUTO_MUTE", userId, `Auto-muted ${username} for 24h (${totalPoints} points)`, { totalPoints, threshold: 3, duration: "24h" });
+            return { totalPoints, escalated: true, action: "mute" };
+        }
+        
+        return { totalPoints, escalated: false };
+    } catch (error) {
+        console.error("Failed to check user points:", error);
+        return { totalPoints: 0, escalated: false };
+    }
+}
+
 function ensureCoMPlus(executorRank: string | null): { ok: boolean; error?: string } {
   const idx = utils.getStaffRankIndex(executorRank);
   const min = utils.getStaffRankIndex("Chief of Moderation");
@@ -54,7 +89,27 @@ export default {
       .addUserOption(o => o.setName("user").setDescription("User").setRequired(true)))
     .addSubcommand(s => s.setName("warn").setDescription("Warn a user globally")
       .addUserOption(o => o.setName("user").setDescription("User").setRequired(true))
-      .addStringOption(o => o.setName("reason").setDescription("Reason").setRequired(true)))
+      .addStringOption(o => o.setName("reason").setDescription("Reason").setRequired(true))
+      .addIntegerOption(o => o.setName("points").setDescription("Warning points (1-5, default: 1)").setMinValue(1).setMaxValue(5).setRequired(false))
+      .addStringOption(o => o.setName("category").setDescription("Warning category").setRequired(false)
+        .addChoices(
+          { name: "Spam", value: "spam" },
+          { name: "Harassment", value: "harassment" },
+          { name: "NSFW", value: "nsfw" },
+          { name: "Hate Speech", value: "hate_speech" },
+          { name: "Impersonation", value: "impersonation" },
+          { name: "Advertising", value: "advertising" },
+          { name: "Doxxing", value: "doxxing" },
+          { name: "Raiding", value: "raiding" },
+          { name: "Disrespect", value: "disrespect" },
+          { name: "General", value: "general" }
+        ))
+      .addIntegerOption(o => o.setName("expiry_days").setDescription("Days until expiry (30/60/90, default: 30)").setRequired(false)
+        .addChoices(
+          { name: "30 days", value: 30 },
+          { name: "60 days", value: 60 },
+          { name: "90 days", value: 90 }
+        )))
     .addSubcommand(s => s.setName("mute").setDescription("Mute a user in global chat")
       .addUserOption(o => o.setName("user").setDescription("User").setRequired(true))
       .addIntegerOption(o => o.setName("minutes").setDescription("Duration in minutes (0 for indefinite)").setRequired(true))
@@ -93,12 +148,108 @@ export default {
       case "warn": {
         const user = interaction.options.getUser("user", true);
         const reason = interaction.options.getString("reason", true);
+        const points = interaction.options.getInteger("points") ?? 1;
+        const category = interaction.options.getString("category") ?? "general";
+        const expiryDays = interaction.options.getInteger("expiry_days") ?? 30;
+        
         const perm = ensureAnyStaff(executorRank);
         if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
-        await db.query("INSERT INTO global_warnings SET ?", [{ userid: user.id, reason, authorid: executor.id, createdAt: Math.floor(Date.now() / 1000) }]);
-        await manager.announce(`User \`${user.username}\` has been globally warned by ${executor.username}. Reason: ${reason}`, "en");
-        await logStaffAction(executor.id, "WARN", user.id, `Warned ${user.tag}`, { reason });
-        return interaction.editReply(`Warned \`${user.username}\`: ${reason}`);
+        
+        // Calculate expiry timestamp
+        const expiresAt = Date.now() + (expiryDays * 24 * 60 * 60 * 1000);
+        
+        // Insert warning with enhanced data
+        await db.query("INSERT INTO global_warnings SET ?", [{
+            userid: user.id,
+            reason,
+            authorid: executor.id,
+            createdAt: Date.now(),
+            points,
+            category,
+            expires_at: expiresAt,
+            active: true,
+            appealed: false
+        }]);
+        
+        // Get warning ID for reference
+        const warningResult: any = await db.query("SELECT LAST_INSERT_ID() as id");
+        const warningId = warningResult[0].id;
+        
+        // Check for auto-escalation
+        const pointCheck = await checkUserPoints(user.id, user.username, executor.id, executor.username);
+        
+        // Category emoji mapping
+        const categoryEmojis: Record<string, string> = {
+            spam: "📧",
+            harassment: "😡",
+            nsfw: "🔞",
+            hate_speech: "🚫",
+            impersonation: "🎭",
+            advertising: "📢",
+            doxxing: "🔍",
+            raiding: "⚔️",
+            disrespect: "😤",
+            general: "⚠️"
+        };
+        
+        const emoji = categoryEmojis[category] || "⚠️";
+        const pointsText = points === 1 ? "1 point" : `${points} points`;
+        
+        let responseMessage = `${emoji} **Warning Issued**\n`;
+        responseMessage += `User: \`${user.username}\`\n`;
+        responseMessage += `Points: **${pointsText}** (Total: ${pointCheck.totalPoints})\n`;
+        responseMessage += `Category: ${category}\n`;
+        responseMessage += `Reason: ${reason}\n`;
+        responseMessage += `Expires: <t:${Math.floor(expiresAt / 1000)}:R>\n`;
+        responseMessage += `Warning ID: #${warningId}`;
+        
+        if (pointCheck.escalated) {
+            responseMessage += `\n\n🚨 **AUTO-ESCALATION TRIGGERED**: User ${pointCheck.action === "ban" ? "blacklisted" : "muted"} due to ${pointCheck.totalPoints} points!`;
+        }
+        
+        await manager.announce(responseMessage, "en");
+        
+        // DM the user
+        try {
+            const userEmbed = new EmbedBuilder()
+                .setColor("Orange")
+                .setTitle(`${emoji} You've Received a Warning`)
+                .setDescription(`You have been warned in the global chat by ${executor.username}.`)
+                .addFields(
+                    { name: "Reason", value: reason },
+                    { name: "Points", value: pointsText, inline: true },
+                    { name: "Category", value: category, inline: true },
+                    { name: "Total Points", value: pointCheck.totalPoints.toString(), inline: true },
+                    { name: "Expires", value: `<t:${Math.floor(expiresAt / 1000)}:R>` },
+                    { name: "Warning ID", value: `#${warningId}` }
+                )
+                .setFooter({ text: "You can appeal this warning using /appeal command" })
+                .setTimestamp();
+            
+            if (pointCheck.escalated) {
+                userEmbed.addFields({
+                    name: "⚠️ Automatic Action Taken",
+                    value: pointCheck.action === "ban" ? "You have been blacklisted from the global chat." : "You have been muted for 24 hours."
+                });
+            }
+            
+            await user.send({ embeds: [userEmbed] });
+        } catch (error) {
+            console.error("Failed to DM user:", error);
+        }
+        
+        await logStaffAction(executor.id, "WARN", user.id, `Warned ${user.tag} (${pointsText})`, { 
+            reason, 
+            points, 
+            category, 
+            expiryDays,
+            warningId,
+            totalPoints: pointCheck.totalPoints,
+            escalated: pointCheck.escalated,
+            escalationAction: pointCheck.action
+        });
+        
+        return interaction.editReply(responseMessage);
       }
       case "mute": {
         const user = interaction.options.getUser("user", true);
