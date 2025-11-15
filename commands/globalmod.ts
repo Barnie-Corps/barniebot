@@ -1,57 +1,57 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from "discord.js";
 import utils from "../utils";
 import db from "../mysql/database";
-import { manager } from "..";
+import client, { manager } from "..";
 
 // Helper to log staff actions
 async function logStaffAction(staffId: string, actionType: string, targetId: string | null, details: string, metadata?: any) {
-    try {
-        await db.query("INSERT INTO staff_audit_log SET ?", [{
-            staff_id: staffId,
-            action_type: actionType,
-            target_id: targetId,
-            details: details,
-            metadata: metadata ? JSON.stringify(metadata) : null,
-            created_at: Date.now()
-        }]);
-    } catch (error) {
-        console.error("Failed to log staff action:", error);
-    }
+  try {
+    await db.query("INSERT INTO staff_audit_log SET ?", [{
+      staff_id: staffId,
+      action_type: actionType,
+      target_id: targetId,
+      details: details,
+      metadata: metadata ? JSON.stringify(metadata) : null,
+      created_at: Date.now()
+    }]);
+  } catch (error) {
+    console.error("Failed to log staff action:", error);
+  }
 }
 
 // Calculate total active warning points and trigger auto-escalation
 async function checkUserPoints(userId: string, username: string, executorId: string, executorUsername: string): Promise<{ totalPoints: number; escalated: boolean; action?: string }> {
-    try {
-        // Get all active warnings (not expired, not appealed/approved)
-        const warnings: any = await db.query(
-            "SELECT * FROM global_warnings WHERE userid = ? AND active = TRUE AND (appeal_status IS NULL OR appeal_status != 'approved') AND expires_at > ?",
-            [userId, Date.now()]
-        );
-        
-        const totalPoints = warnings.reduce((sum: number, w: any) => sum + (w.points || 1), 0);
-        
-        // Auto-escalation thresholds
-        if (totalPoints >= 5) {
-            // Auto-ban at 5+ points
-            await db.query("INSERT INTO global_bans (id, active, times) VALUES (?, TRUE, 1) ON DUPLICATE KEY UPDATE active = TRUE, times = times + 1", [userId]);
-            await manager.announce(`⚠️ **AUTO-BAN**: User \`${username}\` has been automatically blacklisted due to reaching ${totalPoints} warning points.`, "en");
-            await logStaffAction(executorId, "AUTO_BAN", userId, `Auto-banned ${username} for ${totalPoints} points`, { totalPoints, threshold: 5 });
-            return { totalPoints, escalated: true, action: "ban" };
-        } else if (totalPoints >= 3) {
-            // Auto-mute at 3-4 points (24 hours)
-            const until = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-            await db.query("INSERT INTO global_mutes SET ? ON DUPLICATE KEY UPDATE reason = VALUES(reason), authorid = VALUES(authorid), createdAt = VALUES(createdAt), until = VALUES(until)", 
-                [{ id: userId, reason: "Automatic mute due to warning points", authorid: executorId, createdAt: Date.now(), until }]);
-            await manager.announce(`⚠️ **AUTO-MUTE**: User \`${username}\` has been automatically muted for 24h due to reaching ${totalPoints} warning points.`, "en");
-            await logStaffAction(executorId, "AUTO_MUTE", userId, `Auto-muted ${username} for 24h (${totalPoints} points)`, { totalPoints, threshold: 3, duration: "24h" });
-            return { totalPoints, escalated: true, action: "mute" };
-        }
-        
-        return { totalPoints, escalated: false };
-    } catch (error) {
-        console.error("Failed to check user points:", error);
-        return { totalPoints: 0, escalated: false };
+  try {
+    // Get all active warnings (not expired, not appealed/approved)
+    const warnings: any = await db.query(
+      "SELECT * FROM global_warnings WHERE userid = ? AND active = TRUE AND (appeal_status IS NULL OR appeal_status != 'approved') AND expires_at > ?",
+      [userId, Date.now()]
+    );
+
+    const totalPoints = warnings.reduce((sum: number, w: any) => sum + (w.points || 1), 0);
+
+    // Auto-escalation thresholds
+    if (totalPoints >= 5) {
+      // Auto-ban at 5+ points
+      await db.query("INSERT INTO global_bans (id, active, times) VALUES (?, TRUE, 1) ON DUPLICATE KEY UPDATE active = TRUE, times = times + 1", [userId]);
+      await manager.announce(`⚠️ **AUTO-BAN**: User \`${username}\` has been automatically blacklisted due to reaching ${totalPoints} warning points.`, "en");
+      await logStaffAction(executorId, "AUTO_BAN", userId, `Auto-banned ${username} for ${totalPoints} points`, { totalPoints, threshold: 5 });
+      return { totalPoints, escalated: true, action: "ban" };
+    } else if (totalPoints >= 3) {
+      // Auto-mute at 3-4 points (24 hours)
+      const until = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+      await db.query("INSERT INTO global_mutes SET ? ON DUPLICATE KEY UPDATE reason = VALUES(reason), authorid = VALUES(authorid), createdAt = VALUES(createdAt), until = VALUES(until)",
+        [{ id: userId, reason: "Automatic mute due to warning points", authorid: executorId, createdAt: Date.now(), until }]);
+      await manager.announce(`⚠️ **AUTO-MUTE**: User \`${username}\` has been automatically muted for 24h due to reaching ${totalPoints} warning points.`, "en");
+      await logStaffAction(executorId, "AUTO_MUTE", userId, `Auto-muted ${username} for 24h (${totalPoints} points)`, { totalPoints, threshold: 3, duration: "24h" });
+      return { totalPoints, escalated: true, action: "mute" };
     }
+
+    return { totalPoints, escalated: false };
+  } catch (error) {
+    console.error("Failed to check user points:", error);
+    return { totalPoints: 0, escalated: false };
+  }
 }
 
 function ensureCoMPlus(executorRank: string | null): { ok: boolean; error?: string } {
@@ -119,7 +119,9 @@ export default {
     .addSubcommand(s => s.setName("status").setDescription("Check global moderation status of a user")
       .addUserOption(o => o.setName("user").setDescription("User").setRequired(true)))
     .addSubcommand(s => s.setName("closeticket").setDescription("Close a support ticket")
-      .addIntegerOption(o => o.setName("ticket_id").setDescription("Ticket ID").setRequired(true))),
+      .addIntegerOption(o => o.setName("ticket_id").setDescription("Ticket ID").setRequired(true)))
+    .addSubcommand(s => s.setName("search_user").setDescription("Search a user's ID by username and display found user info with moderation status")
+      .addStringOption(o => o.setName("username").setDescription("Username to search for").setRequired(true))),
   execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
     const sub = interaction.options.getSubcommand();
     const executor = interaction.user;
@@ -151,50 +153,50 @@ export default {
         const points = interaction.options.getInteger("points") ?? 1;
         const category = interaction.options.getString("category") ?? "general";
         const expiryDays = interaction.options.getInteger("expiry_days") ?? 30;
-        
+
         const perm = ensureAnyStaff(executorRank);
         if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
-        
+
         // Calculate expiry timestamp
         const expiresAt = Date.now() + (expiryDays * 24 * 60 * 60 * 1000);
-        
+
         // Insert warning with enhanced data
         await db.query("INSERT INTO global_warnings SET ?", [{
-            userid: user.id,
-            reason,
-            authorid: executor.id,
-            createdAt: Date.now(),
-            points,
-            category,
-            expires_at: expiresAt,
-            active: true,
-            appealed: false
+          userid: user.id,
+          reason,
+          authorid: executor.id,
+          createdAt: Date.now(),
+          points,
+          category,
+          expires_at: expiresAt,
+          active: true,
+          appealed: false
         }]);
-        
+
         // Get warning ID for reference
         const warningResult: any = await db.query("SELECT LAST_INSERT_ID() as id");
         const warningId = warningResult[0].id;
-        
+
         // Check for auto-escalation
         const pointCheck = await checkUserPoints(user.id, user.username, executor.id, executor.username);
-        
+
         // Category emoji mapping
         const categoryEmojis: Record<string, string> = {
-            spam: "📧",
-            harassment: "😡",
-            nsfw: "🔞",
-            hate_speech: "🚫",
-            impersonation: "🎭",
-            advertising: "📢",
-            doxxing: "🔍",
-            raiding: "⚔️",
-            disrespect: "😤",
-            general: "⚠️"
+          spam: "📧",
+          harassment: "😡",
+          nsfw: "🔞",
+          hate_speech: "🚫",
+          impersonation: "🎭",
+          advertising: "📢",
+          doxxing: "🔍",
+          raiding: "⚔️",
+          disrespect: "😤",
+          general: "⚠️"
         };
-        
+
         const emoji = categoryEmojis[category] || "⚠️";
         const pointsText = points === 1 ? "1 point" : `${points} points`;
-        
+
         let responseMessage = `${emoji} **Warning Issued**\n`;
         responseMessage += `User: \`${user.username}\`\n`;
         responseMessage += `Points: **${pointsText}** (Total: ${pointCheck.totalPoints})\n`;
@@ -202,53 +204,53 @@ export default {
         responseMessage += `Reason: ${reason}\n`;
         responseMessage += `Expires: <t:${Math.floor(expiresAt / 1000)}:R>\n`;
         responseMessage += `Warning ID: #${warningId}`;
-        
+
         if (pointCheck.escalated) {
-            responseMessage += `\n\n🚨 **AUTO-ESCALATION TRIGGERED**: User ${pointCheck.action === "ban" ? "blacklisted" : "muted"} due to ${pointCheck.totalPoints} points!`;
+          responseMessage += `\n\n🚨 **AUTO-ESCALATION TRIGGERED**: User ${pointCheck.action === "ban" ? "blacklisted" : "muted"} due to ${pointCheck.totalPoints} points!`;
         }
-        
+
         await manager.announce(responseMessage, "en");
-        
+
         // DM the user
         try {
-            const userEmbed = new EmbedBuilder()
-                .setColor("Orange")
-                .setTitle(`${emoji} You've Received a Warning`)
-                .setDescription(`You have been warned in the global chat by ${executor.username}.`)
-                .addFields(
-                    { name: "Reason", value: reason },
-                    { name: "Points", value: pointsText, inline: true },
-                    { name: "Category", value: category, inline: true },
-                    { name: "Total Points", value: pointCheck.totalPoints.toString(), inline: true },
-                    { name: "Expires", value: `<t:${Math.floor(expiresAt / 1000)}:R>` },
-                    { name: "Warning ID", value: `#${warningId}` }
-                )
-                .setFooter({ text: "You can appeal this warning using /appeal command" })
-                .setTimestamp();
-            
-            if (pointCheck.escalated) {
-                userEmbed.addFields({
-                    name: "⚠️ Automatic Action Taken",
-                    value: pointCheck.action === "ban" ? "You have been blacklisted from the global chat." : "You have been muted for 24 hours."
-                });
-            }
-            
-            await user.send({ embeds: [userEmbed] });
+          const userEmbed = new EmbedBuilder()
+            .setColor("Orange")
+            .setTitle(`${emoji} You've Received a Warning`)
+            .setDescription(`You have been warned in the global chat by ${executor.username}.`)
+            .addFields(
+              { name: "Reason", value: reason },
+              { name: "Points", value: pointsText, inline: true },
+              { name: "Category", value: category, inline: true },
+              { name: "Total Points", value: pointCheck.totalPoints.toString(), inline: true },
+              { name: "Expires", value: `<t:${Math.floor(expiresAt / 1000)}:R>` },
+              { name: "Warning ID", value: `#${warningId}` }
+            )
+            .setFooter({ text: "You can appeal this warning using /appeal command" })
+            .setTimestamp();
+
+          if (pointCheck.escalated) {
+            userEmbed.addFields({
+              name: "⚠️ Automatic Action Taken",
+              value: pointCheck.action === "ban" ? "You have been blacklisted from the global chat." : "You have been muted for 24 hours."
+            });
+          }
+
+          await user.send({ embeds: [userEmbed] });
         } catch (error) {
-            console.error("Failed to DM user:", error);
+          console.error("Failed to DM user:", error);
         }
-        
-        await logStaffAction(executor.id, "WARN", user.id, `Warned ${user.tag} (${pointsText})`, { 
-            reason, 
-            points, 
-            category, 
-            expiryDays,
-            warningId,
-            totalPoints: pointCheck.totalPoints,
-            escalated: pointCheck.escalated,
-            escalationAction: pointCheck.action
+
+        await logStaffAction(executor.id, "WARN", user.id, `Warned ${user.tag} (${pointsText})`, {
+          reason,
+          points,
+          category,
+          expiryDays,
+          warningId,
+          totalPoints: pointCheck.totalPoints,
+          escalated: pointCheck.escalated,
+          escalationAction: pointCheck.action
         });
-        
+
         return interaction.editReply(responseMessage);
       }
       case "mute": {
@@ -283,27 +285,27 @@ export default {
         const ticketId = interaction.options.getInteger("ticket_id", true);
         const perm = ensureAnyStaff(executorRank);
         if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
-        
+
         try {
           const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [ticketId]);
           if (!ticketData[0]) {
             return interaction.editReply(`Ticket #${ticketId} not found.`);
           }
-          
+
           const ticket = ticketData[0];
           if (ticket.status === "closed") {
             return interaction.editReply(`Ticket #${ticketId} is already closed.`);
           }
-          
+
           const user = await interaction.client.users.fetch(ticket.user_id);
           const messages: any = await db.query("SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY timestamp ASC", [ticketId]);
-          
+
           // Calculate duration
           const durationMs = Date.now() - ticket.created_at;
           const hours = Math.floor(durationMs / 3600000);
           const minutes = Math.floor((durationMs % 3600000) / 60000);
           const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
-          
+
           // Generate transcripts (same logic as button handler)
           const fs = await import("fs");
           let textTranscript = `Support Ticket #${ticketId} - Transcript\n`;
@@ -315,7 +317,7 @@ export default {
           textTranscript += `Origin: ${ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message"}\n`;
           textTranscript += `Initial Message: ${ticket.initial_message}\n`;
           textTranscript += `\n${"=".repeat(50)}\n\n`;
-          
+
           for (const msg of messages) {
             const timestamp = new Date(msg.timestamp).toISOString();
             if (msg.is_staff) {
@@ -325,14 +327,14 @@ export default {
               textTranscript += `[${timestamp}] ${msg.username}: ${msg.content}\n`;
             }
           }
-          
+
           let htmlTemplate = fs.readFileSync("./transcript_placeholder.html", "utf-8");
           let messagesHtml = "";
-          
+
           for (const msg of messages) {
             const timestamp = new Date(msg.timestamp).toLocaleString();
             const initial = msg.username.charAt(0).toUpperCase();
-            
+
             if (msg.is_staff) {
               const rankTag = utils.getRankSuffix(msg.staff_rank);
               messagesHtml += `
@@ -361,7 +363,7 @@ export default {
               </div>`;
             }
           }
-          
+
           htmlTemplate = htmlTemplate
             .replace(/{ticketId}/g, ticketId.toString())
             .replace(/{username}/g, user.tag)
@@ -373,10 +375,10 @@ export default {
             .replace(/{origin}/g, ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message")
             .replace(/{initialMessage}/g, ticket.initial_message)
             .replace(/{messages}/g, messagesHtml);
-          
+
           fs.writeFileSync(`./transcript-${ticketId}.txt`, textTranscript);
           fs.writeFileSync(`./transcript-${ticketId}.html`, htmlTemplate);
-          
+
           // Send to transcripts channel
           const data = (await import("../data")).default;
           const transcriptsChannel = await interaction.client.channels.fetch(data.bot.transcripts_channel);
@@ -392,7 +394,7 @@ export default {
                 { name: "Duration", value: durationText, inline: true }
               )
               .setTimestamp();
-            
+
             await (transcriptsChannel as any).send({
               embeds: [transcriptEmbed],
               files: [
@@ -401,10 +403,10 @@ export default {
               ]
             });
           }
-          
+
           const closedAt = Date.now();
           await db.query("UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ?", [closedAt, executor.id, ticketId]);
-          
+
           // Update the original embed in ticket channel
           try {
             const ticketChannel = await interaction.client.channels.fetch(ticket.channel_id);
@@ -422,13 +424,13 @@ export default {
                     return field;
                   })
                 );
-              
+
               await originalMessage.edit({ embeds: [updatedEmbed], components: [] });
             }
           } catch (error) {
             console.error("Failed to update ticket embed:", error);
           }
-          
+
           // Notify user with embed
           try {
             const { EmbedBuilder } = await import("discord.js");
@@ -442,12 +444,12 @@ export default {
               )
               .setFooter({ text: "Thank you for contacting support!" })
               .setTimestamp();
-            
+
             await user.send({ embeds: [closedEmbed] });
           } catch (error) {
             console.error("Failed to notify user:", error);
           }
-          
+
           // Send message in ticket channel with delete option
           try {
             const ticketChannel = await interaction.client.channels.fetch(ticket.channel_id);
@@ -457,7 +459,7 @@ export default {
                 .setTitle("🔒 Ticket Closed")
                 .setDescription(`This ticket has been closed by ${executor.tag}.\n\nTranscripts have been saved and sent to <#${data.bot.transcripts_channel}>.\n\nYou can delete this channel using the button below.`)
                 .setTimestamp();
-              
+
               const deleteButton = new ActionRowBuilder<ButtonBuilder>()
                 .addComponents(
                   new ButtonBuilder()
@@ -466,23 +468,92 @@ export default {
                     .setStyle(ButtonStyle.Danger)
                     .setEmoji("🗑️")
                 );
-              
+
               await (ticketChannel as any).send({ embeds: [closedNoticeEmbed], components: [deleteButton] });
             }
           } catch (error) {
             console.error("Failed to send close notice:", error);
           }
-          
+
           fs.unlinkSync(`./transcript-${ticketId}.txt`);
           fs.unlinkSync(`./transcript-${ticketId}.html`);
-          
+
           return interaction.editReply(`Ticket #${ticketId} has been closed successfully.`);
         } catch (error) {
           console.error("Failed to close ticket:", error);
           return interaction.editReply("Failed to close ticket. Please try again.");
         }
       }
+      case "search_user": {
+        const username = interaction.options.getString("username", true);
+        const perm = ensureAnyStaff(executorRank);
+        if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+        await interaction.editReply("Searching, please wait...");
+        for (const g of client.guilds.cache.values()) await g.members.fetch();
+        const query = username.toLowerCase();
+        const allUsers = client.users.cache.filter(u => u.username.toLowerCase().includes(query));
+        if (allUsers.size === 0) return interaction.editReply(`No users found matching '${username}'.`);
+        const matches = Array.from(allUsers.values()).slice(0, 100);
+        const userStatusCache: any[] = [];
+        for (const u of matches) {
+          const rank = await utils.getUserStaffRank(u.id);
+          const blacklisted = await utils.isUserBlacklisted(u.id);
+          const muted = await utils.isUserMuted(u.id);
+          const warnings: any = await db.query("SELECT points, expires_at, active, appeal_status FROM global_warnings WHERE userid = ?", [u.id]);
+          const now = Date.now();
+          const totalPoints = warnings.filter((w: any) => w.active && w.expires_at > now && (!w.appeal_status || w.appeal_status !== 'approved')).reduce((s: number, w: any) => s + (w.points || 1), 0);
+          userStatusCache.push({ user: u, rank: rank || "None", blacklisted, muted, points: totalPoints });
+        }
+        if (userStatusCache.length === 1) {
+          const entry = userStatusCache[0];
+          const embed = new EmbedBuilder()
+            .setColor("Purple")
+            .setTitle(`User Search Result`)
+            .setDescription(`Exact result for '${username}'`)
+            .addFields(
+              { name: "Username", value: `${entry.user.username} (${entry.user.id})`, inline: true },
+              { name: "Rank", value: entry.rank, inline: true },
+              { name: "Warnings Points", value: entry.points.toString(), inline: true },
+              { name: "Blacklisted", value: entry.blacklisted ? "Yes" : "No", inline: true },
+              { name: "Muted", value: entry.muted ? "Yes" : "No", inline: true }
+            )
+            .setTimestamp();
+          return interaction.editReply({ content: "", embeds: [embed] });
+        }
+        let page = 0;
+        const pageSize = 10;
+        const totalPages = Math.ceil(userStatusCache.length / pageSize);
+        const buildEmbed = () => {
+          const slice = userStatusCache.slice(page * pageSize, page * pageSize + pageSize);
+          const embed = new EmbedBuilder()
+            .setColor("Purple")
+            .setTitle(`User Search Results`)
+            .setDescription(`Query: '${username}' | ${userStatusCache.length} result(s) | Page ${page + 1}/${totalPages}`)
+            .setTimestamp();
+          for (const entry of slice) {
+            embed.addFields({
+              name: `${entry.user.username} (${entry.user.id})`,
+              value: `Rank: ${entry.rank} | Points: ${entry.points} | Blacklisted: ${entry.blacklisted ? 'Yes' : 'No'} | Muted: ${entry.muted ? 'Yes' : 'No'}`,
+              inline: false
+            });
+          }
+          return embed;
+        };
+        const makeRow = () => new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId("search_prev").setEmoji("◀️").setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
+          new ButtonBuilder().setCustomId("search_stop").setEmoji("⏹️").setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId("search_next").setEmoji("▶️").setStyle(ButtonStyle.Secondary).setDisabled(page + 1 >= totalPages)
+        );
+        const msg = await interaction.editReply({ content: "", embeds: [buildEmbed()], components: [makeRow()] });
+        const collector = (msg as any).createMessageComponentCollector({ time: 60000, filter: (i: any) => i.user.id === executor.id });
+        collector.on("collect", async (i: any) => {
+          if (i.customId === "search_prev" && page > 0) page--; else if (i.customId === "search_next" && page + 1 < totalPages) page++; else if (i.customId === "search_stop") { collector.stop("stop"); return i.update({ embeds: [buildEmbed()], components: [] }); }
+          await i.update({ embeds: [buildEmbed()], components: [makeRow()] });
+        });
+        collector.on("end", async (_: any, r: any) => { if (r !== "stop") try { await (msg as any).edit({ embeds: [buildEmbed()], components: [] }); } catch {} });
+        return;
+      }
     }
   },
-  ephemeral: true
+  ephemeral: false
 };

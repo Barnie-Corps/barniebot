@@ -167,5 +167,5 @@ export default {
             }
         }
     },
-    ephemeral: true
+    ephemeral: false
 };
