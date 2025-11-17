@@ -19,6 +19,13 @@ function ensureModPlus(executorRank: string | null): { ok: boolean; error?: stri
     return { ok: true };
 }
 
+function ensureAdminPlus(executorRank: string | null): { ok: boolean; error?: string } {
+    const idx = utils.getStaffRankIndex(executorRank);
+    const min = utils.getStaffRankIndex("Probationary Administrator");
+    if (idx < 0 || idx < min) return { ok: false, error: "Probationary Administrator rank or higher required." };
+    return { ok: true };
+}
+
 // Helper to log staff actions
 async function logStaffAction(staffId: string, actionType: string, targetId: string | null, details: string, metadata?: any) {
     try {
@@ -125,7 +132,11 @@ export default {
                     { name: "Approve (Remove warning)", value: "approve" },
                     { name: "Deny (Keep warning)", value: "deny" }
                 )
-                .setRequired(false))),
+                .setRequired(false)))
+        .addSubcommand(s => s.setName("notify")
+            .setDescription("Send a global notification to all users (Admin+)")
+            .addStringOption(o => o.setName("content").setDescription("Notification message").setRequired(true))
+            .addStringOption(o => o.setName("language").setDescription("Source language (default: en)").setRequired(false))),
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         const sub = interaction.options.getSubcommand();
         const executor = interaction.user;
@@ -582,6 +593,28 @@ export default {
                 
                 await logStaffAction(executor.id, "VIEW_APPEALS", null, "Viewed pending appeals");
                 return interaction.editReply({ embeds: [embed] });
+            }
+
+            case "notify": {
+                const perm = ensureAdminPlus(executorRank);
+                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+
+                const content = interaction.options.getString("content", true);
+                const language = interaction.options.getString("language") || "en";
+
+                if (content.length > 2000) {
+                    return interaction.editReply("Notification content must be 2000 characters or less.");
+                }
+
+                await db.query("INSERT INTO global_notifications SET ?", [{
+                    content,
+                    language,
+                    created_by: executor.id,
+                    created_at: Date.now()
+                }]);
+
+                await logStaffAction(executor.id, "CREATE_NOTIFICATION", null, `Created global notification: "${content.substring(0, 50)}..."`, { language });
+                return interaction.editReply(`📢 Global notification created successfully!\n\nUsers will be notified when they next use a command.`);
             }
         }
     },

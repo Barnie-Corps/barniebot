@@ -997,6 +997,24 @@ const utils = {
       sum += n;
     }
     return sum;
+  },
+  getUnreadNotifications: async (userId: string): Promise<any[]> => {
+    const notifications: any = await db.query(`
+      SELECT gn.* FROM global_notifications gn
+      WHERE NOT EXISTS (
+        SELECT 1 FROM user_notification_reads unr
+        WHERE unr.notification_id = gn.id AND unr.user_id = ?
+      )
+      ORDER BY gn.created_at DESC
+    `, [userId]);
+    return Array.isArray(notifications) ? notifications : [];
+  },
+  markNotificationRead: async (userId: string, notificationId: number): Promise<void> => {
+    await db.query("INSERT IGNORE INTO user_notification_reads SET ?", [{
+      user_id: userId,
+      notification_id: notificationId,
+      read_at: Date.now()
+    }]);
   }
 };
 export default utils;

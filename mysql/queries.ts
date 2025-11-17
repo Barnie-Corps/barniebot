@@ -25,5 +25,7 @@ export default function queries(): void {
     db.query("CREATE TABLE IF NOT EXISTS staff_status (user_id VARCHAR(255) PRIMARY KEY, status VARCHAR(20) NOT NULL DEFAULT 'offline', status_message VARCHAR(255) DEFAULT NULL, updated_at BIGINT(255) NOT NULL)");
     db.query("CREATE TABLE IF NOT EXISTS staff_notes (id INT PRIMARY KEY AUTO_INCREMENT, user_id VARCHAR(255) NOT NULL, staff_id VARCHAR(255) NOT NULL, note TEXT NOT NULL, created_at BIGINT(255) NOT NULL)");
     db.query("CREATE TABLE IF NOT EXISTS staff_audit_log (id INT PRIMARY KEY AUTO_INCREMENT, staff_id VARCHAR(255) NOT NULL, action_type VARCHAR(50) NOT NULL, target_id VARCHAR(255) DEFAULT NULL, details TEXT, metadata JSON DEFAULT NULL, created_at BIGINT(255) NOT NULL)");
+    db.query("CREATE TABLE IF NOT EXISTS global_notifications (id INT PRIMARY KEY AUTO_INCREMENT, content TEXT NOT NULL, language VARCHAR(5) NOT NULL DEFAULT 'en', created_by VARCHAR(255) NOT NULL, created_at BIGINT(255) NOT NULL)");
+    db.query("CREATE TABLE IF NOT EXISTS user_notification_reads (user_id VARCHAR(255) NOT NULL, notification_id INT NOT NULL, read_at BIGINT(255) NOT NULL, PRIMARY KEY (user_id, notification_id))");
     Log.info("Database tables ensured", { component: "Database" });
 };

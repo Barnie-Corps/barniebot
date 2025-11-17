@@ -71,6 +71,113 @@ const client = new Client({
     });
 })();
 
+async function showNotifications(interaction: any, notifications: any[], userLang: string) {
+    let currentPage = 0;
+    
+    const showPage = async (page: number, isUpdate: boolean = false) => {
+        const notif = notifications[page];
+        if (!notif) return;
+        
+        let displayContent = notif.content;
+        if (userLang !== "en" && notif.language !== userLang) {
+            try {
+                displayContent = await utils.translate(notif.content, notif.language, userLang);
+            } catch (e) {
+                displayContent = notif.content;
+            }
+        }
+        
+        const embed = new EmbedBuilder()
+            .setColor("Purple")
+            .setTitle("📢 New Notification")
+            .setDescription(displayContent)
+            .setFooter({ 
+                text: `Notification ${page + 1} of ${notifications.length} • Tap "Mark as Read" to dismiss`,
+                iconURL: interaction.client.user?.displayAvatarURL()
+            })
+            .setTimestamp(notif.created_at);
+        
+        const row = new ActionRowBuilder<ButtonBuilder>();
+        
+        if (page > 0) {
+            row.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`notif_prev_${page}`)
+                    .setLabel("◀ Previous")
+                    .setStyle(ButtonStyle.Secondary)
+            );
+        }
+        
+        row.addComponents(
+            new ButtonBuilder()
+                .setCustomId(`notif_read_${notif.id}`)
+                .setLabel("Mark as Read")
+                .setStyle(ButtonStyle.Success)
+        );
+        
+        if (page < notifications.length - 1) {
+            row.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`notif_next_${page}`)
+                    .setLabel("Next ▶")
+                    .setStyle(ButtonStyle.Secondary)
+            );
+        }
+        
+        if (isUpdate) {
+            await interaction.update({ embeds: [embed], components: [row], ephemeral: true });
+        } else {
+            await interaction.followUp({ embeds: [embed], components: [row], ephemeral: true });
+        }
+    };
+    
+    await showPage(currentPage);
+    
+    const collector = interaction.channel?.createMessageComponentCollector({
+        filter: (i: any) => i.user.id === interaction.user.id && i.customId.startsWith("notif_"),
+        time: 300000 // 5 minutes
+    });
+    
+    if (collector) {
+        collector.on("collect", async (i: any) => {
+            const [action, type, value] = i.customId.split("_");
+            
+            if (type === "prev") {
+                currentPage = Math.max(0, currentPage - 1);
+                await showPage(currentPage, true);
+            } else if (type === "next") {
+                currentPage = Math.min(notifications.length - 1, currentPage + 1);
+                await showPage(currentPage, true);
+            } else if (type === "read") {
+                const notifId = parseInt(value);
+                await utils.markNotificationRead(interaction.user.id, notifId);
+                
+                notifications = notifications.filter(n => n.id !== notifId);
+                
+                if (notifications.length === 0) {
+                    await i.update({ 
+                        embeds: [new EmbedBuilder()
+                            .setColor(0x2ecc71)
+                            .setDescription("✅ All notifications have been marked as read!")],
+                        components: []
+                    });
+                    collector.stop();
+                } else {
+                    if (currentPage >= notifications.length) {
+                        currentPage = notifications.length - 1;
+                    }
+                    await i.deferUpdate();
+                    await showPage(currentPage, true);
+                }
+            }
+        });
+        
+        collector.on("end", () => {
+            interaction.editReply({ components: [] });
+        });
+    }
+}
+
 client.on("clientReady", async (): Promise<any> => {
     Log.success(`Bot logged in successfully`, {
         component: "Bot",
@@ -453,6 +560,13 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 await db.query("DELETE FROM vip_users WHERE id = ?", [interaction.user.id]);
                 await interaction.followUp({ content: texts.expired_vip, ephemeral: true });
             } // If the user is VIP and the VIP time has expired, remove the VIP from the user
+            
+            // Check for unread notifications
+            const unreadNotifications = await utils.getUnreadNotifications(interaction.user.id);
+            if (unreadNotifications.length > 0) {
+                await showNotifications(interaction, unreadNotifications, Lang);
+            }
+            
             if (foundU[0]) {
                 await db.query("UPDATE discord_users SET command_executions = command_executions + 1, pfp = ?, username = ? WHERE id = ?", [interaction.user.displayAvatarURL({ size: 1024 }), interaction.user.username, interaction.user.id]);
             } // If the user exists in the database, update the user's data
