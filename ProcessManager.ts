@@ -247,7 +247,7 @@ if (require.main === module) {
     const manager = new ProcessManager({
         script: path.join(__dirname, "index.ts"),
         autoRestart: true,
-        maxRestarts: 15,
+        maxRestarts: 30,
         restartDelay: 3000,
         logFile: path.join(__dirname, "logs", "process-manager.log")
     });
