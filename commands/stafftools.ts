@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from "discord.js";
+import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, Message, TextChannel } from "discord.js";
 import utils from "../utils";
 import db from "../mysql/database";
 import data from "../data";
@@ -135,7 +135,6 @@ export default {
                 .setRequired(false)))
         .addSubcommand(s => s.setName("notify")
             .setDescription("Send a global notification to all users (Admin+)")
-            .addStringOption(o => o.setName("content").setDescription("Notification message").setRequired(true))
             .addStringOption(o => o.setName("language").setDescription("Source language (default: en)").setRequired(false))),
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         const sub = interaction.options.getSubcommand();
@@ -599,22 +598,68 @@ export default {
                 const perm = ensureAdminPlus(executorRank);
                 if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
 
-                const content = interaction.options.getString("content", true);
                 const language = interaction.options.getString("language") || "en";
 
-                if (content.length > 2000) {
-                    return interaction.editReply("Notification content must be 2000 characters or less.");
+                if (!interaction.channel || !("createMessageCollector" in interaction.channel)) {
+                    return interaction.editReply("❌ This command must be used in a text channel.");
                 }
 
-                await db.query("INSERT INTO global_notifications SET ?", [{
-                    content,
-                    language,
-                    created_by: executor.id,
-                    created_at: Date.now()
-                }]);
+                const promptMsg = await interaction.editReply("📢 **Create Global Notification**\n\nPlease send the notification content in your next message.\n\n*You have 2 minutes to respond. The message will be deleted after collection.*");
 
-                await logStaffAction(executor.id, "CREATE_NOTIFICATION", null, `Created global notification: "${content.substring(0, 50)}..."`, { language });
-                return interaction.editReply(`📢 Global notification created successfully!\n\nUsers will be notified when they next use a command.`);
+                const filter = (m: Message) => m.author.id === executor.id;
+                const textChannel = interaction.channel as TextChannel;
+                const collector = textChannel.createMessageCollector({ 
+                    filter, 
+                    max: 1, 
+                    time: 120000
+                });
+
+                collector.on("collect", async (msg: Message) => {
+                    const content = msg.content;
+
+                    try {
+                        await msg.delete();
+                    } catch {}
+
+                    if (!content || content.trim().length === 0) {
+                        return interaction.followUp({ 
+                            content: "❌ Notification content cannot be empty.", 
+                            ephemeral: true 
+                        });
+                    }
+
+                    if (content.length > 2000) {
+                        return interaction.followUp({ 
+                            content: "❌ Notification content must be 2000 characters or less.", 
+                            ephemeral: true 
+                        });
+                    }
+
+                    await db.query("INSERT INTO global_notifications SET ?", [{
+                        content,
+                        language,
+                        created_by: executor.id,
+                        created_at: Date.now()
+                    }]);
+
+                    await logStaffAction(executor.id, "CREATE_NOTIFICATION", null, `Created global notification: "${content.substring(0, 50)}..."`, { language, length: content.length });
+                    
+                    await interaction.followUp({ 
+                        content: `📢 **Global notification created successfully!**\n\nUsers will be notified when they next use a command.\n\n**Preview:**\n${content.substring(0, 200)}${content.length > 200 ? "..." : ""}`, 
+                        ephemeral: true 
+                    });
+                });
+
+                collector.on("end", (collected: any) => {
+                    if (collected.size === 0) {
+                        interaction.followUp({ 
+                            content: "⏱️ Notification creation timed out. Please try again.", 
+                            ephemeral: true 
+                        }).catch(() => {});
+                    }
+                });
+                
+                break;
             }
         }
     },

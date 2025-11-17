@@ -71,113 +71,6 @@ const client = new Client({
     });
 })();
 
-async function showNotifications(interaction: any, notifications: any[], userLang: string) {
-    let currentPage = 0;
-    
-    const showPage = async (page: number, isUpdate: boolean = false) => {
-        const notif = notifications[page];
-        if (!notif) return;
-        
-        let displayContent = notif.content;
-        if (userLang !== "en" && notif.language !== userLang) {
-            try {
-                displayContent = await utils.translate(notif.content, notif.language, userLang);
-            } catch (e) {
-                displayContent = notif.content;
-            }
-        }
-        
-        const embed = new EmbedBuilder()
-            .setColor("Purple")
-            .setTitle("📢 New Notification")
-            .setDescription(displayContent)
-            .setFooter({ 
-                text: `Notification ${page + 1} of ${notifications.length} • Tap "Mark as Read" to dismiss`,
-                iconURL: interaction.client.user?.displayAvatarURL()
-            })
-            .setTimestamp(notif.created_at);
-        
-        const row = new ActionRowBuilder<ButtonBuilder>();
-        
-        if (page > 0) {
-            row.addComponents(
-                new ButtonBuilder()
-                    .setCustomId(`notif_prev_${page}`)
-                    .setLabel("◀ Previous")
-                    .setStyle(ButtonStyle.Secondary)
-            );
-        }
-        
-        row.addComponents(
-            new ButtonBuilder()
-                .setCustomId(`notif_read_${notif.id}`)
-                .setLabel("Mark as Read")
-                .setStyle(ButtonStyle.Success)
-        );
-        
-        if (page < notifications.length - 1) {
-            row.addComponents(
-                new ButtonBuilder()
-                    .setCustomId(`notif_next_${page}`)
-                    .setLabel("Next ▶")
-                    .setStyle(ButtonStyle.Secondary)
-            );
-        }
-        
-        if (isUpdate) {
-            await interaction.update({ embeds: [embed], components: [row], ephemeral: true });
-        } else {
-            await interaction.followUp({ embeds: [embed], components: [row], ephemeral: true });
-        }
-    };
-    
-    await showPage(currentPage);
-    
-    const collector = interaction.channel?.createMessageComponentCollector({
-        filter: (i: any) => i.user.id === interaction.user.id && i.customId.startsWith("notif_"),
-        time: 300000 // 5 minutes
-    });
-    
-    if (collector) {
-        collector.on("collect", async (i: any) => {
-            const [action, type, value] = i.customId.split("_");
-            
-            if (type === "prev") {
-                currentPage = Math.max(0, currentPage - 1);
-                await showPage(currentPage, true);
-            } else if (type === "next") {
-                currentPage = Math.min(notifications.length - 1, currentPage + 1);
-                await showPage(currentPage, true);
-            } else if (type === "read") {
-                const notifId = parseInt(value);
-                await utils.markNotificationRead(interaction.user.id, notifId);
-                
-                notifications = notifications.filter(n => n.id !== notifId);
-                
-                if (notifications.length === 0) {
-                    await i.update({ 
-                        embeds: [new EmbedBuilder()
-                            .setColor(0x2ecc71)
-                            .setDescription("✅ All notifications have been marked as read!")],
-                        components: []
-                    });
-                    collector.stop();
-                } else {
-                    if (currentPage >= notifications.length) {
-                        currentPage = notifications.length - 1;
-                    }
-                    await i.deferUpdate();
-                    await showPage(currentPage, true);
-                }
-            }
-        });
-        
-        collector.on("end", () => {
-            interaction.editReply({ components: [] });
-        });
-    }
-}
-
 client.on("clientReady", async (): Promise<any> => {
     Log.success(`Bot logged in successfully`, {
         component: "Bot",
@@ -234,14 +127,25 @@ client.on("clientReady", async (): Promise<any> => {
     Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", 5); // Create 5 workers for translation tasks
     fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
     Log.info("Workers loaded", { component: "WorkerSystem" });
-    
+
     // Start warning cleanup scheduler
     WarningCleanup.startWarningCleanupScheduler();
-    
+
     Log.info("Bot is ready", { component: "System" });
 });
 
 const activeGuilds: Collection<string, number> = new Collection(); // Active guilds collection for active guilds tracking (messageCreate event)
+// Filter setup session store
+interface FilterSetupState {
+    step: number;
+    values: { enabled: boolean; logs_enabled: boolean; logs_channel: string; lang: string };
+    messageId: string;
+    guildId: string;
+    userId: string;
+    createdAt: number;
+    awaitingChannelMention?: boolean;
+}
+const filterSetupSessions = new Map<string, FilterSetupState>();
 
 client.on("messageCreate", async (message): Promise<any> => {
     // Check if the bot is in test mode and if the user is not an owner
@@ -296,7 +200,7 @@ client.on("messageCreate", async (message): Promise<any> => {
                 Log.warn("Failed to set reboot flag", { component: "Reboot", error: (e as any)?.message });
             }
             await message.reply("✅ Reboot initiated. Process Manager will restart the bot automatically.");
-            
+
             // Give time for the message to send
             setTimeout(() => {
                 client.destroy();
@@ -309,7 +213,7 @@ client.on("messageCreate", async (message): Promise<any> => {
             const hours = Math.floor(uptime / 3600);
             const minutes = Math.floor((uptime % 3600) / 60);
             const seconds = Math.floor(uptime % 60);
-            
+
             await message.reply(`📊 **Bot Status**\n` +
                 `Uptime: ${hours}h ${minutes}m ${seconds}s\n` +
                 `Guilds: ${client.guilds.cache.size}\n` +
@@ -538,7 +442,8 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
         error: "Whoops... An unexpected error occurred. I've already reported it, but if it keeps happening you can let us know at:",
         loading: "Translating texts (this may take a moment)...",
         not_vip: "Hmm... You can't run this command unless you're a VIP.",
-        expired_vip: "Wow! It seems your VIP subscription has ended. I've revoked your VIP access."
+        expired_vip: "Wow! It seems your VIP subscription has ended. I've revoked your VIP access.",
+        unread_notifications: "📬 **Hey!** You've got unread notifications waiting for you! Check them out with `/notifications`"
     } // Texts for the interactionCreate event
     if (Lang !== "en") {
         texts = await utils.autoTranslate(texts, "en", Lang); // Translate the texts to the user's language if it is not English
@@ -560,13 +465,12 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 await db.query("DELETE FROM vip_users WHERE id = ?", [interaction.user.id]);
                 await interaction.followUp({ content: texts.expired_vip, ephemeral: true });
             } // If the user is VIP and the VIP time has expired, remove the VIP from the user
-            
-            // Check for unread notifications
+
             const unreadNotifications = await utils.getUnreadNotifications(interaction.user.id);
-            if (unreadNotifications.length > 0) {
-                await showNotifications(interaction, unreadNotifications, Lang);
+            if (unreadNotifications.length > 0 && interaction.commandName !== "notifications") {
+                await interaction.followUp({ content: texts.unread_notifications, ephemeral: true });
             }
-            
+
             if (foundU[0]) {
                 await db.query("UPDATE discord_users SET command_executions = command_executions + 1, pfp = ?, username = ? WHERE id = ?", [interaction.user.displayAvatarURL({ size: 1024 }), interaction.user.username, interaction.user.id]);
             } // If the user exists in the database, update the user's data
@@ -623,130 +527,170 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             }
             case "continue_setup": {
                 const [uid] = args;
-                const foundConfig: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [interaction.guildId]);
-                let stexts = {
-                    errors: {
-                        not_author: "You're not the person who ran the command originally.",
-                        invalid_rsp: "Invalid response."
-                    },
-                    success: {
-                        done: "We've finished the basic setup for your server! Below is the configuration we applied."
-                    },
-                    common: {
-                        ask_enable: "Do you want the filter to enable automatically when the setup ends? Reply with 0 if you don't and 1 if you do.",
-                        loaded_data: "Configured data",
-                        yes: "Yes",
-                        no: "No",
-                        enabled: "Enabled",
-                        init_msg: "Great. I'll start with a few questions.",
-                        logs_enabled: "Logging enabled",
-                        not_set: "Not configured",
-                        set: "Configured",
-                        langtxt: "Language",
-                        log_channel: "Log channel",
-                        ask_enabled_logs: "Do you want to enable logging?",
-                        ask_logs_channel: "You enabled logging. Which channel should I use?",
-                        ask_lang: "Which language should the filter use? Provide the language code. For example:"
-                    }
-                };
-                const values = {
-                    enabled: false,
-                    logs_enabled: false,
-                    logs_channel: "0",
-                    lang: "en"
-                }
-                if (Lang !== "en") {
-                    stexts = await utils.autoTranslate(stexts, "en", Lang);
-                }
-                if (interaction.isRepliable() && uid !== interaction.user.id) return await interaction.reply({ content: stexts.errors.not_author, ephemeral: true });
-                const imessage = interaction.message;
-                const embed = new EmbedBuilder()
-                    .setTitle(stexts.common.loaded_data)
-                    .setDescription(EmbedDescription())
-                    .setColor("Purple")
-                if (interaction.isRepliable()) await interaction.deferUpdate();
-                await imessage.edit({ components: [], embeds: [embed], content: "" });
-                // Function to ask for input
-                async function GetResponse(msg: string): Promise<Message<boolean>> {
-                    const temp_msg = await (interaction.channel as TextChannel).send(msg);
-                    const collected = await (interaction.channel as TextChannel).awaitMessages({ filter: m => m.author.id === uid, max: 1 });
-                    await temp_msg?.delete();
-                    await collected?.first()?.delete();
-                    return collected?.first() as Message<boolean>;
-                }
-                // Function to create embed description
-                function EmbedDescription(): string {
-                    const enabledValue = values["enabled"] ? stexts.common.yes : stexts.common.no;
-                    const enabledLogs = values["logs_enabled"] ? stexts.common.yes : stexts.common.no;
-                    const lChannelSet = values["logs_channel"] === "0" ? stexts.common.not_set : `#${interaction.guild?.channels.cache.get(values["logs_channel"])?.name}`;
-                    return "```\n" + `${stexts.common.enabled}: ${enabledValue}\n${stexts.common.logs_enabled}: ${enabledLogs}\n${stexts.common.log_channel}: ${lChannelSet}\n${stexts.common.langtxt}: ${values["lang"]}` + "\n```";
-                }
-                // Ask to enable
-                values["enabled"] = await new Promise(async (resolve, reject) => {
-                    let err = false;
-                    do {
-                        const input = await GetResponse(err ? `${stexts.errors.invalid_rsp}\n${stexts.common.ask_enable}` : `${stexts.common.init_msg}\n${stexts.common.ask_enable}`);
-                        if (!["0", "1"].some(v => v === input.content)) { err = true; continue; };
-                        resolve(Boolean(parseInt(input.content)));
-                        break;
-                    }
-                    while (true);
-                });
-                embed.setDescription(EmbedDescription());
-                await imessage.edit({ embeds: [embed] });
-                values["logs_enabled"] = await new Promise(async (resolve, reject) => {
-                    let err = false;
-                    do {
-                        const input = await GetResponse(err ? `${stexts.errors.invalid_rsp}\n${stexts.common.ask_enabled_logs}` : stexts.common.ask_enabled_logs);
-                        if (!["0", "1"].some(v => v === input.content)) { err = true; continue; };
-                        resolve(Boolean(parseInt(input.content)));
-                        break;
-                    }
-                    while (true);
-                });
-                embed.setDescription(EmbedDescription());
-                await imessage.edit({ embeds: [embed] });
-                if (values["logs_enabled"]) {
-                    values["logs_channel"] = await new Promise(async (resolve, reject) => {
-                        let err = false;
-                        do {
-                            const input = await GetResponse(err ? `${stexts.errors.invalid_rsp}\n${stexts.common.ask_logs_channel}` : stexts.common.ask_logs_channel);
-                            if (!input.mentions.channels.first() || (input.mentions.channels.first() && !input.mentions.channels.first()?.isTextBased())) { err = true; continue; };
-                            resolve((input.mentions.channels.first() as unknown as TextChannel).id);
+                            const foundConfig: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [interaction.guildId]);
+                            if (interaction.isRepliable() && uid !== interaction.user.id) return await interaction.reply({ content: "You're not the person who ran the command originally.", ephemeral: true });
+                            if (interaction.isRepliable()) await interaction.deferUpdate();
+                            const sessionKey = `${interaction.guildId}:${interaction.user.id}`;
+                            const existing = filterSetupSessions.get(sessionKey);
+                            if (existing) filterSetupSessions.delete(sessionKey);
+                            const state: FilterSetupState = {
+                                step: 0,
+                                values: { enabled: false, logs_enabled: false, logs_channel: "0", lang: "en" },
+                                messageId: interaction.message.id,
+                                guildId: interaction.guildId!,
+                                userId: interaction.user.id,
+                                createdAt: Date.now()
+                            };
+                            filterSetupSessions.set(sessionKey, state);
+                            const steps = ["Enable filter", "Enable logging", "Set log channel", "Select language", "Finish"];
+                            const render = () => {
+                                const progress = steps.map((s, i) => i === state.step ? `▶ ${s}` : `• ${s}`).join(" \n");
+                                const channelName = state.values.logs_channel === "0" ? "Not set" : `#${interaction.guild?.channels.cache.get(state.values.logs_channel)?.name}`;
+                                return "```\n" + `Setup Progress\n${progress}\n\nEnabled: ${state.values.enabled ? "Yes" : "No"}\nLogging: ${state.values.logs_enabled ? "Yes" : "No"}\nLog Channel: ${channelName}\nLanguage: ${state.values.lang}` + "\n```";
+                            };
+                            const buildComponents = (): ActionRowBuilder<ButtonBuilder>[] => {
+                                const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+                                const row1 = new ActionRowBuilder<ButtonBuilder>();
+                                if (state.step === 0) {
+                                    row1.addComponents(
+                                        new ButtonBuilder().setCustomId("filtersetup_enable_yes").setLabel("Enable").setStyle(ButtonStyle.Success),
+                                        new ButtonBuilder().setCustomId("filtersetup_enable_no").setLabel("Disable").setStyle(ButtonStyle.Secondary)
+                                    );
+                                } else if (state.step === 1) {
+                                    row1.addComponents(
+                                        new ButtonBuilder().setCustomId("filtersetup_logs_yes").setLabel("Logging On").setStyle(ButtonStyle.Success),
+                                        new ButtonBuilder().setCustomId("filtersetup_logs_no").setLabel("Logging Off").setStyle(ButtonStyle.Secondary)
+                                    );
+                                } else if (state.step === 2) {
+                                    if (state.values.logs_enabled) {
+                                        row1.addComponents(
+                                            new ButtonBuilder().setCustomId("filtersetup_set_channel").setLabel("Set Channel").setStyle(ButtonStyle.Primary)
+                                        );
+                                    } else {
+                                        // Skip step if logging disabled
+                                        state.step = 3;
+                                        return buildComponents();
+                                    }
+                                } else if (state.step === 3) {
+                                    const rowLangA = new ActionRowBuilder<ButtonBuilder>().addComponents(
+                                        new ButtonBuilder().setCustomId("filtersetup_lang_en").setLabel("English (en)").setStyle(ButtonStyle.Primary),
+                                        new ButtonBuilder().setCustomId("filtersetup_lang_es").setLabel("Spanish (es)").setStyle(ButtonStyle.Primary),
+                                        new ButtonBuilder().setCustomId("filtersetup_lang_fr").setLabel("French (fr)").setStyle(ButtonStyle.Primary)
+                                    );
+                                    const rowLangB = new ActionRowBuilder<ButtonBuilder>().addComponents(
+                                        new ButtonBuilder().setCustomId("filtersetup_lang_de").setLabel("German (de)").setStyle(ButtonStyle.Primary),
+                                        new ButtonBuilder().setCustomId("filtersetup_lang_pt").setLabel("Portuguese (pt)").setStyle(ButtonStyle.Primary),
+                                        new ButtonBuilder().setCustomId("filtersetup_lang_it").setLabel("Italian (it)").setStyle(ButtonStyle.Primary)
+                                    );
+                                    rows.push(rowLangA, rowLangB);
+                                } else if (state.step === 4) {
+                                    row1.addComponents(
+                                        new ButtonBuilder().setCustomId("filtersetup_finish").setLabel("Finish Setup").setStyle(ButtonStyle.Success)
+                                    );
+                                }
+                                const controlRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+                                    new ButtonBuilder().setCustomId("filtersetup_cancel").setLabel("Cancel").setStyle(ButtonStyle.Danger)
+                                );
+                                if (row1.components.length) rows.push(row1);
+                                rows.push(controlRow);
+                                return rows;
+                            };
+                            const embed = new EmbedBuilder().setTitle("Filter Setup Wizard").setColor("Purple").setDescription(render());
+                            // attach helpers to state for later cases
+                            (state as any).render = render;
+                            (state as any).buildComponents = buildComponents;
+                            await interaction.message.edit({ embeds: [embed], components: buildComponents(), content: "" });
+                            break;
+            }
+                        case "filtersetup_cancel": {
+                            const sessionKey = `${interaction.guildId}:${interaction.user.id}`;
+                            const state = filterSetupSessions.get(sessionKey);
+                            if (!state) { if (interaction.isRepliable()) await interaction.reply({ content: "No active setup.", ephemeral: true }); break; }
+                            filterSetupSessions.delete(sessionKey);
+                            if (interaction.isRepliable()) await interaction.deferUpdate();
+                            await interaction.message.edit({ components: [], content: "Setup cancelled." });
                             break;
                         }
-                        while (true);
-                    });
-                    embed.setDescription(EmbedDescription());
-                    await imessage.edit({ embeds: [embed] });
-                }
-                values["lang"] = await new Promise(async (resolve, reject) => {
-                    let err = false;
-                    do {
-                        const input = await GetResponse(err ? `${stexts.errors.invalid_rsp}\n${stexts.common.ask_lang} English -> en || Spanish -> es` : `${stexts.common.ask_lang} English -> en || Spanish -> es`);
-                        if (input.content.length > 2 || ["br", "ch", "wa"].some(v => input.content.toLowerCase() === v) || !langs.has(1, input.content.toLowerCase())) { err = true; continue; };
-                        resolve(input.content.toLowerCase());
-                        break;
-                    }
-                    while (true);
-                });
-                if (!Boolean(parseInt(args[1]))) await db.query("INSERT INTO filter_configs SET ?", [{
-                    enabled: values["enabled"],
-                    guild: interaction.guildId,
-                    log_channel: values["logs_channel"],
-                    enabled_logs: values["logs_enabled"],
-                    lang: values["lang"]
-                }]);
-                else await db.query("UPDATE filter_configs SET ? WHERE guild = ?", [{
-                    enabled: values["enabled"],
-                    guild: interaction.guildId,
-                    log_channel: values["logs_channel"],
-                    enabled_logs: values["logs_enabled"],
-                    lang: values["lang"]
-                }, interaction.guildId]);
-                embed.setDescription(EmbedDescription());
-                await imessage.edit({ embeds: [embed], content: stexts.success.done });
-            }
+                        case "filtersetup_enable_yes":
+                        case "filtersetup_enable_no":
+                        case "filtersetup_logs_yes":
+                        case "filtersetup_logs_no":
+                        case "filtersetup_set_channel":
+                        case "filtersetup_finish":
+                        case "filtersetup_lang_en":
+                        case "filtersetup_lang_es":
+                        case "filtersetup_lang_fr":
+                        case "filtersetup_lang_de":
+                        case "filtersetup_lang_pt":
+                        case "filtersetup_lang_it": {
+                            const sessionKey = `${interaction.guildId}:${interaction.user.id}`;
+                            const state = filterSetupSessions.get(sessionKey);
+                            if (!state) { if (interaction.isRepliable()) await interaction.reply({ content: "Setup expired. Run /filter setup again.", ephemeral: true }); break; }
+                            const now = Date.now();
+                            if (now - state.createdAt > 10 * 60 * 1000) { // expire after 10m
+                                filterSetupSessions.delete(sessionKey);
+                                if (interaction.isRepliable()) await interaction.reply({ content: "Setup expired. Run /filter setup again.", ephemeral: true });
+                                break;
+                            }
+                            if (interaction.customId === "filtersetup_enable_yes") state.values.enabled = true;
+                            else if (interaction.customId === "filtersetup_enable_no") state.values.enabled = false;
+                            else if (interaction.customId === "filtersetup_logs_yes") state.values.logs_enabled = true;
+                            else if (interaction.customId === "filtersetup_logs_no") state.values.logs_enabled = false;
+                            else if (interaction.customId.startsWith("filtersetup_lang_")) state.values.lang = interaction.customId.split("_").pop()!.toLowerCase();
+                            else if (interaction.customId === "filtersetup_set_channel") {
+                                state.awaitingChannelMention = true;
+                                if (interaction.isRepliable()) await interaction.reply({ content: "Mention the log channel now (you have 30s).", ephemeral: true });
+                                const collector = (interaction.channel as TextChannel).createMessageCollector({ filter: m => m.author.id === interaction.user.id, time: 30000, max: 1 });
+                                collector.on("collect", m => {
+                                    const mentioned = m.mentions.channels.first();
+                                    if (mentioned && mentioned.isTextBased()) {
+                                        state.values.logs_channel = mentioned.id;
+                                    }
+                                    void m.delete().catch(()=>{});
+                                });
+                                collector.on("end", async () => {
+                                    state.awaitingChannelMention = false;
+                                    state.step = 3; // advance to language selection
+                                    const embed = new EmbedBuilder().setTitle("Filter Setup Wizard").setColor("Purple").setDescription((state as any).render());
+                                    await interaction.message.edit({ embeds: [embed], components: (state as any).buildComponents() });
+                                });
+                                break; // wait for channel selection before advancing
+                            }
+                            if (interaction.customId === "filtersetup_finish") {
+                                // Persist to DB
+                                const existingRows: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [state.guildId]);
+                                if (!existingRows[0]) await db.query("INSERT INTO filter_configs SET ?", [{
+                                    enabled: state.values.enabled,
+                                    guild: state.guildId,
+                                    log_channel: state.values.logs_channel,
+                                    enabled_logs: state.values.logs_enabled,
+                                    lang: state.values.lang
+                                }]);
+                                else await db.query("UPDATE filter_configs SET ? WHERE guild = ?", [{
+                                    enabled: state.values.enabled,
+                                    guild: state.guildId,
+                                    log_channel: state.values.logs_channel,
+                                    enabled_logs: state.values.logs_enabled,
+                                    lang: state.values.lang
+                                }, state.guildId]);
+                                filterSetupSessions.delete(sessionKey);
+                                if (interaction.isRepliable()) await interaction.deferUpdate();
+                                const doneEmbed = new EmbedBuilder().setTitle("Filter Setup Complete").setColor("Green").setDescription(`Enabled: ${state.values.enabled ? "Yes" : "No"}\nLogging: ${state.values.logs_enabled ? "Yes" : "No"}\nLog Channel: ${state.values.logs_channel === "0" ? "Not set" : `#${interaction.guild?.channels.cache.get(state.values.logs_channel)?.name}`}\nLanguage: ${state.values.lang}`);
+                                await interaction.message.edit({ embeds: [doneEmbed], components: [] });
+                                break;
+                            }
+                            if (!state.awaitingChannelMention) {
+                                // Advance step if not waiting
+                                if (state.step === 0) state.step = 1;
+                                else if (state.step === 1) state.step = 2;
+                                else if (state.step === 2) state.step = 3;
+                                else if (state.step === 3) state.step = 4;
+                            }
+                            if (interaction.isRepliable()) await interaction.deferUpdate();
+                            const embed = new EmbedBuilder().setTitle("Filter Setup Wizard").setColor("Purple").setDescription((state as any).render());
+                            await interaction.message.edit({ embeds: [embed], components: (state as any).buildComponents() });
+                            break;
+                        }
             case "staffcases": {
                 // Format: staffcases-<action>-<authorId>-<targetUserId>-<page>
                 const [action, authorId, targetUserId, pageStr] = args;
@@ -832,30 +776,30 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             case "close_ticket": {
                 const [ticketIdStr, originalUserId] = args;
                 const ticketId = parseInt(ticketIdStr);
-                
+
                 // Check if user is the ticket owner or staff
                 const isOwner = interaction.user.id === originalUserId;
                 const staffRank = await utils.getUserStaffRank(interaction.user.id);
                 const isStaff = staffRank !== null;
-                
+
                 if (!isOwner && !isStaff) {
                     if (interaction.isRepliable()) await interaction.reply({ content: "You don't have permission to close this ticket.", ephemeral: true });
                     return;
                 }
-                
+
                 try {
                     const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [ticketId]);
                     if (!ticketData[0]) {
                         if (interaction.isRepliable()) await interaction.reply({ content: "Ticket not found.", ephemeral: true });
                         return;
                     }
-                    
+
                     const ticket = ticketData[0];
                     if (ticket.status === "closed") {
                         if (interaction.isRepliable()) await interaction.reply({ content: "This ticket is already closed.", ephemeral: true });
                         return;
                     }
-                    
+
                     // Show confirmation
                     if (interaction.isRepliable()) {
                         const confirmEmbed = new EmbedBuilder()
@@ -863,7 +807,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                             .setTitle("⚠️ Confirm Ticket Closure")
                             .setDescription(`Are you sure you want to close ticket #${ticketId}?\n\nThis action will:\n• Generate and save transcripts\n• Notify the user\n• Mark the ticket as closed`)
                             .setFooter({ text: "Click confirm to proceed" });
-                        
+
                         const confirmRow = new ActionRowBuilder<ButtonBuilder>()
                             .addComponents(
                                 new ButtonBuilder()
@@ -877,7 +821,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                                     .setStyle(ButtonStyle.Secondary)
                                     .setEmoji("❌")
                             );
-                        
+
                         await interaction.reply({ embeds: [confirmEmbed], components: [confirmRow], ephemeral: true });
                     }
                 } catch (error) {
@@ -895,32 +839,32 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             case "confirm_close": {
                 const [ticketIdStr, originalUserId] = args;
                 const ticketId = parseInt(ticketIdStr);
-                
+
                 try {
                     const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [ticketId]);
                     if (!ticketData[0]) {
                         if (interaction.isRepliable()) await interaction.update({ content: "Ticket not found.", embeds: [], components: [] });
                         return;
                     }
-                    
+
                     const ticket = ticketData[0];
                     if (ticket.status === "closed") {
                         if (interaction.isRepliable()) await interaction.update({ content: "This ticket is already closed.", embeds: [], components: [] });
                         return;
                     }
-                    
+
                     if (interaction.isRepliable()) await interaction.update({ content: "🔄 Closing ticket and generating transcripts...", embeds: [], components: [] });
-                    
+
                     // Generate transcript
                     const messages: any = await db.query("SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY timestamp ASC", [ticketId]);
                     const user = await client.users.fetch(ticket.user_id);
-                    
+
                     // Calculate duration
                     const durationMs = Date.now() - ticket.created_at;
                     const hours = Math.floor(durationMs / 3600000);
                     const minutes = Math.floor((durationMs % 3600000) / 60000);
                     const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
-                    
+
                     // Create text transcript
                     let textTranscript = `Support Ticket #${ticketId} - Transcript\n`;
                     textTranscript += `User: ${user.tag} (${user.id})\n`;
@@ -931,7 +875,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     textTranscript += `Origin: ${ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message"}\n`;
                     textTranscript += `Initial Message: ${ticket.initial_message}\n`;
                     textTranscript += `\n${"=".repeat(50)}\n\n`;
-                    
+
                     for (const msg of messages) {
                         const timestamp = new Date(msg.timestamp).toISOString();
                         if (msg.is_staff) {
@@ -941,16 +885,16 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                             textTranscript += `[${timestamp}] ${msg.username}: ${msg.content}\n`;
                         }
                     }
-                    
+
                     // Create HTML transcript
                     const fs = await import("fs");
                     let htmlTemplate = fs.readFileSync("./transcript_placeholder.html", "utf-8");
-                    
+
                     let messagesHtml = "";
                     for (const msg of messages) {
                         const timestamp = new Date(msg.timestamp).toLocaleString();
                         const initial = msg.username.charAt(0).toUpperCase();
-                        
+
                         if (msg.is_staff) {
                             const rankTag = utils.getRankSuffix(msg.staff_rank);
                             messagesHtml += `
@@ -979,7 +923,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                             </div>`;
                         }
                     }
-                    
+
                     htmlTemplate = htmlTemplate
                         .replace(/{ticketId}/g, ticketId.toString())
                         .replace(/{username}/g, user.tag)
@@ -991,11 +935,11 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         .replace(/{origin}/g, ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message")
                         .replace(/{initialMessage}/g, ticket.initial_message)
                         .replace(/{messages}/g, messagesHtml);
-                    
+
                     // Save transcripts to files
                     fs.writeFileSync(`./transcript-${ticketId}.txt`, textTranscript);
                     fs.writeFileSync(`./transcript-${ticketId}.html`, htmlTemplate);
-                    
+
                     // Send transcripts to transcripts channel
                     const transcriptsChannel = await client.channels.fetch(data.bot.transcripts_channel) as TextChannel;
                     if (transcriptsChannel) {
@@ -1009,7 +953,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                                 { name: "Duration", value: durationText, inline: true }
                             )
                             .setTimestamp();
-                        
+
                         await transcriptsChannel.send({
                             embeds: [transcriptEmbed],
                             files: [
@@ -1018,11 +962,11 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                             ]
                         });
                     }
-                    
+
                     // Update ticket status
                     const closedAt = Date.now();
                     await db.query("UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ?", [closedAt, interaction.user.id, ticketId]);
-                    
+
                     // Update the original embed in ticket channel
                     try {
                         const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel;
@@ -1039,13 +983,13 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                                         return field;
                                     })
                                 );
-                            
+
                             await originalMessage.edit({ embeds: [updatedEmbed], components: [] });
                         }
                     } catch (error) {
                         console.error("Failed to update ticket embed:", error);
                     }
-                    
+
                     // Notify user
                     try {
                         const closedEmbed = new EmbedBuilder()
@@ -1058,12 +1002,12 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                             )
                             .setFooter({ text: "Thank you for contacting support!" })
                             .setTimestamp();
-                        
+
                         await user.send({ embeds: [closedEmbed] });
                     } catch (error) {
                         console.error("Failed to notify user of ticket closure:", error);
                     }
-                    
+
                     // Send message in ticket channel with delete option
                     const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel;
                     if (ticketChannel) {
@@ -1072,7 +1016,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                             .setTitle("🔒 Ticket Closed")
                             .setDescription(`This ticket has been closed by ${interaction.user.tag}.\n\nTranscripts have been saved and sent to <#${data.bot.transcripts_channel}>.\n\nYou can delete this channel using the button below.`)
                             .setTimestamp();
-                        
+
                         const deleteButton = new ActionRowBuilder<ButtonBuilder>()
                             .addComponents(
                                 new ButtonBuilder()
@@ -1081,14 +1025,14 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                                     .setStyle(ButtonStyle.Danger)
                                     .setEmoji("🗑️")
                             );
-                        
+
                         await ticketChannel.send({ embeds: [closedNoticeEmbed], components: [deleteButton] });
                     }
-                    
+
                     // Clean up transcript files
                     fs.unlinkSync(`./transcript-${ticketId}.txt`);
                     fs.unlinkSync(`./transcript-${ticketId}.html`);
-                    
+
                     // Update the confirmation message
                     try {
                         await interaction.editReply({ content: `✅ Ticket #${ticketId} has been closed successfully!` });
@@ -1096,7 +1040,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         // If edit fails, it's okay - the ticket is closed
                         console.log("Could not update confirmation message:", error);
                     }
-                    
+
                 } catch (error) {
                     console.error("Failed to close ticket:", error);
                     try {
@@ -1110,14 +1054,14 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             case "delete_channel": {
                 const [ticketIdStr] = args;
                 const ticketId = parseInt(ticketIdStr);
-                
+
                 // Only staff can delete channels
                 const staffRank = await utils.getUserStaffRank(interaction.user.id);
                 if (!staffRank) {
                     if (interaction.isRepliable()) await interaction.reply({ content: "Only staff can delete ticket channels.", ephemeral: true });
                     return;
                 }
-                
+
                 // Show confirmation
                 if (interaction.isRepliable()) {
                     const confirmEmbed = new EmbedBuilder()
@@ -1125,7 +1069,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         .setTitle("⚠️ Confirm Channel Deletion")
                         .setDescription(`Are you sure you want to delete this ticket channel?\n\nThis action cannot be undone. The channel will be deleted in 5 seconds after confirmation.`)
                         .setFooter({ text: "Click confirm to proceed" });
-                    
+
                     const confirmRow = new ActionRowBuilder<ButtonBuilder>()
                         .addComponents(
                             new ButtonBuilder()
@@ -1139,7 +1083,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                                 .setStyle(ButtonStyle.Secondary)
                                 .setEmoji("❌")
                         );
-                    
+
                     await interaction.reply({ embeds: [confirmEmbed], components: [confirmRow], ephemeral: true });
                 }
                 break;
@@ -1152,12 +1096,12 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             }
             case "confirm_delete": {
                 const [ticketIdStr] = args;
-                
+
                 try {
                     if (interaction.isRepliable()) {
                         await interaction.update({ content: "🗑️ Deleting channel in 5 seconds...", embeds: [], components: [] });
                     }
-                    
+
                     setTimeout(async () => {
                         try {
                             if (interaction.channel) {
@@ -1228,11 +1172,11 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (message.channelId !== chatdb[0].channel) return;
     const { author, channel, guild, content } = message;
     if (author.bot) return;
-    
+
     // Check for global commands first
     const isGlobalCommand = await globalCommandsManager.processMessage(message, manager);
     if (isGlobalCommand) return; // If it's a global command, don't process as regular message
-    
+
     // Safety check removed per request (was previously blocking unsafe messages)
     await manager.processUser(author);
     await manager.processMessage(message);
@@ -1355,23 +1299,23 @@ manager.on("limit-exceed", async u => {
 // Support ticket message relay system
 client.on("messageCreate", async (message): Promise<any> => {
     if (message.author.bot) return;
-    
+
     // Check if message is from a ticket channel
     if (message.guild && message.guild.id === data.bot.home_guild) {
         const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE channel_id = ? AND status = 'open'", [message.channelId]);
         if (ticketData[0]) {
             const ticket = ticketData[0];
             const staffRank = await utils.getUserStaffRank(message.author.id);
-            
+
             if (staffRank) {
                 // Staff message -> Send to user
                 const user = await client.users.fetch(ticket.user_id);
                 const rankTag = utils.getRankSuffix(staffRank);
                 const formattedMessage = `[${rankTag}] ${message.author.username}: ${message.content}`;
-                
+
                 try {
                     await user.send(formattedMessage);
-                    
+
                     // Track first response time if not already tracked
                     if (!ticket.first_response_at) {
                         const responseTime = Date.now();
@@ -1379,16 +1323,16 @@ client.on("messageCreate", async (message): Promise<any> => {
                             "UPDATE support_tickets SET first_response_at = ?, first_response_by = ? WHERE id = ?",
                             [responseTime, message.author.id, ticket.id]
                         );
-                        
+
                         // Calculate and display response time
                         const minutesToRespond = Math.floor((responseTime - ticket.created_at) / 60000);
-                        const timeText = minutesToRespond < 60 
-                            ? `${minutesToRespond} minute(s)` 
+                        const timeText = minutesToRespond < 60
+                            ? `${minutesToRespond} minute(s)`
                             : `${Math.floor(minutesToRespond / 60)} hour(s) ${minutesToRespond % 60} minute(s)`;
-                        
+
                         await message.channel.send(`✅ First response logged: ${timeText} response time by ${message.author.tag}.`);
                     }
-                    
+
                     // Save to transcript
                     await db.query("INSERT INTO support_messages SET ?", [{
                         ticket_id: ticket.id,
@@ -1405,20 +1349,20 @@ client.on("messageCreate", async (message): Promise<any> => {
             }
         }
     }
-    
+
     // Check if message is from a user with an open ticket in DMs
     if (!message.guild) {
         const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE user_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 1", [message.author.id]);
         if (ticketData[0]) {
             const ticket = ticketData[0];
             const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel;
-            
+
             if (ticketChannel) {
                 const formattedMessage = `\`${message.author.username}\`: ${message.content}`;
-                
+
                 try {
                     await ticketChannel.send(formattedMessage);
-                    
+
                     // Save to transcript
                     await db.query("INSERT INTO support_messages SET ?", [{
                         ticket_id: ticket.id,
