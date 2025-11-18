@@ -4,9 +4,53 @@ import data from "../data";
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
+import os from "os";
 
-// Simple high-rank check; adjust ranks list if project uses different naming
 const HIGH_RANKS = ["owner", "admin", "lead", "manager"];
+
+
+function findMysqldump(): string | null {
+  const platform = os.platform();
+
+  const commonPaths = [
+    "mysqldump",
+    "mariadb-dump",
+  ];
+
+  if (platform === "win32") {
+    commonPaths.push(
+      "C:\\xampp\\mysql\\bin\\mysqldump.exe",
+      "C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysqldump.exe",
+      "C:\\Program Files\\MySQL\\MySQL Server 5.7\\bin\\mysqldump.exe",
+      "C:\\Program Files\\MariaDB 10.11\\bin\\mariadb-dump.exe",
+      "C:\\Program Files\\MariaDB 10.6\\bin\\mariadb-dump.exe"
+    );
+  } else if (platform === "darwin") {
+    commonPaths.push(
+      "/usr/local/bin/mysqldump",
+      "/opt/homebrew/bin/mysqldump",
+      "/usr/local/mysql/bin/mysqldump"
+    );
+  } else {
+    // Linux and others
+    commonPaths.push(
+      "/usr/bin/mysqldump",
+      "/usr/local/bin/mysqldump",
+      "/opt/mysql/bin/mysqldump"
+    );
+  }
+
+
+  for (const cmdPath of commonPaths) {
+    try {
+      if (fs.existsSync(cmdPath)) {
+        return cmdPath;
+      }
+    } catch { }
+  }
+
+  return "mysqldump";
+}
 
 export default {
   data: new SlashCommandBuilder()
@@ -21,14 +65,11 @@ export default {
     }
 
     const makePublic = interaction.options.getBoolean("public") || false;
-    if (makePublic) {
-      // If user wants public visibility override ephemeral (Discord.js loader sets this elsewhere)
-      // We'll just follow up publicly afterwards.
-    }
+    if (makePublic) { };
 
     await interaction.editReply("Starting backup... This may take a moment.");
 
-  const backupDir = path.join(process.cwd(), "database_backups");
+    const backupDir = path.join(process.cwd(), "database_backups");
     if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
 
     const stamp = new Date();
@@ -36,11 +77,31 @@ export default {
     const fileName = `backup_${ts}.sql`;
     const filePath = path.join(backupDir, fileName);
 
-    // Spawn mysqldump; we stream stdout to file for scalability.
+    const mysqldumpCmd = findMysqldump();
+    if (!mysqldumpCmd) {
+      const embed = new EmbedBuilder()
+        .setColor(0xff5252)
+        .setTitle("Database Backup Failed")
+        .setDescription("mysqldump executable not found. Please install MySQL/MariaDB client tools.")
+        .addFields({ name: "Platform", value: os.platform() })
+        .setTimestamp();
+      return interaction.editReply({ content: "", embeds: [embed] });
+    }
+
+    const args: string[] = [
+      "-h", data.database.host || "localhost",
+      "-u", data.database.user,
+      data.database.database
+    ];
+
+    if (data.database.port) {
+      args.unshift("-P", String(data.database.port));
+    }
+
     const out = fs.createWriteStream(filePath);
-    const args = ["-u", data.database.user, `-p${data.database.password}`, data.database.database];
     let stderrBuf = "";
     let toolMissing = false;
+
     const sendResult = async (ok: boolean, details: string) => {
       const embed = new EmbedBuilder()
         .setColor(ok ? 0x4caf50 : 0xff5252)
@@ -56,7 +117,9 @@ export default {
     };
 
     try {
-      const dump = spawn("mysqldump", args);
+      const env = { ...process.env, MYSQL_PWD: data.database.password };
+      const dump = spawn(mysqldumpCmd, args, { env });
+
       dump.stdout.pipe(out);
       dump.stderr.on("data", d => { stderrBuf += d.toString(); });
       dump.on("error", err => {
@@ -66,29 +129,27 @@ export default {
       dump.on("close", async (code) => {
         out.close();
         if (toolMissing) {
-          return sendResult(false, `mysqldump not found. Install MySQL client tools on the host. Error: ${stderrBuf.slice(0,500)}`);
+          return sendResult(false, `mysqldump not found or failed to execute. Error: ${stderrBuf.slice(0, 500)}`);
         }
         if (code !== 0) {
-          return sendResult(false, `mysqldump exited with code ${code}. ${stderrBuf.slice(0,500)}`);
+          return sendResult(false, `mysqldump exited with code ${code}. ${stderrBuf.slice(0, 500)}`);
         }
-        // Get file size
         let size = 0;
-        try { size = fs.statSync(filePath).size; } catch {}
+        try { size = fs.statSync(filePath).size; } catch { }
 
-        // Retention: keep latest 10 backups
         try {
           const files = fs.readdirSync(backupDir).filter(f => f.endsWith('.sql'));
           if (files.length > 10) {
-            const sorted = files.map(f => ({ f, t: fs.statSync(path.join(backupDir,f)).mtimeMs }))
-              .sort((a,b) => a.t - b.t);
+            const sorted = files.map(f => ({ f, t: fs.statSync(path.join(backupDir, f)).mtimeMs }))
+              .sort((a, b) => a.t - b.t);
             const toDelete = sorted.slice(0, files.length - 10);
             for (const del of toDelete) {
-              try { fs.unlinkSync(path.join(backupDir, del.f)); } catch {}
+              try { fs.unlinkSync(path.join(backupDir, del.f)); } catch { }
             }
           }
-        } catch {}
+        } catch { }
 
-        sendResult(true, `Backup completed. File size: ${Math.round(size/1024)} KB`);
+        sendResult(true, `Backup completed. File size: ${Math.round(size / 1024)} KB`);
       });
     } catch (e: any) {
       return sendResult(false, `Unexpected error spawning mysqldump: ${e.message}`);
