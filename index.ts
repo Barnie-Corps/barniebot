@@ -90,6 +90,7 @@ client.on("clientReady", async (): Promise<any> => {
         for (const g of client.guilds.cache.values()) {
             await g.members.fetch();
         }
+        process.env.MEMBERS_FETCHED = "1";
     }
     client.user?.setPresence({ activities: [{ name: Number(process.env.FETCH_MEMBERS_ON_STARTUP) === 1 ? `there are ${client.users.cache.size} users around!` : "How robotically mysterious!", type: ActivityType.Watching }] });
     await load_slash(); // Load slash commands
@@ -401,10 +402,13 @@ client.on("messageCreate", async (message): Promise<any> => {
         }
         case "fetch_guilds_members": {
             const msg = await message.reply(`${data.bot.loadingEmoji.mention} Fetching members from guilds...`);
+            const startTime = Date.now();
+            const startCacheSize = client.users.cache.size;
             for (const g of client.guilds.cache.values()) {
                 await g.members.fetch();
             }
-            await msg.edit("Finished fetching members from guilds.");
+            process.env.MEMBERS_FETCHED = "1";
+            await msg.edit(`Finished fetching members from guilds. Took ${(Date.now() - startTime) / 1000}s. Members fetched: ${client.users.cache.size - startCacheSize}.`);
             break;
         }
     }
