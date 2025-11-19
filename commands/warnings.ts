@@ -37,9 +37,9 @@ export default {
     }
 
     // Calculate total active points
-    const activeWarnings = warnings.filter((w: any) => 
-      w.active && 
-      w.expires_at > now && 
+    const activeWarnings = warnings.filter((w: any) =>
+      w.active &&
+      w.expires_at > now &&
       (!w.appeal_status || w.appeal_status !== "approved")
     );
     const totalPoints = activeWarnings.reduce((sum: number, w: any) => sum + (w.points || 1), 0);
@@ -79,7 +79,7 @@ export default {
       else if (isInactive) statusText = " [INACTIVE]";
 
       const pointsText = warning.points === 1 ? "1 pt" : `${warning.points} pts`;
-      
+
       let fieldValue = `**Reason:** ${warning.reason}\n`;
       fieldValue += `**Points:** ${pointsText} | **Category:** ${warning.category}\n`;
       fieldValue += `**Issued:** <t:${Math.floor(warning.createdAt / 1000)}:R>\n`;
@@ -96,7 +96,7 @@ export default {
         try {
           const author = await interaction.client.users.fetch(warning.authorid);
           fieldValue += `\n**Issued by:** ${author.username}`;
-        } catch {}
+        } catch { }
       }
 
       embed.addFields({
@@ -133,7 +133,7 @@ export default {
       });
     }
 
-    return interaction.editReply({ embeds: [embed] });
+    return interaction.editReply({ embeds: [embed], content: "" });
   },
   ephemeral: true
 };
