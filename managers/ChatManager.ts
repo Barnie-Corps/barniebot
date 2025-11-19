@@ -8,6 +8,13 @@ import utils from "../utils";
 import Log from "../Log";
 import data from "../data";
 import https from "https";
+import dns from "dns";
+
+// Windows DNS optimization - use system resolver instead of c-ares
+if (process.platform === "win32") {
+    dns.setDefaultResultOrder("verbatim");
+}
+
 const DefaultChatManagerOptions: ChatManagerOptions = {
     messages_limit: 10,
     time: 10000,
@@ -23,11 +30,26 @@ const RANK_CACHE_TTL = 300000;
 const BLACKLIST_CACHE = new Map<string, { value: boolean, expires: number }>();
 const MUTE_CACHE = new Map<string, { value: boolean, until: number, expires: number }>();
 const MODERATION_CACHE_TTL = 60000;
+
+// Application-level translation cache for hot translations
+const APP_TRANSLATION_CACHE = new Map<string, { text: string, expires: number }>();
+const APP_TRANSLATION_CACHE_TTL = 600000; // 10 minutes
+const APP_TRANSLATION_CACHE_LIMIT = 1000;
+
+// Translation circuit breaker per-manager
+let translationFailureCount = 0;
+let lastTranslationFailure = 0;
+const TRANSLATION_CIRCUIT_THRESHOLD = 15;
+const TRANSLATION_CIRCUIT_TIMEOUT = 120000;
+
+// Optimized for Windows - reduced maxSockets, increased timeout, FIFO scheduling
 const httpsAgent = new https.Agent({
     keepAlive: true,
-    maxSockets: 150,
+    maxSockets: process.platform === "win32" ? 50 : 150,
+    maxFreeSockets: process.platform === "win32" ? 25 : 75,
+    timeout: 30000,
     keepAliveMsecs: 30000,
-    scheduling: 'lifo'
+    scheduling: 'fifo' // FIFO works better on Windows
 });
 interface QueuedMessage {
     message: Message<true>;
@@ -395,6 +417,22 @@ export default class ChatManager extends EventEmitter {
             const cacheKey = normalizedTarget || targetLanguage;
             const cached = cache.get(cacheKey);
             if (cached) return cached;
+            // Check app-level cache first
+            const appCacheKey = `${sourceLanguage}:${targetLanguage}:${baseContent.substring(0, 100)}`;
+            const now = Date.now();
+            const appCached = APP_TRANSLATION_CACHE.get(appCacheKey);
+            if (appCached && appCached.expires > now) {
+                return appCached.text;
+            }
+            // Check circuit breaker
+            if (translationFailureCount >= TRANSLATION_CIRCUIT_THRESHOLD) {
+                if (now - lastTranslationFailure > TRANSLATION_CIRCUIT_TIMEOUT) {
+                    translationFailureCount = 0;
+                } else {
+                    Log.warn("Translation circuit breaker active, using fallback", { failures: translationFailureCount });
+                    return sanitizedFallback;
+                }
+            }
             const translationPromise = (async () => {
                 try {
                     const [translatedContent, translatedNotice] = await Promise.all([
@@ -409,10 +447,27 @@ export default class ChatManager extends EventEmitter {
                         ? `${translatedContent.text}\n${noticeText}`
                         : noticeText;
                     const sanitized = this.sanitizeContent(combined) || sanitizedFallback;
+                    // Store in app-level cache
+                    APP_TRANSLATION_CACHE.set(appCacheKey, { text: sanitized, expires: now + APP_TRANSLATION_CACHE_TTL });
+                    // Cleanup app cache if too large
+                    if (APP_TRANSLATION_CACHE.size > APP_TRANSLATION_CACHE_LIMIT) {
+                        const toDelete: string[] = [];
+                        for (const [key, val] of APP_TRANSLATION_CACHE.entries()) {
+                            if (val.expires <= now) toDelete.push(key);
+                            if (toDelete.length >= 100) break;
+                        }
+                        toDelete.forEach(k => APP_TRANSLATION_CACHE.delete(k));
+                    }
+                    // Success - decay failure counter
+                    if (translationFailureCount > 0) {
+                        translationFailureCount = Math.max(0, translationFailureCount - 1);
+                    }
                     return sanitized;
                 }
                 catch (error: any) {
-                    Log.warn("Failed to translate global message", { sourceLanguage, targetLanguage, error: error?.message ?? error });
+                    translationFailureCount++;
+                    lastTranslationFailure = Date.now();
+                    Log.warn("Failed to translate global message", { sourceLanguage, targetLanguage, error: error?.message ?? error, failures: translationFailureCount });
                     return sanitizedFallback;
                 }
             })();

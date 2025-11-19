@@ -21,17 +21,30 @@ const RATELIMIT_WORKER_TYPE = "ratelimit";
 const TRANSLATE_WORKER_PATH = path.join(__dirname, "workers/translate.js");
 const RATELIMIT_WORKER_PATH = path.join(__dirname, "workers/ratelimit.js");
 // Dynamic pool size with sane caps; allow override via env TRANSLATE_WORKERS
+// Windows optimization: reduce pool size to avoid thread contention
 const TRANSLATE_WORKER_POOL_SIZE = (() => {
   const fromEnv = Number(process.env.TRANSLATE_WORKERS);
   if (!Number.isNaN(fromEnv) && fromEnv > 0) return Math.max(1, Math.min(16, fromEnv));
   const cores = Array.isArray(os.cpus()) ? os.cpus().length : 4;
-  return Math.max(2, Math.min(8, Math.ceil(cores / 2)));
+  const isWindows = process.platform === "win32";
+  // Windows: more conservative pool size due to slower thread creation
+  return isWindows ? Math.max(2, Math.min(4, cores)) : Math.max(2, Math.min(8, Math.ceil(cores / 2)));
 })();
-const TRANSLATE_TIMEOUT = 15000;
+// Windows: increased timeout due to slower DNS resolution and connection setup
+const TRANSLATE_TIMEOUT = process.platform === "win32" ? 25000 : 15000;
 const TRANSLATE_CACHE_TTL = 300000;
 const TRANSLATE_CACHE_LIMIT = 500;
+const TRANSLATE_MAX_RETRIES = 3;
+const TRANSLATE_RETRY_BASE_DELAY = 1000;
+const CIRCUIT_BREAKER_THRESHOLD = 10;
+const CIRCUIT_BREAKER_TIMEOUT = 60000;
 const translationCache = new Map<string, { value: string; expires: number }>();
 const pendingTranslations = new Map<string, Promise<string>>();
+
+// Circuit breaker state
+let circuitBreakerFailures = 0;
+let circuitBreakerLastFailure = 0;
+let circuitBreakerOpen = false;
 const AI_WORKSPACE_ROOT = path.join(__dirname, "ai_workspace");
 const MAX_WORKSPACE_SCAN_RESULTS = 50;
 const MAX_FILE_SIZE_FOR_SEARCH = 1024 * 1024;
@@ -681,21 +694,54 @@ const utils = {
       const shared = pendingTranslations.get(cacheKey) as Promise<string>;
       return { text: await shared };
     }
+    // Circuit breaker check
+    if (circuitBreakerOpen) {
+      if (now - circuitBreakerLastFailure > CIRCUIT_BREAKER_TIMEOUT) {
+        circuitBreakerOpen = false;
+        circuitBreakerFailures = 0;
+      } else {
+        throw new Error("Translation service temporarily unavailable (circuit breaker open)");
+      }
+    }
     const task = (async () => {
-      let worker: WorkerHandle | null | undefined = Workers.getAvailableWorker(TRANSLATE_WORKER_TYPE);
-      if (!worker) {
-        worker = Workers.createWorker(TRANSLATE_WORKER_PATH, TRANSLATE_WORKER_TYPE) ?? undefined;
+      let lastError: Error | null = null;
+      for (let attempt = 0; attempt <= TRANSLATE_MAX_RETRIES; attempt++) {
+        try {
+          if (attempt > 0) {
+            const delay = TRANSLATE_RETRY_BASE_DELAY * Math.pow(2, attempt - 1);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+          let worker: WorkerHandle | null | undefined = Workers.getAvailableWorker(TRANSLATE_WORKER_TYPE);
+          if (!worker) {
+            worker = Workers.createWorker(TRANSLATE_WORKER_PATH, TRANSLATE_WORKER_TYPE) ?? undefined;
+          }
+          if (!worker) {
+            worker = await Workers.AwaitAvailableWorker(TRANSLATE_WORKER_TYPE, TRANSLATE_TIMEOUT);
+          }
+          const messageId = Workers.postMessage(worker.id, { text, from, to: target });
+          const response = await Workers.awaitResponse(worker.id, messageId, TRANSLATE_TIMEOUT);
+          if (response.message?.error) throw new Error(response.message.error);
+          const translatedText = String(response.message.translation ?? "");
+          translationCache.set(cacheKey, { value: translatedText, expires: Date.now() + TRANSLATE_CACHE_TTL });
+          trimTranslationCache();
+          // Success - reset circuit breaker
+          if (circuitBreakerFailures > 0) {
+            circuitBreakerFailures = Math.max(0, circuitBreakerFailures - 1);
+          }
+          return translatedText;
+        } catch (error: any) {
+          lastError = error;
+          if (attempt === TRANSLATE_MAX_RETRIES) {
+            circuitBreakerFailures++;
+            circuitBreakerLastFailure = Date.now();
+            if (circuitBreakerFailures >= CIRCUIT_BREAKER_THRESHOLD) {
+              circuitBreakerOpen = true;
+              Log.warn("Translation circuit breaker opened", { failures: circuitBreakerFailures });
+            }
+          }
+        }
       }
-      if (!worker) {
-        worker = await Workers.AwaitAvailableWorker(TRANSLATE_WORKER_TYPE, TRANSLATE_TIMEOUT);
-      }
-      const messageId = Workers.postMessage(worker.id, { text, from, to: target });
-      const response = await Workers.awaitResponse(worker.id, messageId, TRANSLATE_TIMEOUT);
-      if (response.message?.error) throw new Error(response.message.error);
-      const translatedText = String(response.message.translation ?? "");
-      translationCache.set(cacheKey, { value: translatedText, expires: Date.now() + TRANSLATE_CACHE_TTL });
-      trimTranslationCache();
-      return translatedText;
+      throw lastError || new Error("Translation failed after retries");
     })();
     pendingTranslations.set(cacheKey, task);
     try {
