@@ -87,9 +87,7 @@ client.on("clientReady", async (): Promise<any> => {
     if (Number(process.env.FETCH_MEMBERS_ON_STARTUP) === 1) {
         client.user?.setPresence({ activities: [{ name: `how many members are here? *finding out*`, type: ActivityType.Watching }], afk: true });
         Log.info("Fetching members from guilds...", { component: "Initialization" });
-        for (const g of client.guilds.cache.values()) {
-            await g.members.fetch();
-        }
+        for (const g of client.guilds.cache.values()) await g.members.fetch();
         process.env.MEMBERS_FETCHED = "1";
     }
     client.user?.setPresence({ activities: [{ name: Number(process.env.FETCH_MEMBERS_ON_STARTUP) === 1 ? `there are ${client.users.cache.size} users around!` : "How robotically mysterious!", type: ActivityType.Watching }] });
@@ -404,9 +402,7 @@ client.on("messageCreate", async (message): Promise<any> => {
             const msg = await message.reply(`${data.bot.loadingEmoji.mention} Fetching members from guilds...`);
             const startTime = Date.now();
             const startCacheSize = client.users.cache.size;
-            for (const g of client.guilds.cache.values()) {
-                await g.members.fetch();
-            }
+            for (const g of client.guilds.cache.values()) await g.members.fetch();
             process.env.MEMBERS_FETCHED = "1";
             await msg.edit(`Finished fetching members from guilds. Took ${(Date.now() - startTime) / 1000}s. Members fetched: ${client.users.cache.size - startCacheSize}.`);
             break;
@@ -531,170 +527,170 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             }
             case "continue_setup": {
                 const [uid] = args;
-                            const foundConfig: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [interaction.guildId]);
-                            if (interaction.isRepliable() && uid !== interaction.user.id) return await interaction.reply({ content: "You're not the person who ran the command originally.", ephemeral: true });
-                            if (interaction.isRepliable()) await interaction.deferUpdate();
-                            const sessionKey = `${interaction.guildId}:${interaction.user.id}`;
-                            const existing = filterSetupSessions.get(sessionKey);
-                            if (existing) filterSetupSessions.delete(sessionKey);
-                            const state: FilterSetupState = {
-                                step: 0,
-                                values: { enabled: false, logs_enabled: false, logs_channel: "0", lang: "en" },
-                                messageId: interaction.message.id,
-                                guildId: interaction.guildId!,
-                                userId: interaction.user.id,
-                                createdAt: Date.now()
-                            };
-                            filterSetupSessions.set(sessionKey, state);
-                            const steps = ["Enable filter", "Enable logging", "Set log channel", "Select language", "Finish"];
-                            const render = () => {
-                                const progress = steps.map((s, i) => i === state.step ? `▶ ${s}` : `• ${s}`).join(" \n");
-                                const channelName = state.values.logs_channel === "0" ? "Not set" : `#${interaction.guild?.channels.cache.get(state.values.logs_channel)?.name}`;
-                                return "```\n" + `Setup Progress\n${progress}\n\nEnabled: ${state.values.enabled ? "Yes" : "No"}\nLogging: ${state.values.logs_enabled ? "Yes" : "No"}\nLog Channel: ${channelName}\nLanguage: ${state.values.lang}` + "\n```";
-                            };
-                            const buildComponents = (): ActionRowBuilder<ButtonBuilder>[] => {
-                                const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-                                const row1 = new ActionRowBuilder<ButtonBuilder>();
-                                if (state.step === 0) {
-                                    row1.addComponents(
-                                        new ButtonBuilder().setCustomId("filtersetup_enable_yes").setLabel("Enable").setStyle(ButtonStyle.Success),
-                                        new ButtonBuilder().setCustomId("filtersetup_enable_no").setLabel("Disable").setStyle(ButtonStyle.Secondary)
-                                    );
-                                } else if (state.step === 1) {
-                                    row1.addComponents(
-                                        new ButtonBuilder().setCustomId("filtersetup_logs_yes").setLabel("Logging On").setStyle(ButtonStyle.Success),
-                                        new ButtonBuilder().setCustomId("filtersetup_logs_no").setLabel("Logging Off").setStyle(ButtonStyle.Secondary)
-                                    );
-                                } else if (state.step === 2) {
-                                    if (state.values.logs_enabled) {
-                                        row1.addComponents(
-                                            new ButtonBuilder().setCustomId("filtersetup_set_channel").setLabel("Set Channel").setStyle(ButtonStyle.Primary)
-                                        );
-                                    } else {
-                                        // Skip step if logging disabled
-                                        state.step = 3;
-                                        return buildComponents();
-                                    }
-                                } else if (state.step === 3) {
-                                    const rowLangA = new ActionRowBuilder<ButtonBuilder>().addComponents(
-                                        new ButtonBuilder().setCustomId("filtersetup_lang_en").setLabel("English (en)").setStyle(ButtonStyle.Primary),
-                                        new ButtonBuilder().setCustomId("filtersetup_lang_es").setLabel("Spanish (es)").setStyle(ButtonStyle.Primary),
-                                        new ButtonBuilder().setCustomId("filtersetup_lang_fr").setLabel("French (fr)").setStyle(ButtonStyle.Primary)
-                                    );
-                                    const rowLangB = new ActionRowBuilder<ButtonBuilder>().addComponents(
-                                        new ButtonBuilder().setCustomId("filtersetup_lang_de").setLabel("German (de)").setStyle(ButtonStyle.Primary),
-                                        new ButtonBuilder().setCustomId("filtersetup_lang_pt").setLabel("Portuguese (pt)").setStyle(ButtonStyle.Primary),
-                                        new ButtonBuilder().setCustomId("filtersetup_lang_it").setLabel("Italian (it)").setStyle(ButtonStyle.Primary)
-                                    );
-                                    rows.push(rowLangA, rowLangB);
-                                } else if (state.step === 4) {
-                                    row1.addComponents(
-                                        new ButtonBuilder().setCustomId("filtersetup_finish").setLabel("Finish Setup").setStyle(ButtonStyle.Success)
-                                    );
-                                }
-                                const controlRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-                                    new ButtonBuilder().setCustomId("filtersetup_cancel").setLabel("Cancel").setStyle(ButtonStyle.Danger)
-                                );
-                                if (row1.components.length) rows.push(row1);
-                                rows.push(controlRow);
-                                return rows;
-                            };
-                            const embed = new EmbedBuilder().setTitle("Filter Setup Wizard").setColor("Purple").setDescription(render());
-                            // attach helpers to state for later cases
-                            (state as any).render = render;
-                            (state as any).buildComponents = buildComponents;
-                            await interaction.message.edit({ embeds: [embed], components: buildComponents(), content: "" });
-                            break;
+                const foundConfig: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [interaction.guildId]);
+                if (interaction.isRepliable() && uid !== interaction.user.id) return await interaction.reply({ content: "You're not the person who ran the command originally.", ephemeral: true });
+                if (interaction.isRepliable()) await interaction.deferUpdate();
+                const sessionKey = `${interaction.guildId}:${interaction.user.id}`;
+                const existing = filterSetupSessions.get(sessionKey);
+                if (existing) filterSetupSessions.delete(sessionKey);
+                const state: FilterSetupState = {
+                    step: 0,
+                    values: { enabled: false, logs_enabled: false, logs_channel: "0", lang: "en" },
+                    messageId: interaction.message.id,
+                    guildId: interaction.guildId!,
+                    userId: interaction.user.id,
+                    createdAt: Date.now()
+                };
+                filterSetupSessions.set(sessionKey, state);
+                const steps = ["Enable filter", "Enable logging", "Set log channel", "Select language", "Finish"];
+                const render = () => {
+                    const progress = steps.map((s, i) => i === state.step ? `▶ ${s}` : `• ${s}`).join(" \n");
+                    const channelName = state.values.logs_channel === "0" ? "Not set" : `#${interaction.guild?.channels.cache.get(state.values.logs_channel)?.name}`;
+                    return "```\n" + `Setup Progress\n${progress}\n\nEnabled: ${state.values.enabled ? "Yes" : "No"}\nLogging: ${state.values.logs_enabled ? "Yes" : "No"}\nLog Channel: ${channelName}\nLanguage: ${state.values.lang}` + "\n```";
+                };
+                const buildComponents = (): ActionRowBuilder<ButtonBuilder>[] => {
+                    const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+                    const row1 = new ActionRowBuilder<ButtonBuilder>();
+                    if (state.step === 0) {
+                        row1.addComponents(
+                            new ButtonBuilder().setCustomId("filtersetup_enable_yes").setLabel("Enable").setStyle(ButtonStyle.Success),
+                            new ButtonBuilder().setCustomId("filtersetup_enable_no").setLabel("Disable").setStyle(ButtonStyle.Secondary)
+                        );
+                    } else if (state.step === 1) {
+                        row1.addComponents(
+                            new ButtonBuilder().setCustomId("filtersetup_logs_yes").setLabel("Logging On").setStyle(ButtonStyle.Success),
+                            new ButtonBuilder().setCustomId("filtersetup_logs_no").setLabel("Logging Off").setStyle(ButtonStyle.Secondary)
+                        );
+                    } else if (state.step === 2) {
+                        if (state.values.logs_enabled) {
+                            row1.addComponents(
+                                new ButtonBuilder().setCustomId("filtersetup_set_channel").setLabel("Set Channel").setStyle(ButtonStyle.Primary)
+                            );
+                        } else {
+                            // Skip step if logging disabled
+                            state.step = 3;
+                            return buildComponents();
+                        }
+                    } else if (state.step === 3) {
+                        const rowLangA = new ActionRowBuilder<ButtonBuilder>().addComponents(
+                            new ButtonBuilder().setCustomId("filtersetup_lang_en").setLabel("English (en)").setStyle(ButtonStyle.Primary),
+                            new ButtonBuilder().setCustomId("filtersetup_lang_es").setLabel("Spanish (es)").setStyle(ButtonStyle.Primary),
+                            new ButtonBuilder().setCustomId("filtersetup_lang_fr").setLabel("French (fr)").setStyle(ButtonStyle.Primary)
+                        );
+                        const rowLangB = new ActionRowBuilder<ButtonBuilder>().addComponents(
+                            new ButtonBuilder().setCustomId("filtersetup_lang_de").setLabel("German (de)").setStyle(ButtonStyle.Primary),
+                            new ButtonBuilder().setCustomId("filtersetup_lang_pt").setLabel("Portuguese (pt)").setStyle(ButtonStyle.Primary),
+                            new ButtonBuilder().setCustomId("filtersetup_lang_it").setLabel("Italian (it)").setStyle(ButtonStyle.Primary)
+                        );
+                        rows.push(rowLangA, rowLangB);
+                    } else if (state.step === 4) {
+                        row1.addComponents(
+                            new ButtonBuilder().setCustomId("filtersetup_finish").setLabel("Finish Setup").setStyle(ButtonStyle.Success)
+                        );
+                    }
+                    const controlRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+                        new ButtonBuilder().setCustomId("filtersetup_cancel").setLabel("Cancel").setStyle(ButtonStyle.Danger)
+                    );
+                    if (row1.components.length) rows.push(row1);
+                    rows.push(controlRow);
+                    return rows;
+                };
+                const embed = new EmbedBuilder().setTitle("Filter Setup Wizard").setColor("Purple").setDescription(render());
+                // attach helpers to state for later cases
+                (state as any).render = render;
+                (state as any).buildComponents = buildComponents;
+                await interaction.message.edit({ embeds: [embed], components: buildComponents(), content: "" });
+                break;
             }
-                        case "filtersetup_cancel": {
-                            const sessionKey = `${interaction.guildId}:${interaction.user.id}`;
-                            const state = filterSetupSessions.get(sessionKey);
-                            if (!state) { if (interaction.isRepliable()) await interaction.reply({ content: "No active setup.", ephemeral: true }); break; }
-                            filterSetupSessions.delete(sessionKey);
-                            if (interaction.isRepliable()) await interaction.deferUpdate();
-                            await interaction.message.edit({ components: [], content: "Setup cancelled." });
-                            break;
+            case "filtersetup_cancel": {
+                const sessionKey = `${interaction.guildId}:${interaction.user.id}`;
+                const state = filterSetupSessions.get(sessionKey);
+                if (!state) { if (interaction.isRepliable()) await interaction.reply({ content: "No active setup.", ephemeral: true }); break; }
+                filterSetupSessions.delete(sessionKey);
+                if (interaction.isRepliable()) await interaction.deferUpdate();
+                await interaction.message.edit({ components: [], content: "Setup cancelled." });
+                break;
+            }
+            case "filtersetup_enable_yes":
+            case "filtersetup_enable_no":
+            case "filtersetup_logs_yes":
+            case "filtersetup_logs_no":
+            case "filtersetup_set_channel":
+            case "filtersetup_finish":
+            case "filtersetup_lang_en":
+            case "filtersetup_lang_es":
+            case "filtersetup_lang_fr":
+            case "filtersetup_lang_de":
+            case "filtersetup_lang_pt":
+            case "filtersetup_lang_it": {
+                const sessionKey = `${interaction.guildId}:${interaction.user.id}`;
+                const state = filterSetupSessions.get(sessionKey);
+                if (!state) { if (interaction.isRepliable()) await interaction.reply({ content: "Setup expired. Run /filter setup again.", ephemeral: true }); break; }
+                const now = Date.now();
+                if (now - state.createdAt > 10 * 60 * 1000) { // expire after 10m
+                    filterSetupSessions.delete(sessionKey);
+                    if (interaction.isRepliable()) await interaction.reply({ content: "Setup expired. Run /filter setup again.", ephemeral: true });
+                    break;
+                }
+                if (interaction.customId === "filtersetup_enable_yes") state.values.enabled = true;
+                else if (interaction.customId === "filtersetup_enable_no") state.values.enabled = false;
+                else if (interaction.customId === "filtersetup_logs_yes") state.values.logs_enabled = true;
+                else if (interaction.customId === "filtersetup_logs_no") state.values.logs_enabled = false;
+                else if (interaction.customId.startsWith("filtersetup_lang_")) state.values.lang = interaction.customId.split("_").pop()!.toLowerCase();
+                else if (interaction.customId === "filtersetup_set_channel") {
+                    state.awaitingChannelMention = true;
+                    if (interaction.isRepliable()) await interaction.reply({ content: "Mention the log channel now (you have 30s).", ephemeral: true });
+                    const collector = (interaction.channel as TextChannel).createMessageCollector({ filter: m => m.author.id === interaction.user.id, time: 30000, max: 1 });
+                    collector.on("collect", m => {
+                        const mentioned = m.mentions.channels.first();
+                        if (mentioned && mentioned.isTextBased()) {
+                            state.values.logs_channel = mentioned.id;
                         }
-                        case "filtersetup_enable_yes":
-                        case "filtersetup_enable_no":
-                        case "filtersetup_logs_yes":
-                        case "filtersetup_logs_no":
-                        case "filtersetup_set_channel":
-                        case "filtersetup_finish":
-                        case "filtersetup_lang_en":
-                        case "filtersetup_lang_es":
-                        case "filtersetup_lang_fr":
-                        case "filtersetup_lang_de":
-                        case "filtersetup_lang_pt":
-                        case "filtersetup_lang_it": {
-                            const sessionKey = `${interaction.guildId}:${interaction.user.id}`;
-                            const state = filterSetupSessions.get(sessionKey);
-                            if (!state) { if (interaction.isRepliable()) await interaction.reply({ content: "Setup expired. Run /filter setup again.", ephemeral: true }); break; }
-                            const now = Date.now();
-                            if (now - state.createdAt > 10 * 60 * 1000) { // expire after 10m
-                                filterSetupSessions.delete(sessionKey);
-                                if (interaction.isRepliable()) await interaction.reply({ content: "Setup expired. Run /filter setup again.", ephemeral: true });
-                                break;
-                            }
-                            if (interaction.customId === "filtersetup_enable_yes") state.values.enabled = true;
-                            else if (interaction.customId === "filtersetup_enable_no") state.values.enabled = false;
-                            else if (interaction.customId === "filtersetup_logs_yes") state.values.logs_enabled = true;
-                            else if (interaction.customId === "filtersetup_logs_no") state.values.logs_enabled = false;
-                            else if (interaction.customId.startsWith("filtersetup_lang_")) state.values.lang = interaction.customId.split("_").pop()!.toLowerCase();
-                            else if (interaction.customId === "filtersetup_set_channel") {
-                                state.awaitingChannelMention = true;
-                                if (interaction.isRepliable()) await interaction.reply({ content: "Mention the log channel now (you have 30s).", ephemeral: true });
-                                const collector = (interaction.channel as TextChannel).createMessageCollector({ filter: m => m.author.id === interaction.user.id, time: 30000, max: 1 });
-                                collector.on("collect", m => {
-                                    const mentioned = m.mentions.channels.first();
-                                    if (mentioned && mentioned.isTextBased()) {
-                                        state.values.logs_channel = mentioned.id;
-                                    }
-                                    void m.delete().catch(()=>{});
-                                });
-                                collector.on("end", async () => {
-                                    state.awaitingChannelMention = false;
-                                    state.step = 3; // advance to language selection
-                                    const embed = new EmbedBuilder().setTitle("Filter Setup Wizard").setColor("Purple").setDescription((state as any).render());
-                                    await interaction.message.edit({ embeds: [embed], components: (state as any).buildComponents() });
-                                });
-                                break; // wait for channel selection before advancing
-                            }
-                            if (interaction.customId === "filtersetup_finish") {
-                                // Persist to DB
-                                const existingRows: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [state.guildId]);
-                                if (!existingRows[0]) await db.query("INSERT INTO filter_configs SET ?", [{
-                                    enabled: state.values.enabled,
-                                    guild: state.guildId,
-                                    log_channel: state.values.logs_channel,
-                                    enabled_logs: state.values.logs_enabled,
-                                    lang: state.values.lang
-                                }]);
-                                else await db.query("UPDATE filter_configs SET ? WHERE guild = ?", [{
-                                    enabled: state.values.enabled,
-                                    guild: state.guildId,
-                                    log_channel: state.values.logs_channel,
-                                    enabled_logs: state.values.logs_enabled,
-                                    lang: state.values.lang
-                                }, state.guildId]);
-                                filterSetupSessions.delete(sessionKey);
-                                if (interaction.isRepliable()) await interaction.deferUpdate();
-                                const doneEmbed = new EmbedBuilder().setTitle("Filter Setup Complete").setColor("Green").setDescription(`Enabled: ${state.values.enabled ? "Yes" : "No"}\nLogging: ${state.values.logs_enabled ? "Yes" : "No"}\nLog Channel: ${state.values.logs_channel === "0" ? "Not set" : `#${interaction.guild?.channels.cache.get(state.values.logs_channel)?.name}`}\nLanguage: ${state.values.lang}`);
-                                await interaction.message.edit({ embeds: [doneEmbed], components: [] });
-                                break;
-                            }
-                            if (!state.awaitingChannelMention) {
-                                // Advance step if not waiting
-                                if (state.step === 0) state.step = 1;
-                                else if (state.step === 1) state.step = 2;
-                                else if (state.step === 2) state.step = 3;
-                                else if (state.step === 3) state.step = 4;
-                            }
-                            if (interaction.isRepliable()) await interaction.deferUpdate();
-                            const embed = new EmbedBuilder().setTitle("Filter Setup Wizard").setColor("Purple").setDescription((state as any).render());
-                            await interaction.message.edit({ embeds: [embed], components: (state as any).buildComponents() });
-                            break;
-                        }
+                        void m.delete().catch(() => { });
+                    });
+                    collector.on("end", async () => {
+                        state.awaitingChannelMention = false;
+                        state.step = 3; // advance to language selection
+                        const embed = new EmbedBuilder().setTitle("Filter Setup Wizard").setColor("Purple").setDescription((state as any).render());
+                        await interaction.message.edit({ embeds: [embed], components: (state as any).buildComponents() });
+                    });
+                    break; // wait for channel selection before advancing
+                }
+                if (interaction.customId === "filtersetup_finish") {
+                    // Persist to DB
+                    const existingRows: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [state.guildId]);
+                    if (!existingRows[0]) await db.query("INSERT INTO filter_configs SET ?", [{
+                        enabled: state.values.enabled,
+                        guild: state.guildId,
+                        log_channel: state.values.logs_channel,
+                        enabled_logs: state.values.logs_enabled,
+                        lang: state.values.lang
+                    }]);
+                    else await db.query("UPDATE filter_configs SET ? WHERE guild = ?", [{
+                        enabled: state.values.enabled,
+                        guild: state.guildId,
+                        log_channel: state.values.logs_channel,
+                        enabled_logs: state.values.logs_enabled,
+                        lang: state.values.lang
+                    }, state.guildId]);
+                    filterSetupSessions.delete(sessionKey);
+                    if (interaction.isRepliable()) await interaction.deferUpdate();
+                    const doneEmbed = new EmbedBuilder().setTitle("Filter Setup Complete").setColor("Green").setDescription(`Enabled: ${state.values.enabled ? "Yes" : "No"}\nLogging: ${state.values.logs_enabled ? "Yes" : "No"}\nLog Channel: ${state.values.logs_channel === "0" ? "Not set" : `#${interaction.guild?.channels.cache.get(state.values.logs_channel)?.name}`}\nLanguage: ${state.values.lang}`);
+                    await interaction.message.edit({ embeds: [doneEmbed], components: [] });
+                    break;
+                }
+                if (!state.awaitingChannelMention) {
+                    // Advance step if not waiting
+                    if (state.step === 0) state.step = 1;
+                    else if (state.step === 1) state.step = 2;
+                    else if (state.step === 2) state.step = 3;
+                    else if (state.step === 3) state.step = 4;
+                }
+                if (interaction.isRepliable()) await interaction.deferUpdate();
+                const embed = new EmbedBuilder().setTitle("Filter Setup Wizard").setColor("Purple").setDescription((state as any).render());
+                await interaction.message.edit({ embeds: [embed], components: (state as any).buildComponents() });
+                break;
+            }
             case "staffcases": {
                 // Format: staffcases-<action>-<authorId>-<targetUserId>-<page>
                 const [action, authorId, targetUserId, pageStr] = args;
