@@ -136,6 +136,7 @@ export default {
         .addSubcommand(s => s.setName("notify")
             .setDescription("Send a global notification to all users (Admin+)")
             .addStringOption(o => o.setName("language").setDescription("Source language (default: en)").setRequired(false))),
+    category: "Bot Staff",
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         const sub = interaction.options.getSubcommand();
         const executor = interaction.user;

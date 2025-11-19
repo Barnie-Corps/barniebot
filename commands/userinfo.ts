@@ -10,6 +10,7 @@ export default {
                 .setDescription("The user to get information about")
                 .setRequired(true)
         ),
+    category: "Info",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
             common: {

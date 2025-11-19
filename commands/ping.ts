@@ -5,6 +5,7 @@ export default {
     data: new SlashCommandBuilder()
         .setName("ping")
         .setDescription("Shows bot's latency"),
+    category: "Utility",
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         let texts = {
             socket: "Socket latency",

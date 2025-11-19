@@ -6,6 +6,7 @@ export default {
     data: new SlashCommandBuilder()
         .setName("notifications")
         .setDescription("View your unread notifications"),
+    category: "Utility",
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         const userId = interaction.user.id;
 
@@ -68,9 +69,9 @@ export default {
             }
 
             if (isUpdate) {
-                await interaction.editReply({ embeds: [embed], components: [row] });
+                await interaction.editReply({ embeds: [embed], components: [row], content: "" });
             } else {
-                await interaction.editReply({ embeds: [embed], components: [row] });
+                await interaction.editReply({ embeds: [embed], components: [row], content: "" });
             }
         };
 

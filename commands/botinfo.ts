@@ -12,6 +12,7 @@ export default {
     data: new SlashCommandBuilder()
         .setName("botinfo")
         .setDescription("Shows bot's info"),
+    category: "Info",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         function byteToGB(b: number): number {
             return ((b / 1024) / 1024) / 1024;

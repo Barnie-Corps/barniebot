@@ -6,6 +6,7 @@ export default {
         .setDescription("Kicks a user from the server")
         .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
         .addUserOption(o => o.setName("user").setDescription("The target user.").setRequired(true)),
+    category: "Moderation",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         if (!interaction.guild) return await interaction.reply("No.");
         await interaction.deferReply({ ephemeral: true });

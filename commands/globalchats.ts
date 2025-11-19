@@ -12,6 +12,7 @@ export default {
         .addSubcommand(s => s.setName("autotranslate").setDescription("Set the autotranslate option for your guild").addBooleanOption(o => o.setName("status").setDescription("The status to set, true or false (enabled, disabled)").setRequired(true)))
         .addSubcommand(s => s.setName("set").setDescription("Set the global chat channel in the current guild").addChannelOption(o => o.setName("channel").setDescription("The channel to set").setRequired(true)))
         .addSubcommand(s => s.setName("language").setDescription("Sets the server's global chat language").addStringOption(o => o.setName("language").setDescription("The language to set").setRequired(true))),
+    category: "Utility",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
             errors: {

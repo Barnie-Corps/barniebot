@@ -122,6 +122,7 @@ export default {
       .addIntegerOption(o => o.setName("ticket_id").setDescription("Ticket ID").setRequired(true)))
     .addSubcommand(s => s.setName("search_user").setDescription("Search a user's ID by username and display found user info with moderation status")
       .addStringOption(o => o.setName("username").setDescription("Username to search for").setRequired(true))),
+  category: "Bot Staff",
   execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
     const sub = interaction.options.getSubcommand();
     const executor = interaction.user;
@@ -533,7 +534,7 @@ export default {
             .setTimestamp();
           for (const entry of slice) {
             embed.addFields({
-              name: `${entry.user.username} (${entry.user.id})`,
+              name: `${entry.user.displayName} (@${entry.user.username}) -> (${entry.user.id})`,
               value: `Rank: ${entry.rank} | Points: ${entry.points} | Blacklisted: ${entry.blacklisted ? 'Yes' : 'No'} | Muted: ${entry.muted ? 'Yes' : 'No'}`,
               inline: false
             });

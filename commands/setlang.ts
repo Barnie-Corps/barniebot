@@ -8,6 +8,7 @@ export default {
         .setName("setlang")
         .setDescription("Sets your language")
         .addStringOption(o => o.setName("language").setDescription("New language's code").setRequired(true)),
+    category: "Utility",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let newLang = interaction.options.getString("language");
         const reply = (text: string) => {

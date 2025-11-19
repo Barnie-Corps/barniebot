@@ -39,6 +39,7 @@ export default {
             .setDescription("Show moderation cases for a user (warnings, blacklist, mutes)")
             .addUserOption(o => o.setName("user").setDescription("User").setRequired(true))
             .addIntegerOption(o => o.setName("page").setDescription("Warnings page number").setMinValue(1).setRequired(false))),
+    category: "Bot Staff",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         const sub = interaction.options.getSubcommand();
         const executorRank = await utils.getUserStaffRank(interaction.user.id);

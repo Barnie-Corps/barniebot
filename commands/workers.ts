@@ -6,6 +6,7 @@ export default {
     data: new SlashCommandBuilder()
         .setName("workers")
         .setDescription("Shows worker pool stats and latencies"),
+    category: "Admin",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         const stats = Workers.getWorkerStats();
         let texts = {

@@ -8,6 +8,7 @@ export default {
     .setDescription("View warning history for a user")
     .addUserOption(o => o.setName("user").setDescription("User to check (leave empty for yourself)").setRequired(false))
     .addBooleanOption(o => o.setName("include_expired").setDescription("Include expired warnings").setRequired(false)),
+  category: "Moderation",
   execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
     const targetUser = interaction.options.getUser("user") ?? interaction.user;
     const includeExpired = interaction.options.getBoolean("include_expired") ?? false;

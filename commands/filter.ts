@@ -79,6 +79,7 @@ export default {
             s.setName("setup")
                 .setDescription("Initializes the filter setup wizard (Can't be executed twice)")
         ),
+    category: "Moderation",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
             default: "This command is still in development.",

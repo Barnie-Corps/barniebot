@@ -10,6 +10,7 @@ export default {
                 .setDescription("The user whose avatar you wish to view")
                 .setRequired(false)
         ),
+    category: "Utility",
     async execute(interaction: ChatInputCommandInteraction) {
         const target = interaction.options.getUser("target") ?? interaction.user;
 

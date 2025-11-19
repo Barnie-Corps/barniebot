@@ -6,6 +6,7 @@ export default {
     data: new SlashCommandBuilder()
         .setName("meme")
         .setDescription("Shows a random meme"),
+    category: "Fun",
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         async function getMeme() {
             let rsp = await fetch("https://meme-api.com/gimme");

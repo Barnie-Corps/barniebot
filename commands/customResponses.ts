@@ -41,6 +41,7 @@ export default {
             s.setName("list")
                 .setDescription("List all custom responses.")
         ),
+    category: "Utility",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
             errors: {

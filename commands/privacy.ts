@@ -5,6 +5,7 @@ export default {
     data: new SlashCommandBuilder()
         .setName("privacy")
         .setDescription("Shows you the bot privacy policy."),
+    category: "Info",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let text = { value: "Here is the bot's privacy policy, I recommend reading it." };
         if (lang !== "en") {

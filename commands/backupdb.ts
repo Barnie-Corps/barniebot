@@ -57,6 +57,7 @@ export default {
     .setName("backupdb")
     .setDescription("Create an on-demand MySQL database backup (restricted)")
     .addBooleanOption(o => o.setName("public").setDescription("Make the result message public (default: no)")),
+  category: "Admin",
   ephemeral: true,
   async execute(interaction: ChatInputCommandInteraction) {
     const rank = await utils.getUserStaffRank(interaction.user.id);

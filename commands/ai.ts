@@ -51,6 +51,7 @@ export default {
             s.setName("voice")
                 .setDescription("Starts a voice conversation with the AI (requires being in a voice channel).")
         ),
+    category: "AI",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
             errors: {

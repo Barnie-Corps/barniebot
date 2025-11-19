@@ -7,6 +7,7 @@ export default {
     data: new SlashCommandBuilder()
         .setName("top")
         .setDescription("Shows the top users in the message count leaderboard"),
+    category: "Info",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
             embed: {

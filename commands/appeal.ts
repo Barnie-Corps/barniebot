@@ -8,6 +8,7 @@ export default {
     .setDescription("Appeal a warning")
     .addIntegerOption(o => o.setName("warning_id").setDescription("Warning ID to appeal").setRequired(true))
     .addStringOption(o => o.setName("reason").setDescription("Why should this warning be removed?").setRequired(true).setMinLength(20).setMaxLength(500)),
+  category: "Moderation",
   execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
     const warningId = interaction.options.getInteger("warning_id", true);
     const appealReason = interaction.options.getString("reason", true);

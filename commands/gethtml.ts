@@ -7,6 +7,7 @@ export default {
         .setName("gethtml")
         .setDescription("Gets the HTML and code response from a given URL.")
         .addStringOption(o => o.setName("url").setRequired(true).setDescription("URL whose response code and html you wanna get")),
+    category: "Utility",
     execute: async (interaction: ChatInputCommandInteraction, language: string) => {
         let texts = {
             code: "Response Code",

@@ -31,6 +31,7 @@ export default {
                         .setRequired(true)
                 )
         ),
+    category: "Utility",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
             errors: {

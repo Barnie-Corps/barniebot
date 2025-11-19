@@ -9,6 +9,7 @@ export default {
         .setName("support")
         .setDescription("Create a support ticket")
         .addStringOption(o => o.setName("message").setDescription("Describe your issue or question").setRequired(true)),
+    category: "Support",
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         // In guilds, require ManageMessages permission to prevent spam
         if (interaction.guild && interaction.member) {

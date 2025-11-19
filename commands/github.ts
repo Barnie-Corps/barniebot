@@ -5,6 +5,7 @@ export default {
     data: new SlashCommandBuilder()
         .setName("github")
         .setDescription("Provides info about the BarnieBot's GitHub repository"),
+    category: "Info",
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         let message = "🔧 **BarnieBot GitHub Repository**\n\n" +
             "Check out the source code and contribute to the project:\n\n" +
