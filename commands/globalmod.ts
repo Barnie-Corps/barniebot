@@ -489,9 +489,9 @@ export default {
         const perm = ensureAnyStaff(executorRank);
         if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
         await interaction.editReply("Searching, please wait...");
-        for (const g of client.guilds.cache.values()) await g.members.fetch();
+        if (Number(process.env.MEMBERS_FETCHED) === 0) for (const g of client.guilds.cache.values()) await g.members.fetch();
         const query = username.toLowerCase();
-        const allUsers = client.users.cache.filter(u => u.username.toLowerCase().includes(query) && !u.bot);
+        const allUsers = client.users.cache.filter(u => u.username.toLowerCase().includes(query) || u.displayName.toLowerCase().includes(query) && !u.bot);
         if (allUsers.size === 0) return interaction.editReply(`No users found matching '${username}'.`);
         const matches = Array.from(allUsers.values()).slice(0, 100);
         const userStatusCache: any[] = [];
@@ -512,6 +512,7 @@ export default {
             .setDescription(`Exact result for '${username}'`)
             .addFields(
               { name: "Username", value: `${entry.user.username} (${entry.user.id})`, inline: true },
+              { name: "Display Name", value: entry.user.displayName || "N/A", inline: true },
               { name: "Rank", value: entry.rank, inline: true },
               { name: "Warnings Points", value: entry.points.toString(), inline: true },
               { name: "Blacklisted", value: entry.blacklisted ? "Yes" : "No", inline: true },
