@@ -81,5 +81,7 @@ export default function queries(): void {
     
     db.query("CREATE TABLE IF NOT EXISTS rpg_character_skills (character_id INT NOT NULL, skill_id INT NOT NULL, level INT NOT NULL DEFAULT 1, last_used BIGINT(255) DEFAULT NULL, PRIMARY KEY (character_id, skill_id))");
     
+    db.query("CREATE TABLE IF NOT EXISTS rpg_trades (id INT PRIMARY KEY AUTO_INCREMENT, initiator_id INT NOT NULL, receiver_id INT NOT NULL, initiator_gold BIGINT NOT NULL DEFAULT 0, initiator_items TEXT, receiver_gold BIGINT NOT NULL DEFAULT 0, receiver_items TEXT, status VARCHAR(20) NOT NULL DEFAULT 'pending', created_at BIGINT(255) NOT NULL, completed_at BIGINT(255) DEFAULT NULL)");
+    
     Log.info("Database tables ensured", { component: "Database" });
 };

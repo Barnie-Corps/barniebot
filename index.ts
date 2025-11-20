@@ -25,6 +25,7 @@ import data from "./data"; // Data file for storing bot data
 import Log from "./Log"; // Log object for logging
 import queries from "./mysql/queries"; // This file is used to create the tables if they don't exist
 import db from "./mysql/database"; // Database connection
+import { initializeShopItems } from "./rpg_init"; // Initialize RPG shop items
 import utils from "./utils"; // Utils file for utility functions
 import load_slash from "./load_slash"; // Load slash commands
 import ChatManager from "./managers/ChatManager"; // Chat manager for global chat
@@ -77,6 +78,7 @@ client.on("clientReady", async (): Promise<any> => {
         username: client.user?.tag
     });
     queries();
+    initializeShopItems();
     const staffMembers: any = await db.query("SELECT * FROM staff");
     for (const staff of staffMembers) {
         try {

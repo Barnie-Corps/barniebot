@@ -135,7 +135,61 @@ export default {
                 .setRequired(false)))
         .addSubcommand(s => s.setName("notify")
             .setDescription("Send a global notification to all users (Admin+)")
-            .addStringOption(o => o.setName("language").setDescription("Source language (default: en)").setRequired(false))),
+            .addStringOption(o => o.setName("language").setDescription("Source language (default: en)").setRequired(false)))
+        .addSubcommand(s => s.setName("rpg_freeze")
+            .setDescription("Freeze an RPG account (Admin+)")
+            .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true))
+            .addStringOption(o => o.setName("reason").setDescription("Reason for freeze").setRequired(true)))
+        .addSubcommand(s => s.setName("rpg_unfreeze")
+            .setDescription("Unfreeze an RPG account (Admin+)")
+            .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true)))
+        .addSubcommand(s => s.setName("rpg_ban")
+            .setDescription("Ban an RPG account (Admin+)")
+            .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true))
+            .addStringOption(o => o.setName("reason").setDescription("Reason for ban").setRequired(true)))
+        .addSubcommand(s => s.setName("rpg_unban")
+            .setDescription("Unban an RPG account (Admin+)")
+            .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true)))
+        .addSubcommand(s => s.setName("rpg_stats")
+            .setDescription("Modify character stats (Admin+)")
+            .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true))
+            .addStringOption(o => o.setName("stat")
+                .setDescription("Stat to modify")
+                .addChoices(
+                    { name: "Level", value: "level" },
+                    { name: "Experience", value: "experience" },
+                    { name: "Gold", value: "gold" },
+                    { name: "HP", value: "max_hp" },
+                    { name: "MP", value: "max_mp" },
+                    { name: "Strength", value: "strength" },
+                    { name: "Defense", value: "defense" },
+                    { name: "Agility", value: "agility" },
+                    { name: "Intelligence", value: "intelligence" },
+                    { name: "Luck", value: "luck" },
+                    { name: "Stat Points", value: "stat_points" }
+                )
+                .setRequired(true))
+            .addIntegerOption(o => o.setName("value").setDescription("New value").setRequired(true)))
+        .addSubcommand(s => s.setName("rpg_password")
+            .setDescription("Change account password (Admin+)")
+            .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true))
+            .addStringOption(o => o.setName("new_password").setDescription("New password").setRequired(true)))
+        .addSubcommand(s => s.setName("rpg_logout")
+            .setDescription("Force logout an account (Admin+)")
+            .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true)))
+        .addSubcommand(s => s.setName("rpg_info")
+            .setDescription("View detailed RPG account info (Mod+)")
+            .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true)))
+        .addSubcommand(s => s.setName("rpg_give_item")
+            .setDescription("Give an item to a character (Admin+)")
+            .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true))
+            .addIntegerOption(o => o.setName("item_id").setDescription("Item ID").setRequired(true))
+            .addIntegerOption(o => o.setName("quantity").setDescription("Quantity (default: 1)").setRequired(false)))
+        .addSubcommand(s => s.setName("rpg_remove_item")
+            .setDescription("Remove an item from a character (Admin+)")
+            .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true))
+            .addIntegerOption(o => o.setName("item_id").setDescription("Item ID").setRequired(true))
+            .addIntegerOption(o => o.setName("quantity").setDescription("Quantity (default: 1)").setRequired(false))),
     category: "Bot Staff",
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         const sub = interaction.options.getSubcommand();
@@ -661,6 +715,412 @@ export default {
                 });
                 
                 break;
+            }
+
+            case "rpg_freeze": {
+                const perm = ensureAdminPlus(executorRank);
+                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+
+                const username = interaction.options.getString("username", true);
+                const reason = interaction.options.getString("reason", true);
+
+                const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
+                if (!account[0]) {
+                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                }
+
+                await db.query(
+                    "INSERT INTO rpg_account_status SET ? ON DUPLICATE KEY UPDATE frozen = TRUE, frozen_reason = VALUES(frozen_reason), frozen_by = VALUES(frozen_by), frozen_at = VALUES(frozen_at)",
+                    [{ account_id: account[0].id, frozen: true, frozen_reason: reason, frozen_by: executor.id, frozen_at: Date.now() }]
+                );
+
+                await db.query("UPDATE rpg_sessions SET active = FALSE WHERE account_id = ?", [account[0].id]);
+
+                const user = await client.users.fetch(account[0].last_user_logged).catch(() => null);
+                if (user) {
+                    try {
+                        const freezeEmbed = new EmbedBuilder()
+                            .setColor("#0000FF")
+                            .setTitle("❄️ Account Frozen")
+                            .setDescription(`Your RPG account **${username}** has been frozen by staff.`)
+                            .addFields(
+                                { name: "Reason", value: reason },
+                                { name: "Frozen by", value: executor.username }
+                            )
+                            .setTimestamp();
+                        await user.send({ embeds: [freezeEmbed] });
+                    } catch {}
+                }
+
+                await logStaffAction(executor.id, "RPG_FREEZE", account[0].last_user_logged, `Froze RPG account ${username}: ${reason}`, { username, accountId: account[0].id });
+                return interaction.editReply(`❄️ **Account frozen:** ${username}\n**Reason:** ${reason}\nThe account has been logged out.`);
+            }
+
+            case "rpg_unfreeze": {
+                const perm = ensureAdminPlus(executorRank);
+                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+
+                const username = interaction.options.getString("username", true);
+
+                const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
+                if (!account[0]) {
+                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                }
+
+                await db.query(
+                    "INSERT INTO rpg_account_status SET ? ON DUPLICATE KEY UPDATE frozen = FALSE, frozen_reason = NULL, frozen_by = NULL, frozen_at = NULL",
+                    [{ account_id: account[0].id, frozen: false }]
+                );
+
+                const user = await client.users.fetch(account[0].last_user_logged).catch(() => null);
+                if (user) {
+                    try {
+                        const unfreezeEmbed = new EmbedBuilder()
+                            .setColor("#00FF00")
+                            .setTitle("✅ Account Unfrozen")
+                            .setDescription(`Your RPG account **${username}** has been unfrozen by staff.`)
+                            .addFields({ name: "Unfrozen by", value: executor.username })
+                            .setTimestamp();
+                        await user.send({ embeds: [unfreezeEmbed] });
+                    } catch {}
+                }
+
+                await logStaffAction(executor.id, "RPG_UNFREEZE", account[0].last_user_logged, `Unfroze RPG account ${username}`, { username, accountId: account[0].id });
+                return interaction.editReply(`✅ **Account unfrozen:** ${username}\nThe user can now log in again.`);
+            }
+
+            case "rpg_ban": {
+                const perm = ensureAdminPlus(executorRank);
+                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+
+                const username = interaction.options.getString("username", true);
+                const reason = interaction.options.getString("reason", true);
+
+                const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
+                if (!account[0]) {
+                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                }
+
+                await db.query(
+                    "INSERT INTO rpg_account_status SET ? ON DUPLICATE KEY UPDATE banned = TRUE, banned_reason = VALUES(banned_reason), banned_by = VALUES(banned_by), banned_at = VALUES(banned_at)",
+                    [{ account_id: account[0].id, banned: true, banned_reason: reason, banned_by: executor.id, banned_at: Date.now() }]
+                );
+
+                await db.query("UPDATE rpg_sessions SET active = FALSE WHERE account_id = ?", [account[0].id]);
+
+                const user = await client.users.fetch(account[0].last_user_logged).catch(() => null);
+                if (user) {
+                    try {
+                        const banEmbed = new EmbedBuilder()
+                            .setColor("#000000")
+                            .setTitle("🚫 Account Banned")
+                            .setDescription(`Your RPG account **${username}** has been permanently banned.`)
+                            .addFields(
+                                { name: "Reason", value: reason },
+                                { name: "Banned by", value: executor.username }
+                            )
+                            .setTimestamp();
+                        await user.send({ embeds: [banEmbed] });
+                    } catch {}
+                }
+
+                await logStaffAction(executor.id, "RPG_BAN", account[0].last_user_logged, `Banned RPG account ${username}: ${reason}`, { username, accountId: account[0].id });
+                return interaction.editReply(`🚫 **Account banned:** ${username}\n**Reason:** ${reason}\nThe account has been logged out.`);
+            }
+
+            case "rpg_unban": {
+                const perm = ensureAdminPlus(executorRank);
+                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+
+                const username = interaction.options.getString("username", true);
+
+                const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
+                if (!account[0]) {
+                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                }
+
+                await db.query(
+                    "INSERT INTO rpg_account_status SET ? ON DUPLICATE KEY UPDATE banned = FALSE, banned_reason = NULL, banned_by = NULL, banned_at = NULL",
+                    [{ account_id: account[0].id, banned: false }]
+                );
+
+                const user = await client.users.fetch(account[0].last_user_logged).catch(() => null);
+                if (user) {
+                    try {
+                        const unbanEmbed = new EmbedBuilder()
+                            .setColor("#00FF00")
+                            .setTitle("✅ Account Unbanned")
+                            .setDescription(`Your RPG account **${username}** has been unbanned by staff.`)
+                            .addFields({ name: "Unbanned by", value: executor.username })
+                            .setTimestamp();
+                        await user.send({ embeds: [unbanEmbed] });
+                    } catch {}
+                }
+
+                await logStaffAction(executor.id, "RPG_UNBAN", account[0].last_user_logged, `Unbanned RPG account ${username}`, { username, accountId: account[0].id });
+                return interaction.editReply(`✅ **Account unbanned:** ${username}\nThe user can now log in again.`);
+            }
+
+            case "rpg_stats": {
+                const perm = ensureAdminPlus(executorRank);
+                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+
+                const username = interaction.options.getString("username", true);
+                const stat = interaction.options.getString("stat", true);
+                const value = interaction.options.getInteger("value", true);
+
+                const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
+                if (!account[0]) {
+                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                }
+
+                const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [account[0].id]);
+                if (!character[0]) {
+                    return interaction.editReply(`❌ No character found for account **${username}**.`);
+                }
+
+                const validStats = ["level", "experience", "gold", "max_hp", "max_mp", "strength", "defense", "agility", "intelligence", "luck", "stat_points"];
+                if (!validStats.includes(stat)) {
+                    return interaction.editReply(`❌ Invalid stat: ${stat}`);
+                }
+
+                const oldValue = character[0][stat];
+                await db.query(`UPDATE rpg_characters SET ${stat} = ? WHERE id = ?`, [value, character[0].id]);
+
+                if (stat === "max_hp") {
+                    await db.query("UPDATE rpg_characters SET hp = ? WHERE id = ?", [value, character[0].id]);
+                }
+                if (stat === "max_mp") {
+                    await db.query("UPDATE rpg_characters SET mp = ? WHERE id = ?", [value, character[0].id]);
+                }
+
+                await logStaffAction(executor.id, "RPG_MODIFY_STATS", account[0].last_user_logged, `Modified ${stat} for ${username}: ${oldValue} → ${value}`, { username, stat, oldValue, newValue: value });
+                return interaction.editReply(`📊 **Stats modified for ${username}**\n**${stat}:** ${oldValue} → ${value}`);
+            }
+
+            case "rpg_password": {
+                const perm = ensureAdminPlus(executorRank);
+                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+
+                const username = interaction.options.getString("username", true);
+                const newPassword = interaction.options.getString("new_password", true);
+
+                const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
+                if (!account[0]) {
+                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                }
+
+                const encryptedPassword = utils.encryptWithAES(data.bot.encryption_key, newPassword);
+                await db.query("UPDATE registered_accounts SET password = ? WHERE id = ?", [encryptedPassword, account[0].id]);
+
+                await db.query("UPDATE rpg_sessions SET active = FALSE WHERE account_id = ?", [account[0].id]);
+
+                const user = await client.users.fetch(account[0].last_user_logged).catch(() => null);
+                if (user) {
+                    try {
+                        const passwordEmbed = new EmbedBuilder()
+                            .setColor("#FFA500")
+                            .setTitle("🔐 Password Changed")
+                            .setDescription(`Your RPG account password has been changed by staff.\n\n**New Password:** ||${newPassword}||`)
+                            .addFields({ name: "Changed by", value: executor.username })
+                            .setFooter({ text: "Please log in again with your new password" })
+                            .setTimestamp();
+                        await user.send({ embeds: [passwordEmbed] });
+                    } catch {}
+                }
+
+                await logStaffAction(executor.id, "RPG_CHANGE_PASSWORD", account[0].last_user_logged, `Changed password for ${username}`, { username, accountId: account[0].id });
+                return interaction.editReply(`🔐 **Password changed for ${username}**\nThe account has been logged out. User has been notified.`);
+            }
+
+            case "rpg_logout": {
+                const perm = ensureAdminPlus(executorRank);
+                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+
+                const username = interaction.options.getString("username", true);
+
+                const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
+                if (!account[0]) {
+                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                }
+
+                const session: any = await db.query("SELECT * FROM rpg_sessions WHERE account_id = ? AND active = TRUE", [account[0].id]);
+                if (!session[0]) {
+                    return interaction.editReply(`❌ Account **${username}** is not currently logged in.`);
+                }
+
+                await db.query("UPDATE rpg_sessions SET active = FALSE WHERE account_id = ?", [account[0].id]);
+
+                const user = await client.users.fetch(account[0].last_user_logged).catch(() => null);
+                if (user) {
+                    try {
+                        const logoutEmbed = new EmbedBuilder()
+                            .setColor("#FF6600")
+                            .setTitle("🚪 Forced Logout")
+                            .setDescription(`You have been logged out of your RPG account **${username}** by staff.`)
+                            .addFields({ name: "Logged out by", value: executor.username })
+                            .setTimestamp();
+                        await user.send({ embeds: [logoutEmbed] });
+                    } catch {}
+                }
+
+                await logStaffAction(executor.id, "RPG_LOGOUT", account[0].last_user_logged, `Force logged out ${username}`, { username, accountId: account[0].id });
+                return interaction.editReply(`🚪 **Account logged out:** ${username}`);
+            }
+
+            case "rpg_info": {
+                const perm = ensureModPlus(executorRank);
+                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+
+                const username = interaction.options.getString("username", true);
+
+                const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
+                if (!account[0]) {
+                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                }
+
+                const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [account[0].id]);
+                const session: any = await db.query("SELECT * FROM rpg_sessions WHERE account_id = ? AND active = TRUE", [account[0].id]);
+                const status: any = await db.query("SELECT * FROM rpg_account_status WHERE account_id = ?", [account[0].id]);
+
+                const infoEmbed = new EmbedBuilder()
+                    .setColor("#9B59B6")
+                    .setTitle(`📋 RPG Account Info: ${username}`)
+                    .setTimestamp();
+
+                infoEmbed.addFields(
+                    { name: "Account ID", value: account[0].id.toString(), inline: true },
+                    { name: "Email", value: account[0].email, inline: true },
+                    { name: "Verified", value: account[0].verified ? "✅" : "❌", inline: true },
+                    { name: "Created", value: `<t:${Math.floor(account[0].created_at / 1000)}:R>`, inline: true },
+                    { name: "Last Login", value: account[0].last_login ? `<t:${Math.floor(account[0].last_login / 1000)}:R>` : "Never", inline: true },
+                    { name: "Last User", value: account[0].last_user_logged !== "0" ? `<@${account[0].last_user_logged}>` : "None", inline: true }
+                );
+
+                if (character[0]) {
+                    infoEmbed.addFields(
+                        { name: "Character Name", value: character[0].name, inline: true },
+                        { name: "Class", value: character[0].class, inline: true },
+                        { name: "Level", value: character[0].level.toString(), inline: true },
+                        { name: "Gold", value: character[0].gold.toLocaleString(), inline: true },
+                        { name: "HP", value: `${character[0].hp}/${character[0].max_hp}`, inline: true },
+                        { name: "MP", value: `${character[0].mp}/${character[0].max_mp}`, inline: true },
+                        { name: "Stats", value: `STR: ${character[0].strength} | DEF: ${character[0].defense} | AGI: ${character[0].agility}\nINT: ${character[0].intelligence} | LUK: ${character[0].luck}`, inline: false }
+                    );
+                } else {
+                    infoEmbed.addFields({ name: "Character", value: "No character created", inline: false });
+                }
+
+                if (session[0]) {
+                    infoEmbed.addFields(
+                        { name: "Session Status", value: "🟢 Active", inline: true },
+                        { name: "Logged in", value: `<t:${Math.floor(session[0].logged_in_at / 1000)}:R>`, inline: true }
+                    );
+                } else {
+                    infoEmbed.addFields({ name: "Session Status", value: "⚫ Offline", inline: false });
+                }
+
+                if (status[0]) {
+                    if (status[0].frozen) {
+                        const frozenBy = await client.users.fetch(status[0].frozen_by).catch(() => null);
+                        infoEmbed.addFields({
+                            name: "❄️ Frozen",
+                            value: `**Reason:** ${status[0].frozen_reason}\n**By:** ${frozenBy?.username || "Unknown"}\n**At:** <t:${Math.floor(status[0].frozen_at / 1000)}:R>`,
+                            inline: false
+                        });
+                    }
+                    if (status[0].banned) {
+                        const bannedBy = await client.users.fetch(status[0].banned_by).catch(() => null);
+                        infoEmbed.addFields({
+                            name: "🚫 Banned",
+                            value: `**Reason:** ${status[0].banned_reason}\n**By:** ${bannedBy?.username || "Unknown"}\n**At:** <t:${Math.floor(status[0].banned_at / 1000)}:R>`,
+                            inline: false
+                        });
+                    }
+                }
+
+                await logStaffAction(executor.id, "RPG_VIEW_INFO", account[0].last_user_logged, `Viewed RPG info for ${username}`, { username, accountId: account[0].id });
+                return interaction.editReply({ embeds: [infoEmbed] });
+            }
+
+            case "rpg_give_item": {
+                const perm = ensureAdminPlus(executorRank);
+                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+
+                const username = interaction.options.getString("username", true);
+                const itemId = interaction.options.getInteger("item_id", true);
+                const quantity = interaction.options.getInteger("quantity") || 1;
+
+                const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
+                if (!account[0]) {
+                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                }
+
+                const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [account[0].id]);
+                if (!character[0]) {
+                    return interaction.editReply(`❌ No character found for account **${username}**.`);
+                }
+
+                const item: any = await db.query("SELECT * FROM rpg_items WHERE id = ?", [itemId]);
+                if (!item[0]) {
+                    return interaction.editReply(`❌ Item ID **${itemId}** not found.`);
+                }
+
+                const existingItem: any = await db.query("SELECT * FROM rpg_inventory WHERE character_id = ? AND item_id = ?", [character[0].id, itemId]);
+                
+                if (existingItem[0] && item[0].stackable) {
+                    await db.query("UPDATE rpg_inventory SET quantity = quantity + ? WHERE id = ?", [quantity, existingItem[0].id]);
+                } else {
+                    await db.query("INSERT INTO rpg_inventory SET ?", [{
+                        character_id: character[0].id,
+                        item_id: itemId,
+                        quantity: quantity,
+                        acquired_at: Date.now(),
+                        bound: false
+                    }]);
+                }
+
+                await logStaffAction(executor.id, "RPG_GIVE_ITEM", account[0].last_user_logged, `Gave ${quantity}x ${item[0].name} to ${username}`, { username, itemId, itemName: item[0].name, quantity });
+                return interaction.editReply(`✅ **Item given to ${username}**\n**Item:** ${item[0].name}\n**Quantity:** ${quantity}`);
+            }
+
+            case "rpg_remove_item": {
+                const perm = ensureAdminPlus(executorRank);
+                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+
+                const username = interaction.options.getString("username", true);
+                const itemId = interaction.options.getInteger("item_id", true);
+                const quantity = interaction.options.getInteger("quantity") || 1;
+
+                const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
+                if (!account[0]) {
+                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                }
+
+                const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [account[0].id]);
+                if (!character[0]) {
+                    return interaction.editReply(`❌ No character found for account **${username}**.`);
+                }
+
+                const item: any = await db.query("SELECT * FROM rpg_items WHERE id = ?", [itemId]);
+                if (!item[0]) {
+                    return interaction.editReply(`❌ Item ID **${itemId}** not found.`);
+                }
+
+                const existingItem: any = await db.query("SELECT * FROM rpg_inventory WHERE character_id = ? AND item_id = ?", [character[0].id, itemId]);
+                
+                if (!existingItem[0]) {
+                    return interaction.editReply(`❌ Character does not have this item.`);
+                }
+
+                if (existingItem[0].quantity <= quantity) {
+                    await db.query("DELETE FROM rpg_inventory WHERE id = ?", [existingItem[0].id]);
+                } else {
+                    await db.query("UPDATE rpg_inventory SET quantity = quantity - ? WHERE id = ?", [quantity, existingItem[0].id]);
+                }
+
+                await logStaffAction(executor.id, "RPG_REMOVE_ITEM", account[0].last_user_logged, `Removed ${quantity}x ${item[0].name} from ${username}`, { username, itemId, itemName: item[0].name, quantity });
+                return interaction.editReply(`✅ **Item removed from ${username}**\n**Item:** ${item[0].name}\n**Quantity:** ${quantity}`);
             }
         }
     },
