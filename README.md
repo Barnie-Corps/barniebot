@@ -1,6 +1,6 @@
 # BarnieBot
 
-A powerful TypeScript Discord bot that bridges communities through global chat, AI assistance, comprehensive moderation tools, and a fully managed support ticket workflow.
+A powerful TypeScript Discord bot that bridges communities through global chat, AI assistance, comprehensive moderation tools, a fully-featured RPG system with account management, and a fully managed support ticket workflow.
 
 ## What It Does
 
@@ -8,7 +8,9 @@ A powerful TypeScript Discord bot that bridges communities through global chat, 
 
 **AI Powered** – Google Gemini and NVIDIA AI models integration for conversational chat (`/ai chat`), quick and reasoning questions (`/ai ask`), and voice conversations with speech-to-text.
 
-**Staff & Moderation System** – Eight-tier staff hierarchy (Support → Owner) with global enforcement tools: blacklists, warnings, mutes, ticket assignment & auditing. Interactive pagination for case history (`/staff cases`).
+**RPG System** – Complete character progression with account registration, 5 unique classes (Warrior, Mage, Rogue, Paladin, Archer), stat management, equipment system (7 slots), inventory management, shop with database-driven items, player-to-player trading, turn-based combat with difficulty scaling, quest system, and leaderboards. Includes single-session login enforcement, account status management (freeze/ban), and comprehensive admin tools.
+
+**Staff & Moderation System** – Eight-tier staff hierarchy (Support → Owner) with global enforcement tools: blacklists, warnings, mutes, ticket assignment & auditing. Interactive pagination for case history (`/staff cases`). Includes appeal system for warnings with staff review workflow and comprehensive audit logging.
 
 **Support Tickets** – Users open tickets via `/support` (DM or guild); system creates a home-guild channel, relays messages bi‑directionally (user ↔ staff), auto-assigns available staff (fair workload), tracks first response time, exports TXT+HTML transcripts, and supports priority/category, internal staff notes, audit logging, and controlled closure.
 
@@ -16,10 +18,19 @@ A powerful TypeScript Discord bot that bridges communities through global chat, 
 
 ## Core Features
 - **Global Chat**: Encrypted messages, per-guild language settings, optional auto-translate, staff suffix display, global custom commands (`b.rules [lang]`, `b.help`)
-- **Moderation**: Interactive warning viewer, global blacklists, timed/indefinite mutes, action audit trail
-- **Support Tickets**: `/support` creation, auto-assignment, priority & category, first response time tracking, HTML/TXT transcripts, user close button, confirmation dialogs, channel delete flow
-- **Staff Tools**: `/stafftools tickets|assign|priority|category|status|note|notes|search|auditlog` for queue management, workload balancing, notes & auditing
-- **AI Functions**: Session-based chat, function calling for server info/user lookup/guild management, VIP-gated features
+- **RPG System**: 
+  - Account Management: Email verification, encrypted passwords (AES-256-CBC), single-session enforcement
+  - Character System: 5 classes with unique base stats, level progression (1-100+), stat point allocation, HP/MP management
+  - Equipment: 7 slots (weapon, helmet, armor, gloves, boots, 2 accessories), stat bonuses, level/class requirements
+  - Inventory: Stackable/non-stackable items, rarity tiers (common→mythic), binding system, quantity limits
+  - Shop: Database-driven items (potions, weapons, armor, accessories), buy/sell with gold, dynamic pricing
+  - Trading: Player-to-player trades with gold/items, offer/accept/decline flow, tradeable/bound validation
+  - Combat: Turn-based battles with 4 difficulty tiers, critical hits, experience/gold rewards, combat logs
+  - Admin Tools: Freeze/ban accounts, modify stats, change passwords, force logout, give/remove items, detailed account info
+- **Moderation**: Interactive warning viewer with appeal system, global blacklists, timed/indefinite mutes, action audit trail with staff attribution
+- **Support Tickets**: `/support` creation, auto-assignment by workload, priority & category, first response time tracking, HTML/TXT transcripts, user close button, confirmation dialogs, channel delete flow, internal staff notes
+- **Staff Tools**: `/stafftools tickets|assign|priority|category|status|note|notes|search|auditlog|reviewappeals|notify|rpg_*` for comprehensive management
+- **AI Functions**: Session-based chat, function calling for server info/user lookup/guild management, VIP-gated features, persistent user memories
 - **Content Filter**: Word-based filtering, single-word vs substring matching, protected words, log webhooks
 - **Custom Responses**: Guild-specific commands with regex support
 - **Worker Pools**: Translation and rate-limit processing off the main loop (dynamic sizing, prewarm, keep-alive)
@@ -97,6 +108,29 @@ These are lightweight, globally broadcast informational commands executed in a c
 | `/ai ask` | Single AI question (task-specific models) |
 | `/ai chat` | Start contextual AI session (VIP only) |
 | `/ai voice` | Voice conversation in VC (VIP only) |
+| `/register new` | Create new RPG account with email verification |
+| `/register verify` | Verify account with 6-digit code |
+| `/register resend` | Resend verification code (1min cooldown) |
+| `/register info` | View account information and character |
+| `/login` | Login to RPG account (single-session enforcement) |
+| `/rpg create` | Create character (name, class selection) |
+| `/rpg profile` | View character profile with stats & equipment |
+| `/rpg stats` | View/allocate stat points (STR, DEF, AGI, INT, LUK) |
+| `/rpg inventory` | Browse inventory with pagination & rarity sorting |
+| `/rpg equip` | Equip items with requirement validation |
+| `/rpg unequip` | Unequip items from specific slots |
+| `/rpg rest` | Restore HP/MP (5min cooldown) |
+| `/rpg battle` | Combat with monsters (4 difficulties) |
+| `/rpg leaderboard` | Top players by level/gold/experience |
+| `/shop browse` | Browse shop by category (potions, weapons, armor, accessories) |
+| `/shop buy` | Purchase items with gold |
+| `/shop sell` | Sell inventory items (50% value) |
+| `/trade offer` | Initiate trade with player (gold/items) |
+| `/trade accept` | Accept trade with counter-offer |
+| `/trade view` | View pending trades (sent/received) |
+| `/trade decline` | Decline trade offer |
+| `/trade cancel` | Cancel your pending trade |
+| `/support` | Create support ticket (auto-assigns staff) |
 | `/globalchat set` | Configure global chat channel (Manage Channels) |
 | `/globalchat toggle` | Enable/disable global chat (Manage Channels) |
 | `/globalchat autotranslate` | Toggle auto-translation (Manage Channels) |

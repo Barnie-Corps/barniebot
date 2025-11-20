@@ -61,6 +61,11 @@ git checkout -b feature/your-feature-name
 - Apply single-responsibility: one concern per function.
 - Avoid hardcoding secrets or tokens in commits.
 - Match existing indentation & style; do not mass reformat unrelated areas.
+- **RPG System**: Always validate session state before character operations; use helper functions `getSession()` and `getCharacter()` for consistency.
+- **Database Queries**: Use parameterized queries exclusively; never concatenate user input into SQL strings.
+- **Embeds**: Use rich embeds with emojis and structured fields for better UX; follow existing color schemes (green=success, red=error, blue=info, purple=RPG, gold=rewards).
+- **Error Handling**: Provide user-friendly error messages; log technical details server-side only.
+- **Session Management**: Respect single-session enforcement; always invalidate sessions on logout/ban/freeze operations.
 
 ## Pull Request Process
 
@@ -69,19 +74,32 @@ git checkout -b feature/your-feature-name
 3. Describe:
    - Motivation (problem / enhancement)
    - Implementation summary (key files, data flows)
-   - Any schema changes (tables / columns)
-4. Include manual test notes or screenshots for UI (embeds, buttons).
-5. Security / privacy impact (if any) — e.g., new stored data.
+   - Any schema changes (tables / columns / indexes)
+   - RPG system impact (if applicable): affects session management, character data, inventory, combat
+   - Support ticket workflow changes (if applicable): message relay, staff assignment, transcript generation
+4. Include manual test notes or screenshots for UI (embeds, buttons, interactive components).
+5. Security / privacy impact (if any) — e.g., new stored data, encryption requirements, session handling.
 6. Respond to review comments within a reasonable timeframe.
+
+**Testing Checklist** (when applicable):
+- [ ] RPG features: Test login enforcement, character creation, inventory operations, equipment validation
+- [ ] Support tickets: Test message relay, staff assignment, transcript generation, close flow
+- [ ] Moderation: Test warning appeals, audit log accuracy, staff permission checks
+- [ ] Global chat: Test encryption, translation, staff suffix handling
+- [ ] Database: Test migrations, index performance, query parameterization
 
 ## Bug Reports
 
 Include:
 - Precise reproduction steps
 - Expected vs actual output
-- Environment (OS, Node.js version)
-- Relevant logs (avoid posting secrets)
+- Environment (OS, Node.js version, MySQL version)
+- Relevant logs (avoid posting secrets, passwords, or tokens)
 - If worker related: indicate if issue occurs after idle period.
+- **RPG bugs**: Include character state (level, class, HP/MP), session status, last action timestamp.
+- **Support ticket bugs**: Include ticket ID, message count, staff assignment status, channel existence.
+- **Combat bugs**: Include difficulty level, monster type, character stats at time of battle, combat log output.
+- **Trading bugs**: Include trade ID, items involved, gold amounts, trade status at failure point.
 
 ## Questions or Need Help?
 
