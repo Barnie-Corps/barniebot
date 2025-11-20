@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Message } from "discord.js";
+import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import utils from "../utils";
 import db from "../mysql/database";
 
@@ -22,12 +22,29 @@ export default {
             const notif = notifications[page];
             if (!notif) return;
 
-            let displayContent = notif.content;
+            const normalize = (value: any): string => {
+                if (value == null) return "";
+                if (typeof value === "string") return value;
+                if (typeof value === "object" && !Array.isArray(value)) {
+                    if (typeof value.text === "string") return value.text;
+                    try { return JSON.stringify(value); } catch { return String(value); }
+                }
+                if (Array.isArray(value)) return value.join(" ");
+                return String(value);
+            };
+
+            let baseContent = normalize(notif.content).trim();
+            if (baseContent.length > 0) {
+                baseContent = baseContent.charAt(0).toLowerCase() + baseContent.slice(1);
+            }
+
+            let displayContent = baseContent;
             if (lang !== "en" && notif.language !== lang) {
                 try {
-                    displayContent = await utils.translate(notif.content, notif.language, lang);
-                } catch (e) {
-                    displayContent = notif.content;
+                    const translated = await utils.translate(baseContent, notif.language, lang);
+                    displayContent = normalize(translated.text).trim();
+                } catch {
+                    displayContent = baseContent;
                 }
             }
 
@@ -37,9 +54,9 @@ export default {
                 .setDescription(displayContent)
                 .setFooter({
                     text: `Notification ${page + 1} of ${notifications.length} • Tap "Mark as Read" to dismiss`,
-                    iconURL: interaction.client.user?.displayAvatarURL()
+                    iconURL: interaction.client.user?.displayAvatarURL() || undefined
                 })
-                .setTimestamp(notif.created_at);
+                .setTimestamp(new Date(notif.created_at));
 
             const row = new ActionRowBuilder<ButtonBuilder>();
 
