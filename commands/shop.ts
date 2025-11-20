@@ -134,7 +134,7 @@ export default {
                     });
                 }
 
-                return interaction.editReply({ embeds: [shopEmbed] });
+                return interaction.editReply({ embeds: [shopEmbed], content: "" });
             }
 
             case "buy": {
@@ -209,7 +209,7 @@ export default {
                     .setFooter({ text: "Thank you for your purchase!" })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [purchaseEmbed] });
+                return interaction.editReply({ embeds: [purchaseEmbed], content: "" });
             }
 
             case "sell": {
@@ -270,7 +270,7 @@ export default {
                     .setFooter({ text: "Come back anytime!" })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [sellEmbed] });
+                return interaction.editReply({ embeds: [sellEmbed], content: "" });
             }
         }
     },

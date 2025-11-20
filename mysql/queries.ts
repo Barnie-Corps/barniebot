@@ -83,5 +83,35 @@ export default function queries(): void {
     
     db.query("CREATE TABLE IF NOT EXISTS rpg_trades (id INT PRIMARY KEY AUTO_INCREMENT, initiator_id INT NOT NULL, receiver_id INT NOT NULL, initiator_gold BIGINT NOT NULL DEFAULT 0, initiator_items TEXT, receiver_gold BIGINT NOT NULL DEFAULT 0, receiver_items TEXT, status VARCHAR(20) NOT NULL DEFAULT 'pending', created_at BIGINT(255) NOT NULL, completed_at BIGINT(255) DEFAULT NULL)");
     
+    db.query("CREATE TABLE IF NOT EXISTS rpg_guilds (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(50) NOT NULL UNIQUE, description TEXT, founder_id INT NOT NULL, level INT NOT NULL DEFAULT 1, experience BIGINT NOT NULL DEFAULT 0, gold BIGINT NOT NULL DEFAULT 0, member_capacity INT NOT NULL DEFAULT 20, created_at BIGINT(255) NOT NULL, emblem_icon VARCHAR(50) DEFAULT '🛡️')");
+    
+    db.query("CREATE TABLE IF NOT EXISTS rpg_guild_members (character_id INT NOT NULL, guild_id INT NOT NULL, role VARCHAR(30) NOT NULL DEFAULT 'member', joined_at BIGINT(255) NOT NULL, contribution_points INT NOT NULL DEFAULT 0, PRIMARY KEY (character_id, guild_id))");
+    
+    db.query("CREATE TABLE IF NOT EXISTS rpg_guild_upgrades (id INT PRIMARY KEY AUTO_INCREMENT, guild_id INT NOT NULL, upgrade_type VARCHAR(50) NOT NULL, level INT NOT NULL DEFAULT 1, bonus_value INT NOT NULL DEFAULT 0, purchased_at BIGINT(255) NOT NULL)");
+    
+    db.query("CREATE TABLE IF NOT EXISTS rpg_achievements (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(100) NOT NULL, description TEXT NOT NULL, category VARCHAR(30) NOT NULL, requirement_type VARCHAR(50) NOT NULL, requirement_value INT NOT NULL, reward_gold INT NOT NULL DEFAULT 0, reward_experience INT NOT NULL DEFAULT 0, reward_item_id INT DEFAULT NULL, icon VARCHAR(20) DEFAULT '🏆', hidden BOOLEAN NOT NULL DEFAULT FALSE)");
+    
+    db.query("CREATE TABLE IF NOT EXISTS rpg_character_achievements (character_id INT NOT NULL, achievement_id INT NOT NULL, progress INT NOT NULL DEFAULT 0, unlocked BOOLEAN NOT NULL DEFAULT FALSE, unlocked_at BIGINT(255) DEFAULT NULL, PRIMARY KEY (character_id, achievement_id))");
+    
+    db.query("CREATE TABLE IF NOT EXISTS rpg_daily_rewards (character_id INT PRIMARY KEY, last_claim BIGINT(255) NOT NULL, streak INT NOT NULL DEFAULT 0, total_claims INT NOT NULL DEFAULT 0)");
+    
+    db.query("CREATE TABLE IF NOT EXISTS rpg_dungeons (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(100) NOT NULL, description TEXT NOT NULL, required_level INT NOT NULL DEFAULT 1, difficulty VARCHAR(20) NOT NULL, stages INT NOT NULL DEFAULT 3, boss_name VARCHAR(50), reward_gold_min INT NOT NULL DEFAULT 100, reward_gold_max INT NOT NULL DEFAULT 500, reward_exp_min INT NOT NULL DEFAULT 200, reward_exp_max INT NOT NULL DEFAULT 1000, cooldown INT NOT NULL DEFAULT 3600000)");
+    
+    db.query("CREATE TABLE IF NOT EXISTS rpg_dungeon_runs (id INT PRIMARY KEY AUTO_INCREMENT, character_id INT NOT NULL, dungeon_id INT NOT NULL, stage INT NOT NULL DEFAULT 1, status VARCHAR(20) NOT NULL DEFAULT 'in_progress', started_at BIGINT(255) NOT NULL, completed_at BIGINT(255) DEFAULT NULL, rewards_claimed BOOLEAN NOT NULL DEFAULT FALSE)");
+    
+    db.query("CREATE TABLE IF NOT EXISTS rpg_pets (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(50) NOT NULL, description TEXT, rarity VARCHAR(20) NOT NULL DEFAULT 'common', base_price INT NOT NULL DEFAULT 500, strength_bonus INT NOT NULL DEFAULT 0, defense_bonus INT NOT NULL DEFAULT 0, agility_bonus INT NOT NULL DEFAULT 0, intelligence_bonus INT NOT NULL DEFAULT 0, luck_bonus INT NOT NULL DEFAULT 0, special_ability VARCHAR(100) DEFAULT NULL, emoji VARCHAR(20) DEFAULT '🐾')");
+    
+    db.query("CREATE TABLE IF NOT EXISTS rpg_character_pets (id INT PRIMARY KEY AUTO_INCREMENT, character_id INT NOT NULL, pet_id INT NOT NULL, name VARCHAR(50) NOT NULL, level INT NOT NULL DEFAULT 1, experience INT NOT NULL DEFAULT 0, happiness INT NOT NULL DEFAULT 100, is_active BOOLEAN NOT NULL DEFAULT FALSE, acquired_at BIGINT(255) NOT NULL, last_fed BIGINT(255) DEFAULT NULL)");
+    
+    db.query("CREATE TABLE IF NOT EXISTS rpg_crafting_materials (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(50) NOT NULL, description TEXT, rarity VARCHAR(20) NOT NULL DEFAULT 'common', stack_size INT NOT NULL DEFAULT 999, drop_rate DECIMAL(5,2) NOT NULL DEFAULT 10.00, emoji VARCHAR(20) DEFAULT '⚙️')");
+    
+    db.query("CREATE TABLE IF NOT EXISTS rpg_crafting_recipes (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(100) NOT NULL, result_item_id INT NOT NULL, required_level INT NOT NULL DEFAULT 1, material_1_id INT DEFAULT NULL, material_1_qty INT DEFAULT NULL, material_2_id INT DEFAULT NULL, material_2_qty INT DEFAULT NULL, material_3_id INT DEFAULT NULL, material_3_qty INT DEFAULT NULL, gold_cost INT NOT NULL DEFAULT 0, success_rate DECIMAL(5,2) NOT NULL DEFAULT 100.00)");
+    
+    db.query("CREATE TABLE IF NOT EXISTS rpg_character_materials (character_id INT NOT NULL, material_id INT NOT NULL, quantity INT NOT NULL DEFAULT 0, PRIMARY KEY (character_id, material_id))");
+    
+    db.query("CREATE TABLE IF NOT EXISTS rpg_market_listings (id INT PRIMARY KEY AUTO_INCREMENT, seller_id INT NOT NULL, item_id INT NOT NULL, quantity INT NOT NULL DEFAULT 1, price_per_unit INT NOT NULL, listed_at BIGINT(255) NOT NULL, expires_at BIGINT(255) NOT NULL, sold BOOLEAN NOT NULL DEFAULT FALSE)");
+    
+    db.query("CREATE TABLE IF NOT EXISTS rpg_boss_encounters (id INT PRIMARY KEY AUTO_INCREMENT, boss_name VARCHAR(50) NOT NULL, boss_hp INT NOT NULL, boss_atk INT NOT NULL, boss_def INT NOT NULL, reward_multiplier DECIMAL(3,2) NOT NULL DEFAULT 2.00, spawn_chance DECIMAL(5,2) NOT NULL DEFAULT 5.00, emoji VARCHAR(20) DEFAULT '👑')");
+    
     Log.info("Database tables ensured", { component: "Database" });
 };

@@ -29,15 +29,15 @@ export default {
                 no_character: "You need to create a character first! Use `/rpg create` to start your adventure"
             },
             success: {
-                logged_in: "Welcome back, {username}! You have successfully logged in",
-                session_info: "Session established at {time}"
+                logged_in: "Welcome back! You have successfully logged in ",
+                session_info: "Session established at "
             },
             titles: {
                 login_success: "🎮 Login Successful",
                 login_failed: "❌ Login Failed"
             }
         };
-        
+
         if (lang !== "en") {
             texts = await utils.autoTranslate(texts, "en", lang);
         }
@@ -46,7 +46,7 @@ export default {
         const password = interaction.options.getString("password") as string;
 
         const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
-        
+
         if (account.length < 1) {
             const failEmbed = new EmbedBuilder()
                 .setColor("#FF0000")
@@ -57,7 +57,7 @@ export default {
         }
 
         const decryptedPassword = utils.decryptWithAES(data.bot.encryption_key, account[0].password);
-        
+
         if (decryptedPassword !== password) {
             const failEmbed = new EmbedBuilder()
                 .setColor("#FF0000")
@@ -97,7 +97,7 @@ export default {
         }
 
         const existingSession: any = await db.query("SELECT * FROM rpg_sessions WHERE account_id = ? AND active = TRUE", [account[0].id]);
-        
+
         if (existingSession.length > 0) {
             const failEmbed = new EmbedBuilder()
                 .setColor("#FF6600")
@@ -112,15 +112,6 @@ export default {
         }
 
         const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [account[0].id]);
-        
-        if (character.length < 1) {
-            const failEmbed = new EmbedBuilder()
-                .setColor("#FFA500")
-                .setTitle(texts.titles.login_failed)
-                .setDescription(texts.errors.no_character)
-                .setTimestamp();
-            return interaction.editReply({ embeds: [failEmbed], content: "" });
-        }
 
         await db.query("INSERT INTO rpg_sessions SET ?", [{
             account_id: account[0].id,
@@ -138,10 +129,23 @@ export default {
             status: true
         }]);
 
+        if (character.length < 1) {
+            const noCharEmbed = new EmbedBuilder()
+                .setColor("#FFA500")
+                .setTitle(texts.titles.login_success)
+                .setDescription(texts.success.logged_in + username)
+                .addFields(
+                    { name: "⚠️ No Character", value: "You don't have a character yet! Use `/rpg create` to begin your adventure.", inline: false }
+                )
+                .setFooter({ text: texts.success.session_info + new Date().toLocaleString() })
+                .setTimestamp();
+            return interaction.editReply({ embeds: [noCharEmbed], content: "" });
+        }
+
         const successEmbed = new EmbedBuilder()
             .setColor("#00FF00")
             .setTitle(texts.titles.login_success)
-            .setDescription(texts.success.logged_in.replace("{username}", username))
+            .setDescription(texts.success.logged_in + username)
             .addFields(
                 { name: "Character", value: character[0].name, inline: true },
                 { name: "Level", value: character[0].level.toString(), inline: true },
@@ -150,7 +154,7 @@ export default {
                 { name: "HP", value: `❤️ ${character[0].hp}/${character[0].max_hp}`, inline: true },
                 { name: "MP", value: `💙 ${character[0].mp}/${character[0].max_mp}`, inline: true }
             )
-            .setFooter({ text: texts.success.session_info.replace("{time}", new Date().toLocaleString()) })
+            .setFooter({ text: texts.success.session_info + new Date().toLocaleString() })
             .setTimestamp();
 
         await interaction.editReply({ embeds: [successEmbed], content: "" });

@@ -201,7 +201,7 @@ export default {
                 .setFooter({ text: "Your adventure begins now! Use /rpg profile to see your stats" })
                 .setTimestamp();
 
-            return interaction.editReply({ embeds: [createEmbed] });
+            return interaction.editReply({ embeds: [createEmbed], content: "" });
         }
 
         const session = await getSession(interaction.user.id);
@@ -266,7 +266,7 @@ export default {
                     .setFooter({ text: `Stat Points Available: ${character.stat_points}` })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [profileEmbed] });
+                return interaction.editReply({ embeds: [profileEmbed], content: "" });
             }
 
             case "stats": {
@@ -288,7 +288,7 @@ export default {
                         .setFooter({ text: "Use /rpg stats allocate to distribute your points" })
                         .setTimestamp();
 
-                    return interaction.editReply({ embeds: [statsEmbed] });
+                    return interaction.editReply({ embeds: [statsEmbed], content: "" });
                 }
 
                 if (action === "allocate") {
@@ -326,7 +326,7 @@ export default {
                         )
                         .setTimestamp();
 
-                    return interaction.editReply({ embeds: [allocateEmbed] });
+                    return interaction.editReply({ embeds: [allocateEmbed], content: "" });
                 }
                 break;
             }
@@ -378,7 +378,7 @@ export default {
                     });
                 }
 
-                return interaction.editReply({ embeds: [invEmbed] });
+                return interaction.editReply({ embeds: [invEmbed], content: "" });
             }
 
             case "equip": {
@@ -432,7 +432,7 @@ export default {
                     .setDescription(`**${invItem[0].name}** has been equipped in the **${invItem[0].slot}** slot!`)
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [equipEmbed] });
+                return interaction.editReply({ embeds: [equipEmbed], content: "" });
             }
 
             case "unequip": {
@@ -478,7 +478,7 @@ export default {
                     .setFooter({ text: "You feel refreshed and ready for battle!" })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [restEmbed] });
+                return interaction.editReply({ embeds: [restEmbed], content: "" });
             }
 
             case "battle": {
@@ -545,10 +545,40 @@ export default {
                         [Math.max(1, playerHp), newExp, newLevel, monster.gold, levelUp ? 5 : 0, character.id]
                     );
 
+                    const materialDrop = Math.random() < 0.25;
+                    let materialText = "";
+                    if (materialDrop) {
+                        const materials: any = await db.query(
+                            "SELECT * FROM rpg_crafting_materials WHERE drop_rate >= ? ORDER BY RAND() LIMIT 1",
+                            [Math.random() * 100]
+                        );
+                        if (materials[0]) {
+                            const qty = Math.floor(Math.random() * 3) + 1;
+                            const existing: any = await db.query(
+                                "SELECT * FROM rpg_character_materials WHERE character_id = ? AND material_id = ?",
+                                [character.id, materials[0].id]
+                            );
+                            
+                            if (existing[0]) {
+                                await db.query(
+                                    "UPDATE rpg_character_materials SET quantity = quantity + ? WHERE character_id = ? AND material_id = ?",
+                                    [qty, character.id, materials[0].id]
+                                );
+                            } else {
+                                await db.query("INSERT INTO rpg_character_materials SET ?", [{
+                                    character_id: character.id,
+                                    material_id: materials[0].id,
+                                    quantity: qty
+                                }]);
+                            }
+                            materialText = `\n🎁 Dropped: ${materials[0].emoji} ${materials[0].name} x${qty}`;
+                        }
+                    }
+
                     const victoryEmbed = new EmbedBuilder()
                         .setColor("#2ECC71")
                         .setTitle(`⚔️ Victory! ${monster.emoji}`)
-                        .setDescription(`You defeated the **${monster.name}**!`)
+                        .setDescription(`You defeated the **${monster.name}**!${materialText}`)
                         .addFields(
                             { name: "Battle Log", value: battleLog.slice(-5).join("\n"), inline: false },
                             { name: "Rewards", value: `💰 ${monster.gold} Gold\n⭐ ${monster.exp} Experience`, inline: true },
@@ -556,10 +586,10 @@ export default {
                         );
 
                     if (levelUp) {
-                        victoryEmbed.addFields({
-                            name: "🎉 LEVEL UP!",
-                            value: `You reached level **${newLevel}**!\n+5 Stat Points`,
-                            inline: false
+                        victoryEmbed.addFields({ 
+                            name: "🎊 Level Up!", 
+                            value: `You are now level **${newLevel}**! +5 stat points gained.`, 
+                            inline: false 
                         });
                     }
 
@@ -573,7 +603,19 @@ export default {
                         occurred_at: Date.now()
                     }]);
 
-                    return interaction.editReply({ embeds: [victoryEmbed] });
+                    const achProgress: any = await db.query(
+                        "SELECT * FROM rpg_character_achievements WHERE character_id = ? AND achievement_id IN (SELECT id FROM rpg_achievements WHERE requirement_type = 'battles_won')",
+                        [character.id]
+                    );
+                    
+                    if (achProgress[0]) {
+                        await db.query(
+                            "UPDATE rpg_character_achievements SET progress = progress + 1 WHERE character_id = ? AND achievement_id = ?",
+                            [character.id, achProgress[0].achievement_id]
+                        );
+                    }
+
+                    return interaction.editReply({ embeds: [victoryEmbed], content: "" });
                 } else {
                     await db.query(
                         "UPDATE rpg_characters SET hp = 1 WHERE id = ?",
@@ -601,7 +643,7 @@ export default {
                         occurred_at: Date.now()
                     }]);
 
-                    return interaction.editReply({ embeds: [defeatEmbed] });
+                    return interaction.editReply({ embeds: [defeatEmbed], content: "" });
                 }
             }
 
@@ -637,7 +679,7 @@ export default {
                     });
                 });
 
-                return interaction.editReply({ embeds: [leaderboardEmbed] });
+                return interaction.editReply({ embeds: [leaderboardEmbed], content: "" });
             }
         }
     },
