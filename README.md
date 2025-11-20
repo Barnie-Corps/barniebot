@@ -285,4 +285,4 @@ npm run start:managed  # Run with Process Manager (recommended production)
 - **Issues:** https://github.com/Barnie-Corps/barniebot/issues
 
 ---
-Made with ❤️ by Santiago Morales (Lead Developer & Founder, BarnieCorps)
+Made with ❤️ by BarnieCorps.
