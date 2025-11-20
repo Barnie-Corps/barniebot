@@ -888,6 +888,12 @@ export default {
                 const oldValue = character[0][stat];
                 await db.query(`UPDATE rpg_characters SET ${stat} = ? WHERE id = ?`, [value, character[0].id]);
 
+                if (stat === "level" && value > oldValue) {
+                    const levelDiff = value - oldValue;
+                    const statPointsToAdd = levelDiff * 5;
+                    await db.query("UPDATE rpg_characters SET stat_points = stat_points + ? WHERE id = ?", [statPointsToAdd, character[0].id]);
+                }
+
                 if (stat === "max_hp") {
                     await db.query("UPDATE rpg_characters SET hp = ? WHERE id = ?", [value, character[0].id]);
                 }
