@@ -33,7 +33,7 @@ export default class NVIDIAModelsManager {
             return { safe: true };
         }
     };
-    public GetModelChatResponse = async (messages: ChatCompletionMessageParam[], timeoutMs: number = 2000, task: string): Promise<{ content: string, reasoning?: string }> => {
+    public GetModelChatResponse = async (messages: ChatCompletionMessageParam[], timeoutMs: number = 2000, task: string, think: boolean): Promise<{ content: string, reasoning?: string }> => {
         try {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), Math.max(500, timeoutMs));
@@ -42,29 +42,41 @@ export default class NVIDIAModelsManager {
             }
             const response = await this.openai.chat.completions.create({
                 model: this.GetTaskBasedModel(task).name,
-                messages,
+                messages: this.GetTaskBasedModel(task).hasThinkMode ? [{ role: "system", content: think ? "/think" : "/no_think" }, ...messages] : messages,
                 stream: false,
                 ...this.GetCustomTaskConfig(task)
             }, { signal: controller.signal as any });
             clearTimeout(timer);
-            return { content: response.choices[0]?.message?.content || "", reasoning: this.GetTaskBasedModel(task).hasReasoning ? (response.choices[0]?.message as any).reasoning_content : undefined };
+            return { content: response.choices[0]?.message?.content || "", reasoning: this.GetTaskBasedModel(task).hasReasoning && think && this.GetTaskBasedModel(task).hasThinkMode ? (response.choices[0]?.message as any).reasoning_content : this.GetTaskBasedModel(task).hasReasoning ? (response.choices[0]?.message as any).reasoning_content : undefined };
         } catch (error) {
             console.error("Error getting reasoning response:", error);
             return { content: "", reasoning: undefined };
         }
     }
-    private GetTaskBasedModel = (task: string): { name: string, hasReasoning: boolean } => {
-        const taskModels: { [key: string]: { name: string, hasReasoning: boolean } } = {
+    private GetTaskBasedModel = (task: string): { name: string, hasReasoning: boolean, hasThinkMode: boolean } => {
+        const taskModels: { [key: string]: { name: string, hasReasoning: boolean, hasThinkMode: boolean } } = {
             "chat": {
                 "name": "openai/gpt-oss-20b",
                 "hasReasoning": true,
+                "hasThinkMode": false
             },
             "reasoning": {
-                "name": "openai/gpt-oss-120b",
+                "name": "qwen/qwen3-next-80b-a3b-thinking",
                 "hasReasoning": true,
+                "hasThinkMode": false
+            },
+            "math": {
+                "name": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+                "hasReasoning": true,
+                "hasThinkMode": true
+            },
+            "programming": {
+                "name": "moonshotai/kimi-k2-instruct-0905",
+                "hasReasoning": false,
+                "hasThinkMode": false
             }
         };
-        return taskModels[task] || { name: "", hasReasoning: false };
+        return taskModels[task] || { name: "", hasReasoning: false, hasThinkMode: false };
     }
     private GetCustomTaskConfig = (task: string): { max_tokens: number, top_p: number, temperature: number } => {
         const taskConfigs: { [key: string]: { max_tokens: number, top_p: number, temperature: number } } = {
@@ -77,6 +89,11 @@ export default class NVIDIAModelsManager {
                 "max_tokens": 2048,
                 "top_p": 0.9,
                 "temperature": 0.7
+            },
+            "math": {
+                "max_tokens": 4096,
+                "top_p": 0.95,
+                "temperature": 0.3
             }
         };
         return taskConfigs[task] || { max_tokens: 1024, top_p: 0.9, temperature: 0.7 };
@@ -96,16 +113,16 @@ export default class NVIDIAModelsManager {
         try {
             // Load proto definition
             const protoPath = path.join(__dirname, "..", "protos", "riva_asr.proto");
-            
+
             // For now, we'll create a minimal inline proto since we don't have the full proto files
             // This matches NVIDIA's Riva ASR API structure
             const fs = require("fs");
             const protoDir = path.join(__dirname, "..", "protos");
-            
+
             if (!fs.existsSync(protoDir)) {
                 fs.mkdirSync(protoDir, { recursive: true });
             }
-            
+
             const protoContent = `
 syntax = "proto3";
 package nvidia.riva.asr;
@@ -185,7 +202,7 @@ message WordInfo {
   float confidence = 4;
 }
 `;
-            
+
             if (!fs.existsSync(protoPath)) {
                 fs.writeFileSync(protoPath, protoContent);
             }
@@ -205,7 +222,7 @@ message WordInfo {
             // Create metadata with API key and optional function ID
             const metadata = new grpc.Metadata();
             metadata.add("authorization", `Bearer ${this.apiKey}`);
-            
+
             // Add function ID if provided (get this from build.nvidia.com)
             if (functionId) {
                 metadata.add("function-id", functionId);
@@ -241,7 +258,7 @@ message WordInfo {
             // Make the gRPC call with timeout
             return new Promise((resolve, reject) => {
                 const deadline = new Date(Date.now() + timeoutMs);
-                
+
                 client.Recognize(request, { deadline }, (error: Error | null, response: any) => {
                     if (error) {
                         console.error("Error during speech recognition:", error);
@@ -257,7 +274,7 @@ message WordInfo {
                             return;
                         }
                     }
-                    
+
                     resolve("");
                 });
             });
@@ -321,11 +338,11 @@ message WordInfo {
             const protoPath = path.join(__dirname, "..", "protos", "riva_tts.proto");
             const fs = require("fs");
             const protoDir = path.join(__dirname, "..", "protos");
-            
+
             if (!fs.existsSync(protoDir)) {
                 fs.mkdirSync(protoDir, { recursive: true });
             }
-            
+
             const protoContent = `
 syntax = "proto3";
 package nvidia.riva.tts;
@@ -371,7 +388,7 @@ enum AudioEncoding {
   ALAW = 20;
 }
 `;
-            
+
             if (!fs.existsSync(protoPath)) {
                 fs.writeFileSync(protoPath, protoContent);
             }
@@ -389,7 +406,7 @@ enum AudioEncoding {
 
             const metadata = new grpc.Metadata();
             metadata.add("authorization", `Bearer ${this.apiKey}`);
-            
+
             const finalFunctionId = functionId || process.env.NVIDIA_TTS_FUNCTION_ID;
             if (finalFunctionId) {
                 metadata.add("function-id", finalFunctionId);
@@ -454,19 +471,19 @@ enum AudioEncoding {
 
     public GetBestMaleVoice = (languageCode: string): string | null => {
         const voices = this.GetAvailableVoices();
-        const maleVoices = voices.filter(v => 
-            v.languageCode === languageCode && 
+        const maleVoices = voices.filter(v =>
+            v.languageCode === languageCode &&
             (v.description.includes("Male") || v.name.includes("Jason") || v.name.includes("Leo") || v.name.includes("Diego") || v.name.includes("Pascal"))
         );
-        
+
         if (maleVoices.length === 0) return null;
-        
+
         const happyVoice = maleVoices.find(v => v.name.includes(".Happy"));
         if (happyVoice) return happyVoice.name;
-        
+
         const neutralVoice = maleVoices.find(v => v.name.includes(".Neutral") || !v.name.includes("."));
         if (neutralVoice) return neutralVoice.name;
-        
+
         return maleVoices[0].name;
     }
 

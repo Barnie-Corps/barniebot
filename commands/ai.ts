@@ -38,10 +38,12 @@ export default {
                         .setRequired(true)
                         .addChoices(
                             { name: "General Question", value: "chat" },
-                            { name: "Math Problem", value: "reasoning" },
+                            { name: "Math Problem", value: "math" },
                             { name: "Programming Help", value: "programming" },
+                            { name: "General reasoning", value: "reasoning" }
                         )
                 )
+                .addBooleanOption(o => o.setName("think").setDescription("Enable 'think' mode for complex reasoning tasks. (If applicable in the selected model)"))
         )
         .addSubcommand(s =>
             s.setName("chat")
@@ -101,7 +103,8 @@ export default {
             case "ask": {
                 await reply(texts.common.thinking);
                 const question = interaction.options.getString("question") as string;
-                const response = await NVIDIAModels.GetModelChatResponse([{ role: "user", content: `Answer the following question as briefly as possible and in the language used in the question: ${question}\n${"-".repeat(20)}\n Please avoid using complex markdown elements (i.e mathematical elements) as Discord does not support them. Only basic Markdown styling is supported in Discord.` }], 20000, interaction.options.getString("task") as string);
+                const think = interaction.options.getBoolean("think") || false;
+                const response = await NVIDIAModels.GetModelChatResponse([{ role: "user", content: `Answer the following question as briefly as possible and in the language used in the question: ${question}\n${"-".repeat(20)}\n Please avoid using complex markdown elements (i.e mathematical elements) as Discord does not support them. Only basic Markdown styling is supported in Discord.` }], 20000, interaction.options.getString("task") as string, think);
                 if (response.content.length < 1) return await reply(texts.errors.no_response);
                 if (response.content.length > 2000) {
                     const filename = `./ai-response-${Date.now()}.md`;
