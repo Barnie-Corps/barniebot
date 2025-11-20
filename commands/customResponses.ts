@@ -83,7 +83,7 @@ export default {
                 if (responses.length === 0) {
                     await utils.safeInteractionRespond(interaction, texts.errors.no_responses);
                 } else {
-                    const responseList = responses.map((r, i) => `${i + 1}. **${r.command}** → ${r.response}`).join("\n");
+                    const responseList = responses.map((r: any, i: number) => `${i + 1}. **${r.command}** → ${r.response}`).join("\n");
                     await utils.safeInteractionRespond(interaction, `${texts.common.custom_responses}\n${responseList}`);
                 }
                 break;

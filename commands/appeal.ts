@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
 import { manager } from "..";
+import utils from "../utils";
 
 export default {
   data: new SlashCommandBuilder()
