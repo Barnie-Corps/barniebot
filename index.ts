@@ -446,7 +446,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
         loading: "Translating texts (this may take a moment)...",
         not_vip: "Hmm... You can't run this command unless you're a VIP.",
         expired_vip: "Wow! It seems your VIP subscription has ended. I've revoked your VIP access.",
-        unread_notifications: "📬 **Hey!** You've got unread notifications waiting for you! Check them out with `/notifications`"
+        unread_notifications: "📬 **Hey!** You've got unread notifications waiting for you! Check them out with "
     } // Texts for the interactionCreate event
     if (Lang !== "en") {
         texts = await utils.autoTranslate(texts, "en", Lang); // Translate the texts to the user's language if it is not English
@@ -471,7 +471,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
 
             const unreadNotifications = await utils.getUnreadNotifications(interaction.user.id);
             if (unreadNotifications.length > 0 && interaction.commandName !== "notifications") {
-                await interaction.followUp({ content: texts.unread_notifications, ephemeral: true });
+                await interaction.followUp({ content: texts.unread_notifications + "`/notifications`", ephemeral: true });
             }
 
             if (foundU[0]) {
