@@ -204,11 +204,6 @@ export default {
             .addIntegerOption(o => o.setName("quest_id")
                 .setDescription("Quest ID")
                 .setRequired(false)))
-        .addSubcommand(s => s.setName("trade")
-            .setDescription("Trade items with another player")
-            .addUserOption(o => o.setName("player")
-                .setDescription("Player to trade with")
-                .setRequired(true)))
         .addSubcommand(s => s.setName("gamble")
             .setDescription("Try your luck at gambling")
             .addStringOption(o => o.setName("game")
@@ -1531,10 +1526,6 @@ export default {
                     .setTimestamp();
 
                 return interaction.editReply({ embeds: [gambleEmbed], content: "" });
-            }
-
-            case "trade": {
-                return interaction.editReply("🔄 Trading system coming soon! Use the marketplace to buy and sell items for now.");
             }
         }
     },
