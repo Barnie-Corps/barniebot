@@ -30,6 +30,7 @@ export default class ProcessManager {
             restartDelay: options.restartDelay ?? 3000,
             crashPatterns: options.crashPatterns ?? [
                 "Cannot enqueue after fatal error",
+                "Cannot enqueue Query after fatal error",
                 "FATAL ERROR",
                 "Segmentation fault",
                 "Out of memory",
@@ -62,11 +63,11 @@ export default class ProcessManager {
             try {
                 spawnSync("npx", ["--no-install", "ts-node", "--version"], { stdio: "ignore" });
                 return { cmd: "npx", args: ["ts-node", tsFile] };
-            } catch {}
+            } catch { }
             try {
                 spawnSync("npx", ["--no-install", "tsx", "--version"], { stdio: "ignore" });
                 return { cmd: "npx", args: ["tsx", tsFile] };
-            } catch {}
+            } catch { }
         }
         if (fs.existsSync(jsFile)) {
             return { cmd: "node", args: [jsFile] };
