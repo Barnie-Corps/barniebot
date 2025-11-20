@@ -12,8 +12,10 @@ export default {
 
         const notifications = await utils.getUnreadNotifications(userId);
 
+        const respond = async (payload: any) => utils.safeInteractionRespond(interaction, payload);
+
         if (notifications.length === 0) {
-            return interaction.editReply("📭 You don't have any unread notifications!");
+            return respond({ content: "📭 You don't have any unread notifications!" });
         }
 
         let currentPage = 0;
@@ -85,11 +87,7 @@ export default {
                 );
             }
 
-            if (isUpdate) {
-                await interaction.editReply({ embeds: [embed], components: [row], content: "" });
-            } else {
-                await interaction.editReply({ embeds: [embed], components: [row], content: "" });
-            }
+            await respond({ embeds: [embed], components: [row], content: "" });
         };
 
         await showPage(currentPage);
@@ -118,10 +116,8 @@ export default {
                     notifications.splice(notifications.findIndex(n => n.id === notifId), 1);
 
                     if (notifications.length === 0) {
-                        await i.update({
-                            embeds: [new EmbedBuilder()
-                                .setColor("Purple")
-                                .setDescription("✅ All notifications have been marked as read!")],
+                        await utils.safeComponentUpdate(i, {
+                            embeds: [new EmbedBuilder().setColor("Purple").setDescription("✅ All notifications have been marked as read!")],
                             components: []
                         });
                         collector.stop();

@@ -1,6 +1,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder } from "discord.js";
 import fetch from "node-fetch";
 import data from "../data";
+import utils from "../utils";
 
 export default {
     data: new SlashCommandBuilder()
@@ -38,7 +39,7 @@ export default {
             .setColor("Purple")
             .setTimestamp()
             .setFooter({ text: `${data.bot.emojis[0].emoji} ${meme.ups}` })
-        await interaction.editReply({ embeds: [embed], components: [row as any], content: "" });
+        await utils.safeInteractionRespond(interaction, { embeds: [embed], components: [row as any], content: "" });
     },
     ephemeral: false
 }

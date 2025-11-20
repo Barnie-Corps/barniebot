@@ -22,14 +22,14 @@ export default {
             response = await fetch(url);
         }
         catch (err: any) {
-            interaction.editReply(texts.invalid);
+            utils.safeInteractionRespond(interaction, texts.invalid);
             return;
         }
         if (!response) return;
         const html = await response.text();
         const code = response.status;
         fs.writeFileSync("../response.html", String(process.env.SYSTEM_IP).length > 1 ? (html as any).replaceAll(String(process.env.SYSTEM_IP), "[SYSTEM IP CENSORED]") : html);
-        await interaction.editReply({ content: `${texts.code}: ${code}\nHTML:`, files: ["../response.html"] });
+        await utils.safeInteractionRespond(interaction, { content: `${texts.code}: ${code}\nHTML:`, files: ["../response.html"] });
         fs.unlinkSync("../response.html");
     }
 }

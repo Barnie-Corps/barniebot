@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
+import utils from "../utils";
 
 async function getSession(userId: string) {
     const session: any = await db.query(
@@ -61,12 +62,12 @@ export default {
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return interaction.editReply({ content: "❌ You need to log in first! Use `/login` to access your account." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ You need to log in first! Use `/login` to access your account." });
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return interaction.editReply({ content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
         }
 
         const sub = interaction.options.getSubcommand();
@@ -78,7 +79,7 @@ export default {
             );
             
             if (membershipCheck[0]) {
-                return interaction.editReply({ content: "❌ You're already in a guild! Leave your current guild first." });
+                return utils.safeInteractionRespond(interaction, { content: "❌ You're already in a guild! Leave your current guild first." });
             }
 
             const name = interaction.options.getString("name", true);
@@ -86,12 +87,12 @@ export default {
             const emblem = interaction.options.getString("emblem") || "🛡️";
 
             if (character.gold < 5000) {
-                return interaction.editReply({ content: "❌ You need 5000 gold to create a guild!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ You need 5000 gold to create a guild!" });
             }
 
             const existingGuild: any = await db.query("SELECT * FROM rpg_guilds WHERE name = ?", [name]);
             if (existingGuild[0]) {
-                return interaction.editReply({ content: "❌ A guild with this name already exists!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ A guild with this name already exists!" });
             }
 
             const result: any = await db.query("INSERT INTO rpg_guilds SET ?", [{
@@ -129,7 +130,7 @@ export default {
                 .setFooter({ text: "Invite members with /guild invite" })
                 .setTimestamp();
 
-            return interaction.editReply({ embeds: [embed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
 
         if (sub === "info") {
@@ -148,7 +149,7 @@ export default {
             }
 
             if (!guild) {
-                return interaction.editReply({ content: "❌ Guild not found or you're not in a guild!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ Guild not found or you're not in a guild!" });
             }
 
             const members: any = await db.query(
@@ -172,7 +173,7 @@ export default {
                 )
                 .setTimestamp();
 
-            return interaction.editReply({ embeds: [embed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
 
         if (sub === "join") {
@@ -182,14 +183,14 @@ export default {
             );
             
             if (membershipCheck[0]) {
-                return interaction.editReply({ content: "❌ You're already in a guild! Leave your current guild first." });
+                return utils.safeInteractionRespond(interaction, { content: "❌ You're already in a guild! Leave your current guild first." });
             }
 
             const guildName = interaction.options.getString("name", true);
             const guild: any = await db.query("SELECT * FROM rpg_guilds WHERE name = ?", [guildName]);
             
             if (!guild[0]) {
-                return interaction.editReply({ content: "❌ Guild not found!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ Guild not found!" });
             }
 
             const memberCount: any = await db.query(
@@ -198,7 +199,7 @@ export default {
             );
 
             if (memberCount[0].count >= guild[0].member_capacity) {
-                return interaction.editReply({ content: "❌ This guild is full!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ This guild is full!" });
             }
 
             await db.query("INSERT INTO rpg_guild_members SET ?", [{
@@ -209,7 +210,7 @@ export default {
                 contribution_points: 0
             }]);
 
-            return interaction.editReply({ content: `✅ You've joined **${guild[0].emblem_icon} ${guild[0].name}**! Welcome aboard!` });
+            return utils.safeInteractionRespond(interaction, { content: `✅ You've joined **${guild[0].emblem_icon} ${guild[0].name}**! Welcome aboard!` });
         }
 
         if (sub === "leave") {
@@ -219,43 +220,41 @@ export default {
             );
             
             if (!membership[0]) {
-                return interaction.editReply({ content: "❌ You're not in a guild!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ You're not in a guild!" });
             }
 
             if (membership[0].role === "leader") {
-                return interaction.editReply({ content: "❌ Guild leaders cannot leave! Transfer leadership or disband the guild first." });
+                return utils.safeInteractionRespond(interaction, { content: "❌ Guild leaders cannot leave! Transfer leadership or disband the guild first." });
             }
 
             await db.query("DELETE FROM rpg_guild_members WHERE character_id = ?", [character.id]);
             
-            return interaction.editReply({ content: `✅ You've left **${membership[0].name}**.` });
+            return utils.safeInteractionRespond(interaction, { content: `✅ You've left **${membership[0].name}**.` });
         }
 
         if (sub === "donate") {
             const amount = interaction.options.getInteger("amount", true);
 
             if (character.gold < amount) {
-                return interaction.editReply({ content: "❌ You don't have enough gold!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ You don't have enough gold!" });
             }
 
             const membership: any = await db.query(
                 "SELECT gm.*, g.name, g.emblem_icon FROM rpg_guild_members gm JOIN rpg_guilds g ON gm.guild_id = g.id WHERE gm.character_id = ?",
                 [character.id]
             );
-            
-            if (!membership[0]) {
-                return interaction.editReply({ content: "❌ You're not in a guild!" });
-            }
 
-            await db.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ?", [amount, character.id]);
+            if (!membership[0]) {
+                return utils.safeInteractionRespond(interaction, { content: "❌ You're not in a guild!" });
+            }            await db.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ?", [amount, character.id]);
             await db.query("UPDATE rpg_guilds SET gold = gold + ? WHERE id = ?", [amount, membership[0].guild_id]);
             await db.query(
                 "UPDATE rpg_guild_members SET contribution_points = contribution_points + ? WHERE character_id = ? AND guild_id = ?",
                 [amount, character.id, membership[0].guild_id]
             );
 
-            return interaction.editReply({ 
-                content: `✅ Donated **${amount} gold** to ${membership[0].emblem_icon} **${membership[0].name}**! (+${amount} contribution points)` 
+            return utils.safeInteractionRespond(interaction, { 
+                content: `✅ You donated **${amount} gold** to **${membership[0].emblem_icon} ${membership[0].name}**!\n+${amount} contribution points` 
             });
         }
 
@@ -266,7 +265,7 @@ export default {
             );
             
             if (!membership[0]) {
-                return interaction.editReply({ content: "❌ You're not in a guild!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ You're not in a guild!" });
             }
 
             const members: any = await db.query(
@@ -293,7 +292,7 @@ export default {
                 });
             }
 
-            return interaction.editReply({ embeds: [embed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
 
         if (sub === "list") {
@@ -302,7 +301,7 @@ export default {
             );
 
             if (guilds.length === 0) {
-                return interaction.editReply({ content: "📜 No guilds have been created yet! Be the first with `/guild create`" });
+                return utils.safeInteractionRespond(interaction, { content: "📜 No guilds have been created yet! Be the first with `/guild create`" });
             }
 
             const embed = new EmbedBuilder()
@@ -319,7 +318,7 @@ export default {
                 });
             }
 
-            return interaction.editReply({ embeds: [embed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
     },
     ephemeral: false

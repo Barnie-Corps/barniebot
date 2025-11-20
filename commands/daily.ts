@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
+import utils from "../utils";
 
 async function getSession(userId: string) {
     const session: any = await db.query(
@@ -22,12 +23,12 @@ export default {
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return interaction.editReply({ content: "❌ You need to log in first! Use `/login` to access your account." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ You need to log in first! Use `/login` to access your account." });
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return interaction.editReply({ content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
         }
 
         const dailyData: any = await db.query("SELECT * FROM rpg_daily_rewards WHERE character_id = ?", [character.id]);
@@ -42,7 +43,7 @@ export default {
                 const hoursLeft = Math.floor(timeLeft / 3600000);
                 const minutesLeft = Math.floor((timeLeft % 3600000) / 60000);
                 
-                return interaction.editReply({ 
+                return utils.safeInteractionRespond(interaction, { 
                     content: `⏰ You've already claimed your daily reward! Come back in **${hoursLeft}h ${minutesLeft}m**.` 
                 });
             }
@@ -108,7 +109,7 @@ export default {
                 });
             }
 
-            return interaction.editReply({ embeds: [embed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             
         } else {
             await db.query("INSERT INTO rpg_daily_rewards SET ?", [{
@@ -139,7 +140,7 @@ export default {
                 .setFooter({ text: "Come back tomorrow for your next reward!" })
                 .setTimestamp();
 
-            return interaction.editReply({ embeds: [embed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
     },
     ephemeral: false

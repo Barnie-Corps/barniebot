@@ -36,12 +36,12 @@ export default {
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return interaction.editReply({ content: "❌ You need to log in first! Use `/login` to access your account." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ You need to log in first! Use `/login` to access your account." });
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return interaction.editReply({ content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
         }
 
         const sub = interaction.options.getSubcommand();
@@ -62,7 +62,7 @@ export default {
             const achievements: any = await db.query(query, params);
             
             if (achievements.length === 0) {
-                return interaction.editReply({ content: "📜 No achievements found for this category." });
+                return utils.safeInteractionRespond(interaction, { content: "📜 No achievements found for this category." });
             }
 
             const charAchievements: any = await db.query(
@@ -105,7 +105,7 @@ export default {
                 });
             }
 
-            return interaction.editReply({ embeds: [embed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
 
         if (sub === "progress") {
@@ -120,7 +120,7 @@ export default {
             );
 
             if (charAchievements.length === 0) {
-                return interaction.editReply({ content: "📊 You don't have any achievements in progress. Start exploring to unlock some!" });
+                return utils.safeInteractionRespond(interaction, { content: "📊 You don't have any achievements in progress. Start exploring to unlock some!" });
             }
 
             const embed = new EmbedBuilder()
@@ -149,7 +149,7 @@ export default {
             
             embed.setFooter({ text: `Unlocked: ${totalUnlocked[0]?.count || 0}/${totalAchievements[0]?.count || 0}` });
 
-            return interaction.editReply({ embeds: [embed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
     },
     ephemeral: false

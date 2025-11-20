@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
+import utils from "../utils";
 
 async function getSession(userId: string) {
     const session: any = await db.query(
@@ -34,12 +35,12 @@ export default {
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return interaction.editReply({ content: "❌ You need to log in first! Use `/login` to access your account." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ You need to log in first! Use `/login` to access your account." });
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return interaction.editReply({ content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
         }
 
         const sub = interaction.options.getSubcommand();
@@ -55,7 +56,7 @@ export default {
             );
 
             if (materials.length === 0) {
-                return interaction.editReply({ content: "🔧 You don't have any crafting materials yet. Defeat monsters to collect them!" });
+                return utils.safeInteractionRespond(interaction, { content: "🔧 You don't have any crafting materials yet. Defeat monsters to collect them!" });
             }
 
             const embed = new EmbedBuilder()
@@ -82,7 +83,7 @@ export default {
 
             embed.setFooter({ text: "Use /craft recipes to see what you can make!" });
 
-            return interaction.editReply({ embeds: [embed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
 
         if (sub === "recipes") {
@@ -103,7 +104,7 @@ export default {
             const totalPages = Math.ceil(totalRecipes[0].count / recipesPerPage);
 
             if (recipes.length === 0) {
-                return interaction.editReply({ content: "📜 No recipes found on this page." });
+                return utils.safeInteractionRespond(interaction, { content: "📜 No recipes found on this page." });
             }
 
             const embed = new EmbedBuilder()
@@ -163,7 +164,7 @@ export default {
 
             embed.setFooter({ text: `Use /craft create <recipe_id> to craft | Page ${page}/${totalPages}` });
 
-            return interaction.editReply({ embeds: [embed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
 
         if (sub === "create") {
@@ -178,17 +179,17 @@ export default {
             );
 
             if (!recipe[0]) {
-                return interaction.editReply({ content: "❌ Recipe not found!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ Recipe not found!" });
             }
 
             const r = recipe[0];
 
             if (character.level < r.required_level) {
-                return interaction.editReply({ content: `❌ You need to be level ${r.required_level} to craft this!` });
+                return utils.safeInteractionRespond(interaction, { content: `❌ You need to be level ${r.required_level} to craft this!` });
             }
 
             if (character.gold < r.gold_cost) {
-                return interaction.editReply({ content: `❌ You need ${r.gold_cost} gold to craft this!` });
+                return utils.safeInteractionRespond(interaction, { content: `❌ You need ${r.gold_cost} gold to craft this!` });
             }
 
             const requiredMaterials = [
@@ -205,7 +206,7 @@ export default {
 
                 if (!owned[0] || owned[0].quantity < mat.qty) {
                     const matInfo: any = await db.query("SELECT name FROM rpg_crafting_materials WHERE id = ?", [mat.id]);
-                    return interaction.editReply({ 
+                    return utils.safeInteractionRespond(interaction, { 
                         content: `❌ You don't have enough **${matInfo[0].name}**! Need: ${mat.qty}, Have: ${owned[0]?.quantity || 0}` 
                     });
                 }
@@ -242,7 +243,7 @@ export default {
                     .setFooter({ text: "Check your inventory with /rpg inventory" })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [embed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             } else {
                 const embed = new EmbedBuilder()
                     .setColor("#E74C3C")
@@ -255,7 +256,7 @@ export default {
                     .setFooter({ text: "Better luck next time!" })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [embed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
         }
     },

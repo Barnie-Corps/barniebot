@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
+import utils from "../utils";
 
 async function getSession(userId: string) {
     const session: any = await db.query(
@@ -33,12 +34,12 @@ export default {
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return interaction.editReply({ content: "❌ You need to log in first! Use `/login` to access your account." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ You need to log in first! Use `/login` to access your account." });
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return interaction.editReply({ content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
         }
 
         const sub = interaction.options.getSubcommand();
@@ -47,7 +48,7 @@ export default {
             const dungeons: any = await db.query("SELECT * FROM rpg_dungeons ORDER BY required_level");
 
             if (dungeons.length === 0) {
-                return interaction.editReply({ content: "🏰 No dungeons available yet. Check back soon!" });
+                return utils.safeInteractionRespond(interaction, { content: "🏰 No dungeons available yet. Check back soon!" });
             }
 
             const embed = new EmbedBuilder()
@@ -72,7 +73,7 @@ export default {
 
             embed.setFooter({ text: "Use /dungeon enter <id> to challenge a dungeon!" });
 
-            return interaction.editReply({ embeds: [embed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
 
         if (sub === "enter") {
@@ -84,21 +85,21 @@ export default {
             );
 
             if (activeRun[0]) {
-                return interaction.editReply({ content: "❌ You're already in a dungeon! Use `/dungeon continue` or abandon it first." });
+                return utils.safeInteractionRespond(interaction, { content: "❌ You're already in a dungeon! Use `/dungeon continue` or abandon it first." });
             }
 
             const dungeon: any = await db.query("SELECT * FROM rpg_dungeons WHERE id = ?", [dungeonId]);
             
             if (!dungeon[0]) {
-                return interaction.editReply({ content: "❌ Dungeon not found!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ Dungeon not found!" });
             }
 
             if (character.level < dungeon[0].required_level) {
-                return interaction.editReply({ content: `❌ You need to be level ${dungeon[0].required_level} to enter this dungeon!` });
+                return utils.safeInteractionRespond(interaction, { content: `❌ You need to be level ${dungeon[0].required_level} to enter this dungeon!` });
             }
 
             if (character.hp < character.max_hp * 0.5) {
-                return interaction.editReply({ content: "❌ You're too injured to enter a dungeon! Rest first with `/rpg rest`." });
+                return utils.safeInteractionRespond(interaction, { content: "❌ You're too injured to enter a dungeon! Rest first with `/rpg rest`." });
             }
 
             await db.query("INSERT INTO rpg_dungeon_runs SET ?", [{
@@ -124,7 +125,7 @@ export default {
                 .setFooter({ text: "Use /dungeon continue to progress!" })
                 .setTimestamp();
 
-            return interaction.editReply({ embeds: [embed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
 
         if (sub === "continue") {
@@ -134,7 +135,7 @@ export default {
             );
 
             if (!activeRun[0]) {
-                return interaction.editReply({ content: "❌ You're not in a dungeon! Use `/dungeon enter` to start one." });
+                return utils.safeInteractionRespond(interaction, { content: "❌ You're not in a dungeon! Use `/dungeon enter` to start one." });
             }
 
             const run = activeRun[0];
@@ -229,7 +230,7 @@ export default {
                         )
                         .setTimestamp();
 
-                    return interaction.editReply({ embeds: [embed], content: "" });
+                    return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
                 } else {
                     await db.query(
                         "UPDATE rpg_dungeon_runs SET stage = stage + 1 WHERE character_id = ? AND status = 'in_progress'",
@@ -249,7 +250,7 @@ export default {
                         .setFooter({ text: "Use /dungeon continue to advance!" })
                         .setTimestamp();
 
-                    return interaction.editReply({ embeds: [embed], content: "" });
+                    return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
                 }
             } else {
                 await db.query(
@@ -270,7 +271,7 @@ export default {
                     .setFooter({ text: "Rest up and try again!" })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [embed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
         }
 
@@ -281,7 +282,7 @@ export default {
             );
 
             if (!activeRun[0]) {
-                return interaction.editReply({ content: "❌ You're not currently in a dungeon." });
+                return utils.safeInteractionRespond(interaction, { content: "❌ You're not currently in a dungeon." });
             }
 
             const run = activeRun[0];
@@ -300,7 +301,7 @@ export default {
                 .setFooter({ text: "Use /dungeon continue to keep going!" })
                 .setTimestamp();
 
-            return interaction.editReply({ embeds: [embed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
     },
     ephemeral: false

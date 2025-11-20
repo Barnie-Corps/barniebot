@@ -6,9 +6,11 @@ import data from "../data";
 export default {
     data: new SlashCommandBuilder()
         .setName("top")
-        .setDescription("Shows the top users in the message count leaderboard"),
+        .setDescription("Shows the top users in the message count leaderboard")
+        .addIntegerOption(o => o.setName("limit").setDescription("How many to show (5-25)").setMinValue(5).setMaxValue(25)),
     category: "Info",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
+        const limit = interaction.options.getInteger("limit") ?? 10;
         let texts = {
             embed: {
                 title: "Top 10 message count leaderboard",
@@ -25,24 +27,38 @@ export default {
         if (lang !== "en") {
             texts = await utils.autoTranslate(texts, "en", lang);
         }
-        const data: any = await db.query("SELECT * FROM message_count ORDER BY count DESC LIMIT 10");
-        if (data.length === 0) return await interaction.editReply(texts.errors.no_data);
+        const data: any = await db.query("SELECT * FROM message_count ORDER BY count DESC LIMIT ?", [Math.max(5, Math.min(25, limit))]);
+        if (data.length === 0) return await utils.safeInteractionRespond(interaction, { content: texts.errors.no_data });
+
         const embed = new EmbedBuilder({
-            title: texts.embed.title,
+            title: texts.embed.title.replace("Top 10", `Top ${data.length}`),
             description: texts.embed.description,
             footer: {
                 text: texts.embed.footer,
                 iconURL: interaction.client.user?.displayAvatarURL()
             },
-            fields: data.map((d: any, i: number) => {
-                const user = interaction.client.users.cache.get(d.uid);
-                return {
-                    name: `#${i + 1} - ${user ? `${user?.displayName} (@${user?.username})` : `Unknown User`} (${d.uid})`,
-                    value: `${texts.fields.normal}: ${d.count}`
-                }
-            }),
+            fields: []
         })
             .setColor("Purple");
-        await interaction.editReply({ embeds: [embed], content: "" });
+
+        const medals = ["🥇", "🥈", "🥉"]; // for top 3
+        const nf = new Intl.NumberFormat();
+
+        // Resolve users (fetch if missing) to improve display names
+        for (let i = 0; i < data.length; i++) {
+            const d = data[i];
+            let user = interaction.client.users.cache.get(d.uid);
+            if (!user) {
+                try { user = await interaction.client.users.fetch(d.uid); } catch {}
+            }
+            const place = i < 3 ? medals[i] : `#${i + 1}`;
+            const display = user ? `${user.displayName} (@${user.username})` : `Unknown User`;
+            (embed.data.fields as any[]).push({
+                name: `${place} • ${display} (${d.uid})`,
+                value: `${texts.fields.normal}: ${nf.format(d.count)}`
+            });
+        }
+
+        await utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
     }
 }

@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
+import utils from "../utils";
 
 async function getSession(userId: string) {
     const session: any = await db.query(
@@ -51,12 +52,12 @@ export default {
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return interaction.editReply("❌ You need to log in first! Use `/login` to access your account.");
+            return utils.safeInteractionRespond(interaction, "❌ You need to log in first! Use `/login` to access your account.");
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return interaction.editReply("❌ You need to create a character first! Use `/rpg create` to begin your adventure.");
+            return utils.safeInteractionRespond(interaction, "❌ You need to create a character first! Use `/rpg create` to begin your adventure.");
         }
 
         const sub = interaction.options.getSubcommand();
@@ -78,7 +79,7 @@ export default {
                 );
 
                 if (items.length === 0) {
-                    return interaction.editReply("❌ No items available in this category!");
+                    return utils.safeInteractionRespond(interaction, "❌ No items available in this category!");
                 }
 
                 const rarityColors: any = {
@@ -134,7 +135,7 @@ export default {
                     });
                 }
 
-                return interaction.editReply({ embeds: [shopEmbed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [shopEmbed], content: "" });
             }
 
             case "buy": {
@@ -144,14 +145,14 @@ export default {
                 const shopItem: any = await db.query("SELECT * FROM rpg_items WHERE id = ?", [itemId]);
 
                 if (!shopItem[0]) {
-                    return interaction.editReply("❌ Invalid item ID! Use `/shop browse` to see available items.");
+                    return utils.safeInteractionRespond(interaction, "❌ Invalid item ID! Use `/shop browse` to see available items.");
                 }
 
                 const item = shopItem[0];
                 const totalCost = item.base_value * quantity;
                 
                 if (character.gold < totalCost) {
-                    return interaction.editReply(`❌ Not enough gold! You need **${totalCost}** gold but only have **${character.gold}**!`);
+                    return utils.safeInteractionRespond(interaction, `❌ Not enough gold! You need **${totalCost}** gold but only have **${character.gold}**!`);
                 }
 
                 const emojiMap: Record<string, string> = {
@@ -209,7 +210,7 @@ export default {
                     .setFooter({ text: "Thank you for your purchase!" })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [purchaseEmbed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [purchaseEmbed], content: "" });
             }
 
             case "sell": {
@@ -225,19 +226,19 @@ export default {
                 );
 
                 if (!invItem[0]) {
-                    return interaction.editReply("❌ Item not found in your inventory!");
+                    return utils.safeInteractionRespond(interaction, "❌ Item not found in your inventory!");
                 }
 
                 if (!invItem[0].tradeable) {
-                    return interaction.editReply("❌ This item cannot be sold!");
+                    return utils.safeInteractionRespond(interaction, "❌ This item cannot be sold!");
                 }
 
                 if (invItem[0].bound) {
-                    return interaction.editReply("❌ This item is bound to you and cannot be sold!");
+                    return utils.safeInteractionRespond(interaction, "❌ This item is bound to you and cannot be sold!");
                 }
 
                 if (invItem[0].quantity < quantity) {
-                    return interaction.editReply(`❌ You only have ${invItem[0].quantity} of this item!`);
+                    return utils.safeInteractionRespond(interaction, `❌ You only have ${invItem[0].quantity} of this item!`);
                 }
 
                 const equipped: any = await db.query(
@@ -246,7 +247,7 @@ export default {
                 );
 
                 if (equipped[0]) {
-                    return interaction.editReply("❌ You must unequip this item before selling it!");
+                    return utils.safeInteractionRespond(interaction, "❌ You must unequip this item before selling it!");
                 }
 
                 const sellPrice = Math.floor(invItem[0].base_value * 0.5 * quantity);
@@ -270,7 +271,7 @@ export default {
                     .setFooter({ text: "Come back anytime!" })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [sellEmbed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [sellEmbed], content: "" });
             }
         }
     },

@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
+import utils from "../utils";
 
 async function getSession(userId: string) {
     const session: any = await db.query(
@@ -51,12 +52,12 @@ export default {
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return interaction.editReply({ content: "❌ You need to log in first! Use `/login` to access your account." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ You need to log in first! Use `/login` to access your account." });
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return interaction.editReply({ content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
         }
 
         const sub = interaction.options.getSubcommand();
@@ -72,7 +73,7 @@ export default {
             );
 
             if (pets.length === 0) {
-                return interaction.editReply({ content: "🐾 You don't have any pets yet! Visit the shop to adopt one." });
+                return utils.safeInteractionRespond(interaction, { content: "🐾 You don't have any pets yet! Visit the shop to adopt one." });
             }
 
             const embed = new EmbedBuilder()
@@ -104,7 +105,7 @@ export default {
 
             embed.setFooter({ text: "Use /pet info <id> to view detailed information" });
 
-            return interaction.editReply({ embeds: [embed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
 
         if (sub === "equip") {
@@ -116,11 +117,11 @@ export default {
             );
 
             if (!pet[0]) {
-                return interaction.editReply({ content: "❌ Pet not found!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ Pet not found!" });
             }
 
             if (pet[0].is_active) {
-                return interaction.editReply({ content: "❌ This pet is already equipped!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ This pet is already equipped!" });
             }
 
             await db.query("UPDATE rpg_character_pets SET is_active = FALSE WHERE character_id = ?", [character.id]);
@@ -128,7 +129,7 @@ export default {
 
             const petInfo: any = await db.query("SELECT * FROM rpg_pets WHERE id = ?", [pet[0].pet_id]);
 
-            return interaction.editReply({ 
+            return utils.safeInteractionRespond(interaction, { 
                 content: `✅ ${petInfo[0].emoji} **${pet[0].name}** is now your active companion!` 
             });
         }
@@ -140,12 +141,12 @@ export default {
             );
 
             if (!activePet[0]) {
-                return interaction.editReply({ content: "❌ You don't have an active pet!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ You don't have an active pet!" });
             }
 
             await db.query("UPDATE rpg_character_pets SET is_active = FALSE WHERE id = ?", [activePet[0].id]);
 
-            return interaction.editReply({ content: `✅ **${activePet[0].name}** has been unequipped.` });
+            return utils.safeInteractionRespond(interaction, { content: `✅ **${activePet[0].name}** has been unequipped.` });
         }
 
         if (sub === "feed") {
@@ -157,16 +158,16 @@ export default {
             );
 
             if (!pet[0]) {
-                return interaction.editReply({ content: "❌ Pet not found!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ Pet not found!" });
             }
 
             if (pet[0].happiness >= 100) {
-                return interaction.editReply({ content: "❌ This pet is already at maximum happiness!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ This pet is already at maximum happiness!" });
             }
 
             const feedCost = 50;
             if (character.gold < feedCost) {
-                return interaction.editReply({ content: `❌ You need ${feedCost} gold to feed your pet!` });
+                return utils.safeInteractionRespond(interaction, { content: `❌ You need ${feedCost} gold to feed your pet!` });
             }
 
             const happinessGain = Math.floor(Math.random() * 20) + 10;
@@ -180,7 +181,7 @@ export default {
 
             const petInfo: any = await db.query("SELECT emoji FROM rpg_pets WHERE id = ?", [pet[0].pet_id]);
 
-            return interaction.editReply({ 
+            return utils.safeInteractionRespond(interaction, { 
                 content: `✅ You fed ${petInfo[0].emoji} **${pet[0].name}**! Happiness: ${pet[0].happiness} → ${newHappiness} (+${happinessGain})` 
             });
         }
@@ -198,7 +199,7 @@ export default {
             );
 
             if (!pet[0]) {
-                return interaction.editReply({ content: "❌ Pet not found!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ Pet not found!" });
             }
 
             const p = pet[0];
@@ -238,7 +239,7 @@ export default {
                 });
             }
 
-            return interaction.editReply({ embeds: [embed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
 
         if (sub === "rename") {
@@ -251,12 +252,12 @@ export default {
             );
 
             if (!pet[0]) {
-                return interaction.editReply({ content: "❌ Pet not found!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ Pet not found!" });
             }
 
             await db.query("UPDATE rpg_character_pets SET name = ? WHERE id = ?", [newName, petId]);
 
-            return interaction.editReply({ content: `✅ Pet renamed to **${newName}**!` });
+            return utils.safeInteractionRespond(interaction, { content: `✅ Pet renamed to **${newName}**!` });
         }
     },
     ephemeral: false

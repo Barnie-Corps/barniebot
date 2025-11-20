@@ -52,7 +52,7 @@ export default {
 
         embed.addFields({ name: texts.totals, value: `${texts.totalWorkers}: ${stats.total}` });
         embed.setFooter({ text: texts.footer });
-        await interaction.editReply({ embeds: [embed], content: null });
+        await utils.safeInteractionRespond(interaction, { embeds: [embed], content: null });
     },
     ephemeral: false
 };

@@ -17,7 +17,7 @@ export default {
 
     // Only staff can view other users' warnings
     if (!isSelf && !isStaff) {
-      return interaction.editReply("You can only view your own warnings.");
+      return utils.safeInteractionRespond(interaction, "You can only view your own warnings.");
     }
 
     const now = Date.now();
@@ -34,7 +34,7 @@ export default {
     const warnings: any = await db.query(query, params);
 
     if (warnings.length === 0) {
-      return interaction.editReply(`${targetUser.username} has no ${includeExpired ? "" : "active "}warnings.`);
+      return utils.safeInteractionRespond(interaction, `${targetUser.username} has no ${includeExpired ? "" : "active "}warnings.`);
     }
 
     // Calculate total active points
@@ -134,7 +134,7 @@ export default {
       });
     }
 
-    return interaction.editReply({ embeds: [embed], content: "" });
+    return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
   },
   ephemeral: true
 };

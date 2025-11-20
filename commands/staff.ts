@@ -50,23 +50,23 @@ export default {
                 const desiredRank = desiredRankRaw.length ? desiredRankRaw : null;
                 const targetRank = await utils.getUserStaffRank(user.id);
                 const perm = canManageRank(executorRank, targetRank, desiredRank);
-                if (!perm.allowed) return interaction.editReply({ content: perm.error });
+                if (!perm.allowed) return utils.safeInteractionRespond(interaction, { content: perm.error });
                 if (desiredRank) {
                     await utils.setUserStaffRank(user.id, desiredRank);
-                    return interaction.editReply(`Assigned rank '${desiredRank}' to ${user.username}.`);
+                    return utils.safeInteractionRespond(interaction, `Assigned rank '${desiredRank}' to ${user.username}.`);
                 } else {
                     await utils.setUserStaffRank(user.id, null);
-                    return interaction.editReply(`Removed rank from ${user.username}.`);
+                    return utils.safeInteractionRespond(interaction, `Removed rank from ${user.username}.`);
                 }
             }
             case "info": {
                 const user = interaction.options.getUser("user", true);
                 const rank = await utils.getUserStaffRank(user.id);
-                return interaction.editReply(rank ? `${user.username} rank: ${rank}` : `${user.username} has no rank.`);
+                return utils.safeInteractionRespond(interaction, rank ? `${user.username} rank: ${rank}` : `${user.username} has no rank.`);
             }
             case "list": {
                 const rows: any = await db.query("SELECT * FROM staff");
-                if (!Array.isArray(rows) || rows.length === 0) return interaction.editReply("No staff registered.");
+                if (!Array.isArray(rows) || rows.length === 0) return utils.safeInteractionRespond(interaction, "No staff registered.");
                 const byRank: Record<string, string[]> = {};
                 for (const r of rows) {
                     const rank = r.rank || "(none)";
@@ -77,7 +77,7 @@ export default {
                 Object.entries(byRank).sort((a, b) => utils.getStaffRankIndex(b[0]) - utils.getStaffRankIndex(a[0])).forEach(([rank, ids]) => {
                     embed.addFields({ name: rank, value: ids.map(id => `<@${id}> (@${client.users.cache.get(id)?.username ?? "Unknown"})`).join(" ") || "(none)", inline: false });
                 });
-                return interaction.editReply({ embeds: [embed], content: null });
+                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: null });
             }
             case "cases": {
                 const user = interaction.options.getUser("user", true);
@@ -164,7 +164,7 @@ export default {
                                     .setStyle(ButtonStyle.Danger);
                                 const row = new ActionRowBuilder<ButtonBuilder>().addComponents(prev, next, close);
 
-                                return interaction.editReply({ embeds: [embed], content: null, components: [row] });
+                                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: null, components: [row] });
             }
         }
     },

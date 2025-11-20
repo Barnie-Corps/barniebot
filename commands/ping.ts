@@ -15,10 +15,10 @@ export default {
             texts = await utils.autoTranslate(texts, "en", lang);
         }
         const start = Date.now();
-        await interaction.editReply(`:ping_pong: Pong!\n${texts.socket}: ${interaction.client.ws.ping} ms\n${texts.http}: --//--`);
+        await utils.safeInteractionRespond(interaction, `:ping_pong: Pong!\n${texts.socket}: ${interaction.client.ws.ping} ms\n${texts.http}: --//--`);
         const end = Date.now();
         const wsPing = interaction.client.ws.ping;
-        await interaction.editReply(`:ping_pong: Pong!\n${texts.socket}: ${wsPing} ms (${wsPing / 1000} s)\n${texts.http}: ${end - start} ms (${(end - start) / 1000} s)`);
+        await utils.safeInteractionRespond(interaction, `:ping_pong: Pong!\n${texts.socket}: ${wsPing} ms (${wsPing / 1000} s)\n${texts.http}: ${end - start} ms (${(end - start) / 1000} s)`);
     },
     ephemeral: false
 }

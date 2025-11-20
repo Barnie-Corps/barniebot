@@ -1061,6 +1061,27 @@ const utils = {
       notification_id: notificationId,
       read_at: Date.now()
     }]);
+  },
+  safeInteractionRespond: async (interaction: any, payload: any) => {
+    try {
+      if (interaction.replied || interaction.deferred) return await interaction.editReply(payload);
+      return await interaction.reply(payload);
+    } catch (err: any) {
+      if (err?.code === 10008) {
+        try { return await interaction.followUp(payload); } catch {}
+      }
+      throw err;
+    }
+  },
+  safeComponentUpdate: async (i: any, payload: any) => {
+    try {
+      return await i.update(payload);
+    } catch (err: any) {
+      if (err?.code === 10008) {
+        try { return await i.followUp(payload); } catch {}
+      }
+      throw err;
+    }
   }
 };
 export default utils;

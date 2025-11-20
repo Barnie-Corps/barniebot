@@ -225,12 +225,12 @@ export default {
         if (sub === "create") {
             const session = await getSession(interaction.user.id);
             if (!session) {
-                return interaction.editReply("❌ You need to log in first! Use `/login` to access your account.");
+                return utils.safeInteractionRespond(interaction, "❌ You need to log in first! Use `/login` to access your account.");
             }
 
             const existingChar = await getCharacter(session.account_id);
             if (existingChar) {
-                return interaction.editReply("❌ You already have a character! Use `/rpg profile` to view it.");
+                return utils.safeInteractionRespond(interaction, "❌ You already have a character! Use `/rpg profile` to view it.");
             }
 
             const name = interaction.options.getString("name", true);
@@ -239,7 +239,7 @@ export default {
 
             const nameCheck: any = await db.query("SELECT * FROM rpg_characters WHERE name = ?", [name]);
             if (nameCheck.length > 0) {
-                return interaction.editReply("❌ This character name is already taken!");
+                return utils.safeInteractionRespond(interaction, "❌ This character name is already taken!");
             }
 
             await db.query("INSERT INTO rpg_characters SET ?", [{
@@ -281,17 +281,17 @@ export default {
                 .setFooter({ text: "Your adventure begins now! Use /rpg profile to see your stats" })
                 .setTimestamp();
 
-            return interaction.editReply({ embeds: [createEmbed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [createEmbed], content: "" });
         }
 
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return interaction.editReply("❌ You need to log in first! Use `/login` to access your account.");
+            return utils.safeInteractionRespond(interaction, "❌ You need to log in first! Use `/login` to access your account.");
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return interaction.editReply("❌ You need to create a character first! Use `/rpg create` to begin your adventure.");
+            return utils.safeInteractionRespond(interaction, "❌ You need to create a character first! Use `/rpg create` to begin your adventure.");
         }
 
         switch (sub) {
@@ -346,7 +346,7 @@ export default {
                     .setFooter({ text: `Stat Points Available: ${character.stat_points}` })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [profileEmbed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [profileEmbed], content: "" });
             }
 
             case "stats": {
@@ -368,7 +368,7 @@ export default {
                         .setFooter({ text: "Use /rpg stats allocate to distribute your points" })
                         .setTimestamp();
 
-                    return interaction.editReply({ embeds: [statsEmbed], content: "" });
+                    return utils.safeInteractionRespond(interaction, { embeds: [statsEmbed], content: "" });
                 }
 
                 if (action === "allocate") {
@@ -376,11 +376,11 @@ export default {
                     const points = interaction.options.getInteger("points");
 
                     if (!stat || !points) {
-                        return interaction.editReply("❌ Please specify both stat and points to allocate!");
+                        return utils.safeInteractionRespond(interaction, "❌ Please specify both stat and points to allocate!");
                     }
 
                     if (character.stat_points < points) {
-                        return interaction.editReply(`❌ You only have ${character.stat_points} stat points available!`);
+                        return utils.safeInteractionRespond(interaction, `❌ You only have ${character.stat_points} stat points available!`);
                     }
 
                     await db.query(
@@ -406,7 +406,7 @@ export default {
                         )
                         .setTimestamp();
 
-                    return interaction.editReply({ embeds: [allocateEmbed], content: "" });
+                    return utils.safeInteractionRespond(interaction, { embeds: [allocateEmbed], content: "" });
                 }
                 break;
             }
@@ -430,7 +430,7 @@ export default {
                 const totalPages = Math.ceil(totalItems[0].count / itemsPerPage);
 
                 if (items.length === 0) {
-                    return interaction.editReply("📦 Your inventory is empty!");
+                    return utils.safeInteractionRespond(interaction, "📦 Your inventory is empty!");
                 }
 
                 const rarityColors: any = {
@@ -458,7 +458,7 @@ export default {
                     });
                 }
 
-                return interaction.editReply({ embeds: [invEmbed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [invEmbed], content: "" });
             }
 
             case "equip": {
@@ -474,19 +474,19 @@ export default {
                 );
 
                 if (!invItem[0]) {
-                    return interaction.editReply("❌ Item not found in your inventory!");
+                    return utils.safeInteractionRespond(interaction, "❌ Item not found in your inventory!");
                 }
 
                 if (!invItem[0].slot) {
-                    return interaction.editReply("❌ This item cannot be equipped!");
+                    return utils.safeInteractionRespond(interaction, "❌ This item cannot be equipped!");
                 }
 
                 if (invItem[0].required_level > character.level) {
-                    return interaction.editReply(`❌ You need to be level ${invItem[0].required_level} to equip this item!`);
+                    return utils.safeInteractionRespond(interaction, `❌ You need to be level ${invItem[0].required_level} to equip this item!`);
                 }
 
                 if (invItem[0].required_class && invItem[0].required_class !== character.class) {
-                    return interaction.editReply(`❌ This item can only be equipped by ${invItem[0].required_class}s!`);
+                    return utils.safeInteractionRespond(interaction, `❌ This item can only be equipped by ${invItem[0].required_class}s!`);
                 }
 
                 // Check if this item is already equipped in any slot
@@ -496,7 +496,7 @@ export default {
                 );
 
                 if (alreadyEquipped[0]) {
-                    return interaction.editReply(`❌ **${invItem[0].name}** is already equipped! Unequip it first before equipping another copy.`);
+                    return utils.safeInteractionRespond(interaction, `❌ **${invItem[0].name}** is already equipped! Unequip it first before equipping another copy.`);
                 }
 
                 const currentEquip: any = await db.query(
@@ -522,7 +522,7 @@ export default {
                     .setDescription(`**${invItem[0].name}** has been equipped in the **${invItem[0].slot}** slot!`)
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [equipEmbed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [equipEmbed], content: "" });
             }
 
             case "unequip": {
@@ -534,12 +534,12 @@ export default {
                 );
 
                 if (!equipped[0]) {
-                    return interaction.editReply("❌ No item equipped in that slot!");
+                    return utils.safeInteractionRespond(interaction, "❌ No item equipped in that slot!");
                 }
 
                 await db.query("DELETE FROM rpg_equipped_items WHERE character_id = ? AND slot = ?", [character.id, slot]);
 
-                return interaction.editReply(`✅ Item unequipped from **${slot}** slot!`);
+                return utils.safeInteractionRespond(interaction, `✅ Item unequipped from **${slot}** slot!`);
             }
 
             case "rest": {
@@ -549,7 +549,7 @@ export default {
 
                 if (timeLeft > 0) {
                     const minutes = Math.ceil(timeLeft / 60000);
-                    return interaction.editReply(`⏰ You can rest again in ${minutes} minute(s)!`);
+                    return utils.safeInteractionRespond(interaction, `⏰ You can rest again in ${minutes} minute(s)!`);
                 }
 
                 await db.query(
@@ -568,7 +568,7 @@ export default {
                     .setFooter({ text: "You feel refreshed and ready for battle!" })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [restEmbed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [restEmbed], content: "" });
             }
 
             case "battle": {
@@ -757,7 +757,7 @@ export default {
                         );
                     }
 
-                    return interaction.editReply({ embeds: [victoryEmbed], content: "" });
+                    return utils.safeInteractionRespond(interaction, { embeds: [victoryEmbed], content: "" });
                 } else {
                     await db.query(
                         "UPDATE rpg_characters SET hp = 1 WHERE id = ?",
@@ -785,7 +785,7 @@ export default {
                         occurred_at: Date.now()
                     }]);
 
-                    return interaction.editReply({ embeds: [defeatEmbed], content: "" });
+                    return utils.safeInteractionRespond(interaction, { embeds: [defeatEmbed], content: "" });
                 }
             }
 
@@ -798,7 +798,7 @@ export default {
                 );
 
                 if (topPlayers.length === 0) {
-                    return interaction.editReply("📋 No players on the leaderboard yet!");
+                    return utils.safeInteractionRespond(interaction, "📋 No players on the leaderboard yet!");
                 }
 
                 const leaderboardEmbed = new EmbedBuilder()
@@ -821,7 +821,7 @@ export default {
                     });
                 });
 
-                return interaction.editReply({ embeds: [leaderboardEmbed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [leaderboardEmbed], content: "" });
             }
 
             case "adventure": {
@@ -832,7 +832,7 @@ export default {
 
                 if (timeLeft > 0) {
                     const minutes = Math.ceil(timeLeft / 60000);
-                    return interaction.editReply(`⏰ You're still recovering from your last adventure! Wait ${minutes} minute(s).`);
+                    return utils.safeInteractionRespond(interaction, `⏰ You're still recovering from your last adventure! Wait ${minutes} minute(s).`);
                 }
 
                 const adventures: any = {
@@ -900,7 +900,7 @@ export default {
                         .setFooter({ text: "Be more careful next time!" })
                         .setTimestamp();
 
-                    return interaction.editReply({ embeds: [dangerEmbed], content: "" });
+                    return utils.safeInteractionRespond(interaction, { embeds: [dangerEmbed], content: "" });
                 }
 
                 // Success - calculate rewards
@@ -984,7 +984,7 @@ export default {
                     });
                 }
 
-                return interaction.editReply({ embeds: [adventureEmbed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [adventureEmbed], content: "" });
             }
 
             case "work": {
@@ -995,7 +995,7 @@ export default {
 
                 if (timeLeft > 0) {
                     const minutes = Math.ceil(timeLeft / 60000);
-                    return interaction.editReply(`⏰ You're still working! Wait ${minutes} minute(s) before taking another job.`);
+                    return utils.safeInteractionRespond(interaction, `⏰ You're still working! Wait ${minutes} minute(s) before taking another job.`);
                 }
 
                 const jobs: any = {
@@ -1065,7 +1065,7 @@ export default {
                     .setFooter({ text: "Come back later for more work!" })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [workEmbed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [workEmbed], content: "" });
             }
 
             case "gather": {
@@ -1076,7 +1076,7 @@ export default {
 
                 if (timeLeft > 0) {
                     const minutes = Math.ceil(timeLeft / 60000);
-                    return interaction.editReply(`⏰ You're still gathering! Wait ${minutes} minute(s).`);
+                    return utils.safeInteractionRespond(interaction, `⏰ You're still gathering! Wait ${minutes} minute(s).`);
                 }
 
                 const resources: any = {
@@ -1109,7 +1109,7 @@ export default {
                     .setFooter({ text: "Resources sold automatically to merchants" })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [gatherEmbed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [gatherEmbed], content: "" });
             }
 
             case "market": {
@@ -1126,7 +1126,7 @@ export default {
                     );
 
                     if (!listings || listings.length === 0) {
-                        return interaction.editReply("🏪 The marketplace is empty! List some items for sale.");
+                        return utils.safeInteractionRespond(interaction, "🏪 The marketplace is empty! List some items for sale.");
                     }
 
                     const rarityColors: any = {
@@ -1153,7 +1153,7 @@ export default {
                         });
                     }
 
-                    return interaction.editReply({ embeds: [marketEmbed], content: "" });
+                    return utils.safeInteractionRespond(interaction, { embeds: [marketEmbed], content: "" });
                 }
 
                 if (action === "sell") {
@@ -1161,11 +1161,11 @@ export default {
                     const price = interaction.options.getInteger("price");
 
                     if (!itemId || !price) {
-                        return interaction.editReply("❌ Please provide both item_id and price to list an item!");
+                        return utils.safeInteractionRespond(interaction, "❌ Please provide both item_id and price to list an item!");
                     }
 
                     if (price < 1) {
-                        return interaction.editReply("❌ Price must be at least 1 gold!");
+                        return utils.safeInteractionRespond(interaction, "❌ Price must be at least 1 gold!");
                     }
 
                     const invItem: any = await db.query(
@@ -1174,7 +1174,7 @@ export default {
                     );
 
                     if (!invItem[0]) {
-                        return interaction.editReply("❌ Item not found in your inventory!");
+                        return utils.safeInteractionRespond(interaction, "❌ Item not found in your inventory!");
                     }
 
                     // Check if item is equipped
@@ -1184,7 +1184,7 @@ export default {
                     );
 
                     if (equipped[0]) {
-                        return interaction.editReply("❌ You cannot sell equipped items! Unequip it first.");
+                        return utils.safeInteractionRespond(interaction, "❌ You cannot sell equipped items! Unequip it first.");
                     }
 
                     // Remove from inventory
@@ -1206,7 +1206,7 @@ export default {
                         created_at: Date.now()
                     }]);
 
-                    return interaction.editReply(`✅ Item listed for **${price} gold**! Other players can now purchase it.`);
+                    return utils.safeInteractionRespond(interaction, `✅ Item listed for **${price} gold**! Other players can now purchase it.`);
                 }
 
                 if (action === "mylistings") {
@@ -1219,7 +1219,7 @@ export default {
                     );
 
                     if (!myListings || myListings.length === 0) {
-                        return interaction.editReply("📋 You have no active listings.");
+                        return utils.safeInteractionRespond(interaction, "📋 You have no active listings.");
                     }
 
                     const listingsEmbed = new EmbedBuilder()
@@ -1236,13 +1236,13 @@ export default {
                         });
                     }
 
-                    return interaction.editReply({ embeds: [listingsEmbed], content: "" });
+                    return utils.safeInteractionRespond(interaction, { embeds: [listingsEmbed], content: "" });
                 }
 
                 // Buy action (with listing_id)
                 const listingId = interaction.options.getInteger("listing_id");
                 if (!listingId) {
-                    return interaction.editReply("❌ Please provide a listing_id to purchase an item!");
+                    return utils.safeInteractionRespond(interaction, "❌ Please provide a listing_id to purchase an item!");
                 }
 
                 const listing: any = await db.query(
@@ -1253,15 +1253,15 @@ export default {
                 );
 
                 if (!listing[0]) {
-                    return interaction.editReply("❌ Listing not found or no longer available!");
+                    return utils.safeInteractionRespond(interaction, "❌ Listing not found or no longer available!");
                 }
 
                 if (listing[0].seller_id === character.id) {
-                    return interaction.editReply("❌ You cannot buy your own listings!");
+                    return utils.safeInteractionRespond(interaction, "❌ You cannot buy your own listings!");
                 }
 
                 if (character.gold < listing[0].price) {
-                    return interaction.editReply(`❌ Not enough gold! You need ${listing[0].price} gold.`);
+                    return utils.safeInteractionRespond(interaction, `❌ Not enough gold! You need ${listing[0].price} gold.`);
                 }
 
                 // Process transaction
@@ -1288,7 +1288,7 @@ export default {
                     }]);
                 }
 
-                return interaction.editReply(`✅ Purchased **${listing[0].item_name}** for **${listing[0].price} gold**!`);
+                return utils.safeInteractionRespond(interaction, `✅ Purchased **${listing[0].item_name}** for **${listing[0].price} gold**!`);
             }
 
             case "quest": {
@@ -1305,7 +1305,7 @@ export default {
                     );
 
                     if (!quests || quests.length === 0) {
-                        return interaction.editReply("📜 No quests available at your level!");
+                        return utils.safeInteractionRespond(interaction, "📜 No quests available at your level!");
                     }
 
                     const questEmbed = new EmbedBuilder()
@@ -1322,7 +1322,7 @@ export default {
                         });
                     }
 
-                    return interaction.editReply({ embeds: [questEmbed], content: "" });
+                    return utils.safeInteractionRespond(interaction, { embeds: [questEmbed], content: "" });
                 }
 
                 if (action === "active") {
@@ -1334,7 +1334,7 @@ export default {
                     );
 
                     if (!activeQuests || activeQuests.length === 0) {
-                        return interaction.editReply("📋 You have no active quests. Accept some from available quests!");
+                        return utils.safeInteractionRespond(interaction, "📋 You have no active quests. Accept some from available quests!");
                     }
 
                     const activeEmbed = new EmbedBuilder()
@@ -1351,21 +1351,21 @@ export default {
                         });
                     }
 
-                    return interaction.editReply({ embeds: [activeEmbed], content: "" });
+                    return utils.safeInteractionRespond(interaction, { embeds: [activeEmbed], content: "" });
                 }
 
                 if (action === "accept") {
                     if (!questId) {
-                        return interaction.editReply("❌ Please provide a quest_id to accept!");
+                        return utils.safeInteractionRespond(interaction, "❌ Please provide a quest_id to accept!");
                     }
 
                     const quest: any = await db.query("SELECT * FROM rpg_quests WHERE id = ?", [questId]);
                     if (!quest[0]) {
-                        return interaction.editReply("❌ Quest not found!");
+                        return utils.safeInteractionRespond(interaction, "❌ Quest not found!");
                     }
 
                     if (character.level < quest[0].required_level) {
-                        return interaction.editReply(`❌ You need to be level ${quest[0].required_level} for this quest!`);
+                        return utils.safeInteractionRespond(interaction, `❌ You need to be level ${quest[0].required_level} for this quest!`);
                     }
 
                     const existing: any = await db.query(
@@ -1374,7 +1374,7 @@ export default {
                     );
 
                     if (existing[0]) {
-                        return interaction.editReply("❌ You already have this quest!");
+                        return utils.safeInteractionRespond(interaction, "❌ You already have this quest!");
                     }
 
                     await db.query("INSERT INTO rpg_character_quests SET ?", [{
@@ -1386,12 +1386,12 @@ export default {
                         accepted_at: Date.now()
                     }]);
 
-                    return interaction.editReply(`✅ Quest accepted: **${quest[0].name}**\nCheck your active quests to track progress!`);
+                    return utils.safeInteractionRespond(interaction, `✅ Quest accepted: **${quest[0].name}**\nCheck your active quests to track progress!`);
                 }
 
                 if (action === "complete") {
                     if (!questId) {
-                        return interaction.editReply("❌ Please provide a quest_id to complete!");
+                        return utils.safeInteractionRespond(interaction, "❌ Please provide a quest_id to complete!");
                     }
 
                     const charQuest: any = await db.query(
@@ -1402,11 +1402,11 @@ export default {
                     );
 
                     if (!charQuest[0]) {
-                        return interaction.editReply("❌ Quest not found or already completed!");
+                        return utils.safeInteractionRespond(interaction, "❌ Quest not found or already completed!");
                     }
 
                     if (charQuest[0].progress < charQuest[0].requirement) {
-                        return interaction.editReply(`❌ Quest not ready! Progress: ${charQuest[0].progress}/${charQuest[0].requirement}`);
+                        return utils.safeInteractionRespond(interaction, `❌ Quest not ready! Progress: ${charQuest[0].progress}/${charQuest[0].requirement}`);
                     }
 
                     await db.query(
@@ -1429,7 +1429,7 @@ export default {
                         )
                         .setTimestamp();
 
-                    return interaction.editReply({ embeds: [completeEmbed], content: "" });
+                    return utils.safeInteractionRespond(interaction, { embeds: [completeEmbed], content: "" });
                 }
 
                 break;
@@ -1440,11 +1440,11 @@ export default {
                 const bet = interaction.options.getInteger("bet", true);
 
                 if (character.gold < bet) {
-                    return interaction.editReply("❌ You don't have enough gold to place this bet!");
+                    return utils.safeInteractionRespond(interaction, "❌ You don't have enough gold to place this bet!");
                 }
 
                 if (bet > 1000) {
-                    return interaction.editReply("❌ Maximum bet is 1000 gold!");
+                    return utils.safeInteractionRespond(interaction, "❌ Maximum bet is 1000 gold!");
                 }
 
                 const games: any = {
@@ -1525,7 +1525,7 @@ export default {
                     .setFooter({ text: result.win ? "Congratulations!" : "Better luck next time!" })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [gambleEmbed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [gambleEmbed], content: "" });
             }
         }
     },

@@ -11,7 +11,7 @@ export default {
         if (lang !== "en") {
             text = (await utils.autoTranslate(text, "en", lang));
         }
-        await interaction.editReply(`${text.value}\n[Privacy policy](https://github.com/Barnie-Corps/barniebot/blob/master/privacy.md)`);
+        await utils.safeInteractionRespond(interaction, `${text.value}\n[Privacy policy](https://github.com/Barnie-Corps/barniebot/blob/master/privacy.md)`);
     },
     ephemeral: false
 }

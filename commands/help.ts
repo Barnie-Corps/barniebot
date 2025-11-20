@@ -61,7 +61,7 @@ export default {
         if (specificCommand) {
             const cmd = data.bot.commands.get(specificCommand.toLowerCase());
             if (!cmd) {
-                return await interaction.editReply(`❌ Command \`${specificCommand}\` not found.`);
+                return await utils.safeInteractionRespond(interaction, `❌ Command \`${specificCommand}\` not found.`);
             }
 
             let texts = {
@@ -102,10 +102,9 @@ export default {
                 .setFooter({ text: `${cmd.data.name} • Use /${cmd.data.name} to execute` })
                 .setTimestamp();
 
-            return await interaction.editReply({ embeds: [detailEmbed], content: "" });
-        }
 
-        // Get all commands and organize by category
+            return await utils.safeInteractionRespond(interaction, { embeds: [detailEmbed], content: "" });
+        }        // Get all commands and organize by category
         const commandsByCategory: Record<string, any[]> = {};
 
         for (const [name, cmd] of data.bot.commands) {
@@ -137,7 +136,7 @@ export default {
         }
 
         if (allCommands.length === 0) {
-            return await interaction.editReply("No commands found in this category.");
+            return await utils.safeInteractionRespond(interaction, "No commands found in this category.");
         }
 
         const totalPages = Math.ceil(allCommands.length / COMMANDS_PER_PAGE);
@@ -169,7 +168,7 @@ export default {
             const embed = new EmbedBuilder()
                 .setColor("Purple")
                 .setTitle(`📚 ${texts.title}`)
-                .setDescription(selectedCategory 
+                .setDescription(selectedCategory
                     ? `${CATEGORY_EMOJIS[selectedCategory] || "📋"} **${selectedCategory}**\n${CATEGORY_DESCRIPTIONS[selectedCategory] || ""}\n\n${texts.viewDetails}`
                     : `${texts.description}\n\n${texts.viewDetails}`)
                 .setFooter({ text: `${texts.page} ${page + 1} ${texts.of} ${totalPages} • ${texts.totalCommands}: ${allCommands.length}` })
@@ -187,7 +186,7 @@ export default {
             // Add fields for each category on this page
             for (const [category, cmds] of Object.entries(pageCategories)) {
                 const emoji = CATEGORY_EMOJIS[category] || "📋";
-                
+
                 // Translate only descriptions
                 const commandList = [];
                 for (const cmd of cmds) {
@@ -274,18 +273,18 @@ export default {
         const embed = await generateEmbed(currentPage);
         const components = generateComponents(currentPage);
 
-        const response = await interaction.editReply({
+        const response = await utils.safeInteractionRespond(interaction, {
             embeds: [embed],
             components: components
         });
 
         // Create collector for button interactions
         const collector = response.createMessageComponentCollector({
-            filter: (i) => i.user.id === interaction.user.id,
+            filter: (i: any) => i.user.id === interaction.user.id,
             time: 300000 // 5 minutes
         });
 
-        collector.on("collect", async (i) => {
+        collector.on("collect", async (i: any) => {
             if (i.customId === "help_first") {
                 currentPage = 0;
             } else if (i.customId === "help_prev") {
@@ -296,11 +295,11 @@ export default {
                 currentPage = totalPages - 1;
             } else if (i.customId === "help_category_filter" && i.isStringSelectMenu()) {
                 const selectedValue = i.values[0];
-                
+
                 // Rebuild command list based on selection
                 allCommands = [];
                 const filterCategories = selectedValue === "all" ? sortedCategories : [selectedValue];
-                
+
                 for (const category of filterCategories) {
                     if (commandsByCategory[category]) {
                         for (const cmd of commandsByCategory[category]) {
@@ -315,7 +314,7 @@ export default {
             const newEmbed = await generateEmbed(currentPage);
             const newComponents = generateComponents(currentPage);
 
-            await i.update({
+            await utils.safeComponentUpdate(i, {
                 embeds: [newEmbed],
                 components: newComponents
             });
@@ -332,7 +331,7 @@ export default {
                     return newRow;
                 });
 
-                await interaction.editReply({ components: disabledComponents as any });
+                await utils.safeInteractionRespond(interaction, { components: disabledComponents as any });
             } catch (error) {
                 // Ignore errors if message was already deleted
             }

@@ -121,8 +121,8 @@ export default {
         if (lang !== "en") {
             texts = await utils.autoTranslate(texts, "en", lang);
         }
-        // if (!data.bot.owners.includes(interaction.user.id)) return await interaction.editReply(texts.default);
-        if (!interaction.inGuild()) return await interaction.editReply(texts.errors.no_guild);
+        // if (!data.bot.owners.includes(interaction.user.id)) return await utils.safeInteractionRespond(interaction, texts.default);
+        if (!interaction.inGuild()) return await utils.safeInteractionRespond(interaction, texts.errors.no_guild);
         const subcmd = interaction.options.getSubcommand();
         if (subcmd) {
             const filterMain: any = (await db.query("SELECT * FROM filter_configs WHERE guild = ?", [interaction.guildId]) as any)[0];
@@ -133,91 +133,91 @@ export default {
                             guild: interaction.guildId,
                             enabled: true
                         }]);
-                        await interaction.editReply(texts.success.registered);
+                        await utils.safeInteractionRespond(interaction, texts.success.registered);
                         break;
                     }
                     else {
                         const set = Number(filterMain.enabled) === 1 ? false : true;
                         await db.query("UPDATE filter_configs SET ? WHERE guild = ?", [{ enabled: set }, interaction.guildId]);
-                        await interaction.editReply(`${set ? texts.success.toggled_on : texts.success.toggled_off}`);
+                        await utils.safeInteractionRespond(interaction, `${set ? texts.success.toggled_on : texts.success.toggled_off}`);
                         break;
                     }
                 }
                 case "add": {
-                    if (!filterMain) return await interaction.editReply(`${texts.errors.not_setup} /filter setup`);
+                    if (!filterMain) return await utils.safeInteractionRespond(interaction, `${texts.errors.not_setup} /filter setup`);
                     const word = interaction.options.getString("word") as string;
                     const allow_repeat = interaction.options.getBoolean("allow_repeat") as boolean;
                     const isProtected = interaction.options.getBoolean("protected") as boolean;
                     const isSingle = interaction.options.getBoolean("single") as boolean;
                     if (!allow_repeat) {
                         const foundWord: any = await db.query("SELECT * FROM filter_words WHERE guild = ? AND content = ?", [interaction.guildId, word.toLowerCase()]);
-                        if (foundWord[0]) return await interaction.editReply(texts.errors.repeated);
-                        if (isProtected && !interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) return await interaction.editReply(texts.errors.not_admin_add);
+                        if (foundWord[0]) return await utils.safeInteractionRespond(interaction, texts.errors.repeated);
+                        if (isProtected && !interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) return await utils.safeInteractionRespond(interaction, texts.errors.not_admin_add);
                         await db.query("INSERT INTO filter_words SET ?", [{ guild: interaction.guildId, content: word.toLowerCase(), protected: isProtected ? true : false, single: isSingle ? true : false }]);
                     }
-                    if (!Boolean(filterMain.enabled)) await interaction.editReply(`${texts.success.added_word} ${isProtected ? ` ${texts.common.protected_word}` : ""}\n${texts.common.turned_off}`);
-                    else await interaction.editReply(`${texts.success.added_word} ${isProtected ? ` ${texts.common.protected_word}` : ""}${isSingle ? ` ${texts.common.single_word}` : ""}`);
+                    if (!Boolean(filterMain.enabled)) await utils.safeInteractionRespond(interaction, `${texts.success.added_word} ${isProtected ? ` ${texts.common.protected_word}` : ""}\n${texts.common.turned_off}`);
+                    else await utils.safeInteractionRespond(interaction, `${texts.success.added_word} ${isProtected ? ` ${texts.common.protected_word}` : ""}${isSingle ? ` ${texts.common.single_word}` : ""}`);
                     break;
                 }
                 case "view": {
-                    if (!filterMain) return await interaction.editReply(`${texts.errors.not_setup} /filter setup`);
+                    if (!filterMain) return await utils.safeInteractionRespond(interaction, `${texts.errors.not_setup} /filter setup`);
                     const format = interaction.options.getString("format") as string;
                     const words: any = await db.query("SELECT * FROM filter_words WHERE guild = ?", [interaction.guildId]);
-                    if (words.length < 1) return await interaction.editReply(texts.errors.no_words);
+                    if (words.length < 1) return await utils.safeInteractionRespond(interaction, texts.errors.no_words);
                     const mapped = words.map((w: any) => `[${w.id}] ${w.content} ${Boolean(w.protected) ? `[${texts.common.protected_text}]` : ""}`);
                     switch (format) {
                         case "file": {
                             const filePath = path.join(__dirname, `filter_content_${interaction.guildId}.txt`);
                             fs.writeFileSync(filePath, `${texts.common.filter_content_text} [${words.length}]\n\n${mapped.join("\n")}`, { encoding: "utf-8" });
-                            await interaction.editReply({ content: "<a:marcano:800125893892505662>", files: [filePath] });
+                            await utils.safeInteractionRespond(interaction, { content: "<a:marcano:800125893892505662>", files: [filePath] });
                             fs.unlinkSync(filePath);
                             break;
                         }
                         case "message": {
                             const finalText = "```\n" + `${texts.common.filter_content_text} [${words.length}]\n${mapped.join("\n")}` + "\n```";
-                            if (finalText.length > 2000) return await interaction.editReply(texts.errors.too_long);
-                            await interaction.editReply(finalText);
+                            if (finalText.length > 2000) return await utils.safeInteractionRespond(interaction, texts.errors.too_long);
+                            await utils.safeInteractionRespond(interaction, finalText);
                             break;
                         }
                     }
                     break;
                 }
                 case "search": {
-                    if (!filterMain) return await interaction.editReply(`${texts.errors.not_setup} /filter setup`);
+                    if (!filterMain) return await utils.safeInteractionRespond(interaction, `${texts.errors.not_setup} /filter setup`);
                     const queries = interaction.options.getString("query") as string;
                     const format = interaction.options.getString("format") as string;
                     const words: any = await db.query("SELECT * FROM filter_words WHERE guild = ?", [interaction.guildId]);
-                    if (words.length < 1) return await interaction.editReply(texts.errors.no_words);
+                    if (words.length < 1) return await utils.safeInteractionRespond(interaction, texts.errors.no_words);
                     const filtered = words.filter((w: any) => queries.trim().split(",").some((q: string) => w.content.includes(q.toLowerCase())));
-                    if (filtered.length < 1) return await interaction.editReply(texts.errors.no_results);
+                    if (filtered.length < 1) return await utils.safeInteractionRespond(interaction, texts.errors.no_results);
                     const mapped = filtered.map((w: any) => `[${w.id}] ${w.content} ${Boolean(w.protected) ? `[${texts.common.protected_text}]` : ""}`);
                     switch (format) {
                         case "file": {
                             const filePath = path.join(__dirname, `filter_content_${interaction.guildId}.txt`);
                             fs.writeFileSync(filePath, `${texts.common.results}: ${queries.trim().split(",").join(", ")} [${words.length}]\n\n${mapped.join("\n")}`, { encoding: "utf-8" });
-                            await interaction.editReply({ content: "<a:marcano:800125893892505662>", files: [filePath] });
+                            await utils.safeInteractionRespond(interaction, { content: "<a:marcano:800125893892505662>", files: [filePath] });
                             fs.unlinkSync(filePath);
                             break;
                         }
                         case "message": {
                             const finalText = "```\n" + `${texts.common.results}: ${queries.trim().split(",").join(", ")} [${filtered.length}]\n${mapped.join("\n")}` + "\n```";
-                            if (finalText.length > 2000) return await interaction.editReply(texts.errors.too_long);
-                            await interaction.editReply(finalText);
+                            if (finalText.length > 2000) return await utils.safeInteractionRespond(interaction, texts.errors.too_long);
+                            await utils.safeInteractionRespond(interaction, finalText);
                             break;
                         }
                     }
                     break;
                 }
                 case "remove": {
-                    if (!filterMain) return await interaction.editReply(`${texts.errors.not_setup} /filter setup`);
+                    if (!filterMain) return await utils.safeInteractionRespond(interaction, `${texts.errors.not_setup} /filter setup`);
                     const wid = interaction.options.getInteger("id") as number;
                     const force = interaction.options.getBoolean("force") as boolean;
-                    if (force && !interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) return await interaction.editReply(texts.errors.not_admin_delete);
+                    if (force && !interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) return await utils.safeInteractionRespond(interaction, texts.errors.not_admin_delete);
                     const word: any = await db.query("SELECT * FROM filter_words WHERE guild = ? AND id = ?", [interaction.guildId, wid]);
-                    if (!word[0]) return await interaction.editReply(texts.errors.invalid_id);
-                    if (Boolean(word[0].protected) && !force) return await interaction.editReply(`${texts.common.protected_word} ${texts.errors.missing_force}`);
+                    if (!word[0]) return await utils.safeInteractionRespond(interaction, texts.errors.invalid_id);
+                    if (Boolean(word[0].protected) && !force) return await utils.safeInteractionRespond(interaction, `${texts.common.protected_word} ${texts.errors.missing_force}`);
                     await db.query("DELETE FROM filter_words WHERE guild = ? AND id = ?", [interaction.guildId, wid]);
-                    await interaction.editReply(`${texts.success.removed_word} -> \`${word[0].content}\`${Boolean(word[0]) && force ? `. ${texts.common.was_forced}` : ""}`);
+                    await utils.safeInteractionRespond(interaction, `${texts.success.removed_word} -> \`${word[0].content}\`${Boolean(word[0]) && force ? `. ${texts.common.was_forced}` : ""}`);
                     break;
                 }
                 case "setup": {
@@ -232,7 +232,7 @@ export default {
                                 .setCustomId(`cancel_setup-${interaction.user.id}-${!filterMain ? "0" : "1"}`)
                                 .setStyle(ButtonStyle.Danger)
                         )
-                    await interaction.editReply({ content: texts.setup.msg, components: [row as any] });
+                    await utils.safeInteractionRespond(interaction, { content: texts.setup.msg, components: [row as any] });
                 }
             }
             return;

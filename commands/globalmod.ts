@@ -133,20 +133,20 @@ export default {
         const user = interaction.options.getUser("user", true);
         const reason = interaction.options.getString("reason") ?? "no reason";
         const perm = ensureCoMPlus(executorRank);
-        if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+        if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         await db.query("INSERT INTO global_bans (id, active, times) VALUES (?, TRUE, 1) ON DUPLICATE KEY UPDATE active = TRUE, times = times + 1", [user.id]);
         await manager.announce(`User \`${user.username}\` has been globally blacklisted by ${executor.username}. Reason: ${reason}`, "en");
         await logStaffAction(executor.id, "BLACKLIST", user.id, `Blacklisted ${user.tag}`, { reason });
-        return interaction.editReply(`Blacklisted \`${user.username}\`. Reason: ${reason}`);
+        return utils.safeInteractionRespond(interaction, `Blacklisted \`${user.username}\`. Reason: ${reason}`);
       }
       case "unblacklist": {
         const user = interaction.options.getUser("user", true);
         const perm = ensureCoMPlus(executorRank);
-        if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+        if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         await db.query("UPDATE global_bans SET active = FALSE WHERE id = ?", [user.id]);
         await manager.announce(`User \`${user.username}\` has been globally unblacklisted by ${executor.username}.`, "en");
         await logStaffAction(executor.id, "UNBLACKLIST", user.id, `Removed blacklist for ${user.tag}`);
-        return interaction.editReply(`Removed blacklist for \`${user.username}\`.`);
+        return utils.safeInteractionRespond(interaction, `Removed blacklist for \`${user.username}\`.`);
       }
       case "warn": {
         const user = interaction.options.getUser("user", true);
@@ -156,7 +156,7 @@ export default {
         const expiryDays = interaction.options.getInteger("expiry_days") ?? 30;
 
         const perm = ensureAnyStaff(executorRank);
-        if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+        if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
         // Calculate expiry timestamp
         const expiresAt = Date.now() + (expiryDays * 24 * 60 * 60 * 1000);
@@ -252,50 +252,50 @@ export default {
           escalationAction: pointCheck.action
         });
 
-        return interaction.editReply(responseMessage);
+        return utils.safeInteractionRespond(interaction, responseMessage);
       }
       case "mute": {
         const user = interaction.options.getUser("user", true);
         const minutes = interaction.options.getInteger("minutes", true);
         const reason = interaction.options.getString("reason") ?? "no reason";
         const perm = ensureModPlus(executorRank);
-        if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+        if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         const until = minutes > 0 ? Date.now() + minutes * 60_000 : 0;
         await db.query("INSERT INTO global_mutes SET ? ON DUPLICATE KEY UPDATE reason = VALUES(reason), authorid = VALUES(authorid), createdAt = VALUES(createdAt), until = VALUES(until)", [{ id: user.id, reason, authorid: executor.id, createdAt: Date.now(), until }]);
         await manager.announce(`User \`${user.username}\` has been globally muted by ${executor.username}. Reason: ${reason}`, "en");
         await logStaffAction(executor.id, "MUTE", user.id, `Muted ${user.tag}${minutes > 0 ? ` for ${minutes}m` : " indefinitely"}`, { reason, minutes, until });
-        return interaction.editReply(`Muted \`${user.username}\` ${minutes > 0 ? `for ${minutes}m` : "indefinitely"}.`);
+        return utils.safeInteractionRespond(interaction, `Muted \`${user.username}\` ${minutes > 0 ? `for ${minutes}m` : "indefinitely"}.`);
       }
       case "unmute": {
         const user = interaction.options.getUser("user", true);
         const perm = ensureModPlus(executorRank);
-        if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+        if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         await db.query("DELETE FROM global_mutes WHERE id = ?", [user.id]);
         await manager.announce(`User \`${user.username}\` has been globally unmuted by ${executor.username}.`, "en");
         await logStaffAction(executor.id, "UNMUTE", user.id, `Unmuted ${user.tag}`);
-        return interaction.editReply(`Unmuted \`${user.username}\`.`);
+        return utils.safeInteractionRespond(interaction, `Unmuted \`${user.username}\`.`);
       }
       case "status": {
         const user = interaction.options.getUser("user", true);
         const blacklisted = await utils.isUserBlacklisted(user.id);
         const muted = await utils.isUserMuted(user.id);
         const rank = await utils.getUserStaffRank(user.id);
-        return interaction.editReply(`Status for \`${user.username}\`:\nRank: ${rank ?? "(none)"}\nBlacklisted: ${blacklisted ? "Yes" : "No"}\nMuted: ${muted ? "Yes" : "No"}`);
+        return utils.safeInteractionRespond(interaction, `Status for \`${user.username}\`:\nRank: ${rank ?? "(none)"}\nBlacklisted: ${blacklisted ? "Yes" : "No"}\nMuted: ${muted ? "Yes" : "No"}`);
       }
       case "closeticket": {
         const ticketId = interaction.options.getInteger("ticket_id", true);
         const perm = ensureAnyStaff(executorRank);
-        if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+        if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
         try {
           const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [ticketId]);
           if (!ticketData[0]) {
-            return interaction.editReply(`Ticket #${ticketId} not found.`);
+            return utils.safeInteractionRespond(interaction, `Ticket #${ticketId} not found.`);
           }
 
           const ticket = ticketData[0];
           if (ticket.status === "closed") {
-            return interaction.editReply(`Ticket #${ticketId} is already closed.`);
+            return utils.safeInteractionRespond(interaction, `Ticket #${ticketId} is already closed.`);
           }
 
           const user = await interaction.client.users.fetch(ticket.user_id);
@@ -479,21 +479,27 @@ export default {
           fs.unlinkSync(`./transcript-${ticketId}.txt`);
           fs.unlinkSync(`./transcript-${ticketId}.html`);
 
-          return interaction.editReply(`Ticket #${ticketId} has been closed successfully.`);
+          return utils.safeInteractionRespond(interaction, `Ticket #${ticketId} has been closed successfully.`);
         } catch (error) {
           console.error("Failed to close ticket:", error);
-          return interaction.editReply("Failed to close ticket. Please try again.");
+          return utils.safeInteractionRespond(interaction, "Failed to close ticket. Please try again.");
         }
       }
       case "search_user": {
         const username = interaction.options.getString("username", true);
         const perm = ensureAnyStaff(executorRank);
-        if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
-        await interaction.editReply("Searching, please wait...");
+        if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
+        await utils.safeInteractionRespond(interaction, "Searching, please wait...");
         if (Number(process.env.MEMBERS_FETCHED) === 0) for (const g of client.guilds.cache.values()) await g.members.fetch();
         const query = username.toLowerCase();
-        const allUsers = client.users.cache.filter(u => u.username.toLowerCase().includes(query) || u.displayName.toLowerCase().includes(query) && !u.bot);
-        if (allUsers.size === 0) return interaction.editReply(`No users found matching '${username}'.`);
+        // Guard against null displayName and ensure bot exclusion applies to both username/displayName checks
+        const allUsers = client.users.cache.filter(u => {
+          if (u.bot) return false;
+          const uname = (u.username || "").toLowerCase();
+          const dname = (u.displayName || "").toLowerCase();
+          return uname.includes(query) || dname.includes(query);
+        });
+        if (allUsers.size === 0) return utils.safeInteractionRespond(interaction, `No users found matching '${username}'.`);
         const matches = Array.from(allUsers.values()).slice(0, 100);
         const userStatusCache: any[] = [];
         for (const u of matches) {
@@ -520,7 +526,7 @@ export default {
               { name: "Muted", value: entry.muted ? "Yes" : "No", inline: true }
             )
             .setTimestamp();
-          return interaction.editReply({ content: "", embeds: [embed] });
+          return utils.safeInteractionRespond(interaction, { content: "", embeds: [embed] });
         }
         let page = 0;
         const pageSize = 10;
@@ -546,11 +552,11 @@ export default {
           new ButtonBuilder().setCustomId("search_stop").setEmoji("⏹️").setStyle(ButtonStyle.Danger),
           new ButtonBuilder().setCustomId("search_next").setEmoji("▶️").setStyle(ButtonStyle.Secondary).setDisabled(page + 1 >= totalPages)
         );
-        const msg = await interaction.editReply({ content: "", embeds: [buildEmbed()], components: [makeRow()] });
+        const msg = await utils.safeInteractionRespond(interaction, { content: "", embeds: [buildEmbed()], components: [makeRow()] });
         const collector = (msg as any).createMessageComponentCollector({ time: 60000, filter: (i: any) => i.user.id === executor.id });
         collector.on("collect", async (i: any) => {
-          if (i.customId === "search_prev" && page > 0) page--; else if (i.customId === "search_next" && page + 1 < totalPages) page++; else if (i.customId === "search_stop") { collector.stop("stop"); return i.update({ embeds: [buildEmbed()], components: [] }); }
-          await i.update({ embeds: [buildEmbed()], components: [makeRow()] });
+          if (i.customId === "search_prev" && page > 0) page--; else if (i.customId === "search_next" && page + 1 < totalPages) page++; else if (i.customId === "search_stop") { collector.stop("stop"); return utils.safeComponentUpdate(i, { embeds: [buildEmbed()], components: [] }); }
+          await utils.safeComponentUpdate(i, { embeds: [buildEmbed()], components: [makeRow()] });
         });
         collector.on("end", async (_: any, r: any) => { if (r !== "stop") try { await (msg as any).edit({ embeds: [buildEmbed()], components: [] }); } catch {} });
         return;

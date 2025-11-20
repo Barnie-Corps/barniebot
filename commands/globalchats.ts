@@ -43,75 +43,75 @@ export default {
             const subcmd = interaction.options.getSubcommand();
             switch (subcmd) {
                 case "set": {
-                    if (!interaction.guild) return await interaction.editReply(texts.errors.only_guild);
+                    if (!interaction.guild) return await utils.safeInteractionRespond(interaction, texts.errors.only_guild);
                     if (!interaction.memberPermissions?.has("ManageChannels")) {
-                        await interaction.editReply(texts.errors.missing_perms);
+                        await utils.safeInteractionRespond(interaction, texts.errors.missing_perms);
                         break;
                     }
                     const channel = interaction.options.getChannel("channel") as TextChannel;
-                    if (channel.type !== ChannelType.GuildText) return await interaction.editReply(texts.errors.not_valid);
+                    if (channel.type !== ChannelType.GuildText) return await utils.safeInteractionRespond(interaction, texts.errors.not_valid);
                     let chatdb: any = await db.query("SELECT * FROM globalchats WHERE guild = ?", [interaction.guildId]);
                     const wh = await channel.createWebhook({
                         name: "GlobalHook"
                     });
                     if (!chatdb[0]) {
                         await db.query("INSERT INTO globalchats SET ?", [{ autotranslate: false, guild: interaction.guildId, channel: channel.id, language: lang, webhook_id: wh.id, webhook_token: wh.token }]);
-                        await interaction.editReply(`${texts.success.first_time_enabled}`);
+                        await utils.safeInteractionRespond(interaction, `${texts.success.first_time_enabled}`);
                         break;
                     }
                     await db.query("UPDATE globalchats SET ? WHERE guild = ?", [{ autotranslate: false, channel: channel.id, enabled: true, webhook_id: wh.id, webhook_token: wh.token }, interaction.guildId]);
-                    await interaction.editReply(texts.success.set);
+                    await utils.safeInteractionRespond(interaction, texts.success.set);
                     break;
                 }
                 case "autotranslate": {
-                    if (!interaction.guild) return await interaction.editReply(texts.errors.only_guild);
+                    if (!interaction.guild) return await utils.safeInteractionRespond(interaction, texts.errors.only_guild);
                     if (!interaction.memberPermissions?.has("ManageChannels")) {
-                        await interaction.editReply(texts.errors.missing_perms);
+                        await utils.safeInteractionRespond(interaction, texts.errors.missing_perms);
                         break;
                     }
                     const status = interaction.options.getBoolean("status") as boolean;
                     let chatdb: any = await db.query("SELECT * FROM globalchats WHERE guild = ?", [interaction.guildId]);
                     if (!chatdb[0]) {
-                        await interaction.editReply(texts.errors.not_registered);
+                        await utils.safeInteractionRespond(interaction, texts.errors.not_registered);
                         break;
                     }
                     await db.query("UPDATE globalchats SET ? WHERE guild = ?", [{ autotranslate: status }, interaction.guildId]);
-                    await interaction.editReply(status ? texts.autotranslate.on : texts.autotranslate.off);
+                    await utils.safeInteractionRespond(interaction, status ? texts.autotranslate.on : texts.autotranslate.off);
                     break;
                 }
                 case "language": {
-                    if (!interaction.guild) return await interaction.editReply(texts.errors.only_guild);
+                    if (!interaction.guild) return await utils.safeInteractionRespond(interaction, texts.errors.only_guild);
                     if (!interaction.memberPermissions?.has("ManageChannels")) {
-                        await interaction.editReply(texts.errors.missing_perms);
+                        await utils.safeInteractionRespond(interaction, texts.errors.missing_perms);
                         break;
                     }
                     const language = (interaction.options.getString("language") as string).toLowerCase();
                     let chatdb: any = await db.query("SELECT * FROM globalchats WHERE guild = ?", [interaction.guildId]);
                     if (!chatdb[0]) {
-                        await interaction.editReply(texts.errors.not_registered);
+                        await utils.safeInteractionRespond(interaction, texts.errors.not_registered);
                         break;
                     }
                     if (!langs.has(1, language) || language === "br" || language === "ch") {
-                        await interaction.editReply(texts.language.unsupported);
+                        await utils.safeInteractionRespond(interaction, texts.language.unsupported);
                         break;
                     }
                     await db.query("UPDATE globalchats SET language = ? WHERE guild = ?", [language, interaction.guildId]);
-                    await interaction.editReply(texts.language.set);
+                    await utils.safeInteractionRespond(interaction, texts.language.set);
                     break;
                 }
                 case "toggle": {
-                    if (!interaction.guild) return await interaction.editReply(texts.errors.only_guild);
+                    if (!interaction.guild) return await utils.safeInteractionRespond(interaction, texts.errors.only_guild);
                     if (!interaction.memberPermissions?.has("ManageChannels")) {
-                        await interaction.editReply(texts.errors.missing_perms);
+                        await utils.safeInteractionRespond(interaction, texts.errors.missing_perms);
                         break;
                     }
                     let chatdb: any = await db.query("SELECT * FROM globalchats WHERE guild = ?", [interaction.guildId]);
                     if (!chatdb[0]) {
-                        await interaction.editReply(texts.errors.not_registered);
+                        await utils.safeInteractionRespond(interaction, texts.errors.not_registered);
                         break;
                     }
                     await db.query("UPDATE globalchats SET enabled = ? WHERE guild = ?", [chatdb[0].enabled ? false : true, interaction.guildId]);
-                    await interaction.editReply(chatdb[0].enabled ? texts.success.disabled : texts.success.enabled);
+                    await utils.safeInteractionRespond(interaction, chatdb[0].enabled ? texts.success.disabled : texts.success.enabled);
                     break;
                 }
             }

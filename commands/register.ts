@@ -94,11 +94,11 @@ export default {
                 const email = interaction.options.getString("email", true).trim().toLowerCase();
 
                 if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
-                    return interaction.editReply(`❌ ${texts.errors.invalid_username}`);
+                    return utils.safeInteractionRespond(interaction, `❌ ${texts.errors.invalid_username}`);
                 }
 
                 if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-                    return interaction.editReply(`❌ ${texts.errors.invalid_email}`);
+                    return utils.safeInteractionRespond(interaction, `❌ ${texts.errors.invalid_email}`);
                 }
 
                 const found: any = await db.query(
@@ -109,11 +109,11 @@ export default {
                 if (found.length > 0) {
                     const existing = found[0];
                     if (existing.verified) {
-                        return interaction.editReply(`❌ ${texts.errors.already_in_use}`);
+                        return utils.safeInteractionRespond(interaction, `❌ ${texts.errors.already_in_use}`);
                     } else {
                         const timeSince = Date.now() - existing.created_at;
                         if (timeSince < 300000) {
-                            return interaction.editReply(`❌ ${texts.errors.already_in_use}\n\n*Hint: If this is your account and you haven't verified it yet, use \`/register resend\`*`);
+                            return utils.safeInteractionRespond(interaction, `❌ ${texts.errors.already_in_use}\n\n*Hint: If this is your account and you haven't verified it yet, use \`/register resend\`*`);
                         }
                     }
                 }
@@ -131,7 +131,7 @@ export default {
                     .setFooter({ text: "You have 2 minutes to set your password" })
                     .setTimestamp();
 
-                await interaction.editReply({ embeds: [passwordSetupEmbed] });
+                await utils.safeInteractionRespond(interaction, { embeds: [passwordSetupEmbed] });
 
                 try {
                     const dmEmbed = new EmbedBuilder()
@@ -273,7 +273,7 @@ export default {
                 const code = interaction.options.getString("code", true).trim();
 
                 if (!/^\d{6}$/.test(code)) {
-                    return interaction.editReply(`❌ ${texts.errors.invalid_code}`);
+                    return utils.safeInteractionRespond(interaction, `❌ ${texts.errors.invalid_code}`);
                 }
 
                 const account: any = await db.query(
@@ -282,7 +282,7 @@ export default {
                 );
 
                 if (account.length < 1) {
-                    return interaction.editReply(`❌ ${texts.errors.invalid_code}`);
+                    return utils.safeInteractionRespond(interaction, `❌ ${texts.errors.invalid_code}`);
                 }
 
                 const acc = account[0];
@@ -310,7 +310,7 @@ export default {
                     .setFooter({ text: "Your adventure begins now!" })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [verifyEmbed] });
+                return utils.safeInteractionRespond(interaction, { embeds: [verifyEmbed] });
             }
 
             case "resend": {
@@ -322,14 +322,14 @@ export default {
                 );
 
                 if (account.length < 1) {
-                    return interaction.editReply(`❌ ${texts.errors.account_not_found}`);
+                    return utils.safeInteractionRespond(interaction, `❌ ${texts.errors.account_not_found}`);
                 }
 
                 const acc = account[0];
                 const timeSince = Date.now() - acc.created_at;
 
                 if (timeSince < 60000) {
-                    return interaction.editReply(`❌ ${texts.errors.cooldown}`);
+                    return utils.safeInteractionRespond(interaction, `❌ ${texts.errors.cooldown}`);
                 }
 
                 const new_code = Math.floor(100000 + Math.random() * 900000);
@@ -356,7 +356,7 @@ export default {
                     .setFooter({ text: "Check your spam folder if you don't see it" })
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [resendEmbed] });
+                return utils.safeInteractionRespond(interaction, { embeds: [resendEmbed] });
             }
 
             case "info": {
@@ -366,7 +366,7 @@ export default {
                 );
 
                 if (account.length < 1) {
-                    return interaction.editReply(`❌ ${texts.errors.no_account}\n\nUse \`/register new\` to create an account!`);
+                    return utils.safeInteractionRespond(interaction, `❌ ${texts.errors.no_account}\n\nUse \`/register new\` to create an account!`);
                 }
 
                 const acc = account[0];
@@ -399,7 +399,7 @@ export default {
                     });
                 }
 
-                return interaction.editReply({ embeds: [infoEmbed] });
+                return utils.safeInteractionRespond(interaction, { embeds: [infoEmbed] });
             }
         }
     },

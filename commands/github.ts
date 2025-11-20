@@ -16,7 +16,7 @@ export default {
         if (lang !== "en") {
             message = (await utils.translate(message, "en", lang)).text;
         }
-        await interaction.editReply(message);
+        await utils.safeInteractionRespond(interaction, message);
         const msg = await interaction.fetchReply();
         await msg.suppressEmbeds(true);
     },

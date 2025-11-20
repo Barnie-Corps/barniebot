@@ -198,7 +198,7 @@ export default {
         const executorRank = await utils.getUserStaffRank(executor.id);
 
         const perm = ensureStaff(executorRank);
-        if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+        if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
         switch (sub) {
             case "tickets": {
@@ -225,7 +225,7 @@ export default {
                 const tickets: any = await db.query(query, params);
 
                 if (!tickets || tickets.length === 0) {
-                    return interaction.editReply("No tickets found matching your filter.");
+                    return utils.safeInteractionRespond(interaction, "No tickets found matching your filter.");
                 }
 
                 const embed = new EmbedBuilder()
@@ -257,7 +257,7 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "VIEW_TICKETS", null, `Viewed tickets with filter: ${filter}`);
-                return interaction.editReply({ embeds: [embed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
             case "assign": {
@@ -267,12 +267,12 @@ export default {
                 // Check if staff user is actually staff
                 const staffRank = await utils.getUserStaffRank(staffUser.id);
                 if (!staffRank) {
-                    return interaction.editReply("The specified user is not a staff member.");
+                    return utils.safeInteractionRespond(interaction, "The specified user is not a staff member.");
                 }
 
                 const ticket: any = await db.query("SELECT * FROM support_tickets WHERE id = ? AND status = 'open'", [ticketId]);
                 if (!ticket[0]) {
-                    return interaction.editReply(`Ticket #${ticketId} not found or already closed.`);
+                    return utils.safeInteractionRespond(interaction, `Ticket #${ticketId} not found or already closed.`);
                 }
 
                 await db.query("UPDATE support_tickets SET assigned_to = ? WHERE id = ?", [staffUser.id, ticketId]);
@@ -288,7 +288,7 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "ASSIGN_TICKET", ticket[0].user_id, `Assigned ticket #${ticketId} to ${staffUser.tag}`, { ticket_id: ticketId, assigned_to: staffUser.id });
-                return interaction.editReply(`✅ Ticket #${ticketId} has been assigned to ${staffUser.tag}.`);
+                return utils.safeInteractionRespond(interaction, `✅ Ticket #${ticketId} has been assigned to ${staffUser.tag}.`);
             }
 
             case "priority": {
@@ -297,7 +297,7 @@ export default {
 
                 const ticket: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [ticketId]);
                 if (!ticket[0]) {
-                    return interaction.editReply(`Ticket #${ticketId} not found.`);
+                    return utils.safeInteractionRespond(interaction, `Ticket #${ticketId} not found.`);
                 }
 
                 await db.query("UPDATE support_tickets SET priority = ? WHERE id = ?", [priority, ticketId]);
@@ -321,7 +321,7 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "SET_PRIORITY", ticket[0].user_id, `Set ticket #${ticketId} priority to ${priority}`, { ticket_id: ticketId, priority });
-                return interaction.editReply(`${emoji} Ticket #${ticketId} priority set to **${priority.toUpperCase()}**.`);
+                return utils.safeInteractionRespond(interaction, `${emoji} Ticket #${ticketId} priority set to **${priority.toUpperCase()}**.`);
             }
 
             case "category": {
@@ -330,13 +330,13 @@ export default {
 
                 const ticket: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [ticketId]);
                 if (!ticket[0]) {
-                    return interaction.editReply(`Ticket #${ticketId} not found.`);
+                    return utils.safeInteractionRespond(interaction, `Ticket #${ticketId} not found.`);
                 }
 
                 await db.query("UPDATE support_tickets SET category = ? WHERE id = ?", [category, ticketId]);
 
                 await logStaffAction(executor.id, "SET_CATEGORY", ticket[0].user_id, `Set ticket #${ticketId} category to ${category}`, { ticket_id: ticketId, category });
-                return interaction.editReply(`📁 Ticket #${ticketId} category set to **${category}**.`);
+                return utils.safeInteractionRespond(interaction, `📁 Ticket #${ticketId} category set to **${category}**.`);
             }
 
             case "status": {
@@ -357,7 +357,7 @@ export default {
                 const emoji = statusEmoji[status] || "⚪";
 
                 await logStaffAction(executor.id, "SET_STATUS", null, `Changed status to ${status}${message ? `: ${message}` : ""}`, { status, message });
-                return interaction.editReply(`${emoji} Your status has been set to **${status.toUpperCase()}**${message ? `\nMessage: ${message}` : ""}`);
+                return utils.safeInteractionRespond(interaction, `${emoji} Your status has been set to **${status.toUpperCase()}**${message ? `\nMessage: ${message}` : ""}`);
             }
 
             case "note": {
@@ -372,7 +372,7 @@ export default {
                 }]);
 
                 await logStaffAction(executor.id, "ADD_NOTE", user.id, `Added note about ${user.tag}`, { note: noteContent });
-                return interaction.editReply(`📝 Note added for ${user.tag}.`);
+                return utils.safeInteractionRespond(interaction, `📝 Note added for ${user.tag}.`);
             }
 
             case "notes": {
@@ -381,7 +381,7 @@ export default {
                 const notes: any = await db.query("SELECT * FROM staff_notes WHERE user_id = ? ORDER BY created_at DESC LIMIT 10", [user.id]);
 
                 if (!notes || notes.length === 0) {
-                    return interaction.editReply(`No notes found for ${user.tag}.`);
+                    return utils.safeInteractionRespond(interaction, `No notes found for ${user.tag}.`);
                 }
 
                 const embed = new EmbedBuilder()
@@ -403,7 +403,7 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "VIEW_NOTES", user.id, `Viewed notes for ${user.tag}`);
-                return interaction.editReply({ embeds: [embed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
             case "search": {
@@ -416,7 +416,7 @@ export default {
                 );
 
                 if (!tickets || tickets.length === 0) {
-                    return interaction.editReply(`No tickets found matching query: "${query}"`);
+                    return utils.safeInteractionRespond(interaction, `No tickets found matching query: "${query}"`);
                 }
 
                 const embed = new EmbedBuilder()
@@ -437,13 +437,13 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "SEARCH_TICKETS", null, `Searched tickets: "${query}"`, { query });
-                return interaction.editReply({ embeds: [embed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
             case "auditlog": {
                 // Moderator+ required for viewing audit logs
                 const modPerm = ensureModPlus(executorRank);
-                if (!modPerm.ok) return interaction.editReply(modPerm.error || "Moderator rank or higher required.");
+                if (!modPerm.ok) return utils.safeInteractionRespond(interaction, modPerm.error || "Moderator rank or higher required.");
 
                 const staffUser = interaction.options.getUser("staff");
                 const actionFilter = interaction.options.getString("action") || "all";
@@ -468,7 +468,7 @@ export default {
                 const logs: any = await db.query(query, params);
 
                 if (!logs || logs.length === 0) {
-                    return interaction.editReply("No audit log entries found matching your criteria.");
+                    return utils.safeInteractionRespond(interaction, "No audit log entries found matching your criteria.");
                 }
 
                 const embed = new EmbedBuilder()
@@ -513,12 +513,12 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "VIEW_AUDIT_LOG", null, `Viewed audit log${staffUser ? ` for ${staffUser.tag}` : ""}`, { filter: actionFilter, days });
-                return interaction.editReply({ embeds: [embed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
             case "reviewappeals": {
                 const perm = ensureModPlus(executorRank);
-                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+                if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const warningId = interaction.options.getInteger("warning_id");
                 const decision = interaction.options.getString("decision");
@@ -528,7 +528,7 @@ export default {
                     const warningData: any = await db.query("SELECT * FROM global_warnings WHERE id = ? AND appealed = TRUE AND appeal_status = 'pending'", [warningId]);
 
                     if (!warningData[0]) {
-                        return interaction.editReply(`Warning #${warningId} not found or not pending appeal.`);
+                        return utils.safeInteractionRespond(interaction, `Warning #${warningId} not found or not pending appeal.`);
                     }
 
                     const warning = warningData[0];
@@ -563,7 +563,7 @@ export default {
 
                         await logStaffAction(executor.id, "APPROVE_APPEAL", warning.userid, `Approved appeal for warning #${warningId}`, { warningId, warning: warning.reason });
 
-                        return interaction.editReply(`✅ Appeal for warning #${warningId} has been **approved**. Warning removed.`);
+                        return utils.safeInteractionRespond(interaction, `✅ Appeal for warning #${warningId} has been **approved**. Warning removed.`);
                     } else if (decision === "deny") {
                         // Deny appeal - keep warning active
                         await db.query("UPDATE global_warnings SET appeal_status = 'denied', appeal_reviewed_by = ?, appeal_reviewed_at = ? WHERE id = ?",
@@ -593,7 +593,7 @@ export default {
 
                         await logStaffAction(executor.id, "DENY_APPEAL", warning.userid, `Denied appeal for warning #${warningId}`, { warningId, warning: warning.reason });
 
-                        return interaction.editReply(`❌ Appeal for warning #${warningId} has been **denied**. Warning remains active.`);
+                        return utils.safeInteractionRespond(interaction, `❌ Appeal for warning #${warningId} has been **denied**. Warning remains active.`);
                     }
                 }
 
@@ -601,7 +601,7 @@ export default {
                 const pendingAppeals: any = await db.query("SELECT * FROM global_warnings WHERE appealed = TRUE AND appeal_status = 'pending' ORDER BY createdAt DESC LIMIT 10");
 
                 if (pendingAppeals.length === 0) {
-                    return interaction.editReply("📋 No pending appeals to review.");
+                    return utils.safeInteractionRespond(interaction, "📋 No pending appeals to review.");
                 }
 
                 const { EmbedBuilder } = await import("discord.js");
@@ -647,20 +647,20 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "VIEW_APPEALS", null, "Viewed pending appeals");
-                return interaction.editReply({ embeds: [embed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
             case "notify": {
                 const perm = ensureAdminPlus(executorRank);
-                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+                if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const language = interaction.options.getString("language") || "en";
 
                 if (!interaction.channel || !("createMessageCollector" in interaction.channel)) {
-                    return interaction.editReply("❌ This command must be used in a text channel.");
+                    return utils.safeInteractionRespond(interaction, "❌ This command must be used in a text channel.");
                 }
 
-                const promptMsg = await interaction.editReply("📢 **Create Global Notification**\n\nPlease send the notification content in your next message.\n\n*You have 2 minutes to respond. The message will be deleted after collection.*");
+                const promptMsg = await utils.safeInteractionRespond(interaction, "📢 **Create Global Notification**\n\nPlease send the notification content in your next message.\n\n*You have 2 minutes to respond. The message will be deleted after collection.*");
 
                 const filter = (m: Message) => m.author.id === executor.id;
                 const textChannel = interaction.channel as TextChannel;
@@ -720,14 +720,14 @@ export default {
 
             case "rpg_freeze": {
                 const perm = ensureAdminPlus(executorRank);
-                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+                if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
                 const reason = interaction.options.getString("reason", true);
 
                 const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
                 if (!account[0]) {
-                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                    return utils.safeInteractionRespond(interaction, `❌ Account **${username}** not found.`);
                 }
 
                 await db.query(
@@ -754,18 +754,18 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "RPG_FREEZE", account[0].last_user_logged, `Froze RPG account ${username}: ${reason}`, { username, accountId: account[0].id });
-                return interaction.editReply(`❄️ **Account frozen:** ${username}\n**Reason:** ${reason}\nThe account has been logged out.`);
+                return utils.safeInteractionRespond(interaction, `❄️ **Account frozen:** ${username}\n**Reason:** ${reason}\nThe account has been logged out.`);
             }
 
             case "rpg_unfreeze": {
                 const perm = ensureAdminPlus(executorRank);
-                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+                if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
 
                 const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
                 if (!account[0]) {
-                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                    return utils.safeInteractionRespond(interaction, `❌ Account **${username}** not found.`);
                 }
 
                 await db.query(
@@ -787,19 +787,19 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "RPG_UNFREEZE", account[0].last_user_logged, `Unfroze RPG account ${username}`, { username, accountId: account[0].id });
-                return interaction.editReply(`✅ **Account unfrozen:** ${username}\nThe user can now log in again.`);
+                return utils.safeInteractionRespond(interaction, `✅ **Account unfrozen:** ${username}\nThe user can now log in again.`);
             }
 
             case "rpg_ban": {
                 const perm = ensureAdminPlus(executorRank);
-                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+                if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
                 const reason = interaction.options.getString("reason", true);
 
                 const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
                 if (!account[0]) {
-                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                    return utils.safeInteractionRespond(interaction, `❌ Account **${username}** not found.`);
                 }
 
                 await db.query(
@@ -826,18 +826,18 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "RPG_BAN", account[0].last_user_logged, `Banned RPG account ${username}: ${reason}`, { username, accountId: account[0].id });
-                return interaction.editReply(`🚫 **Account banned:** ${username}\n**Reason:** ${reason}\nThe account has been logged out.`);
+                return utils.safeInteractionRespond(interaction, `🚫 **Account banned:** ${username}\n**Reason:** ${reason}\nThe account has been logged out.`);
             }
 
             case "rpg_unban": {
                 const perm = ensureAdminPlus(executorRank);
-                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+                if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
 
                 const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
                 if (!account[0]) {
-                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                    return utils.safeInteractionRespond(interaction, `❌ Account **${username}** not found.`);
                 }
 
                 await db.query(
@@ -859,12 +859,12 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "RPG_UNBAN", account[0].last_user_logged, `Unbanned RPG account ${username}`, { username, accountId: account[0].id });
-                return interaction.editReply(`✅ **Account unbanned:** ${username}\nThe user can now log in again.`);
+                return utils.safeInteractionRespond(interaction, `✅ **Account unbanned:** ${username}\nThe user can now log in again.`);
             }
 
             case "rpg_stats": {
                 const perm = ensureAdminPlus(executorRank);
-                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+                if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
                 const stat = interaction.options.getString("stat", true);
@@ -872,17 +872,17 @@ export default {
 
                 const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
                 if (!account[0]) {
-                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                    return utils.safeInteractionRespond(interaction, `❌ Account **${username}** not found.`);
                 }
 
                 const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [account[0].id]);
                 if (!character[0]) {
-                    return interaction.editReply(`❌ No character found for account **${username}**.`);
+                    return utils.safeInteractionRespond(interaction, `❌ No character found for account **${username}**.`);
                 }
 
                 const validStats = ["level", "experience", "gold", "max_hp", "max_mp", "strength", "defense", "agility", "intelligence", "luck", "stat_points"];
                 if (!validStats.includes(stat)) {
-                    return interaction.editReply(`❌ Invalid stat: ${stat}`);
+                    return utils.safeInteractionRespond(interaction, `❌ Invalid stat: ${stat}`);
                 }
 
                 const oldValue = character[0][stat];
@@ -902,19 +902,19 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "RPG_MODIFY_STATS", account[0].last_user_logged, `Modified ${stat} for ${username}: ${oldValue} → ${value}`, { username, stat, oldValue, newValue: value });
-                return interaction.editReply(`📊 **Stats modified for ${username}**\n**${stat}:** ${oldValue} → ${value}`);
+                return utils.safeInteractionRespond(interaction, `📊 **Stats modified for ${username}**\n**${stat}:** ${oldValue} → ${value}`);
             }
 
             case "rpg_password": {
                 const perm = ensureAdminPlus(executorRank);
-                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+                if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
                 const newPassword = interaction.options.getString("new_password", true);
 
                 const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
                 if (!account[0]) {
-                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                    return utils.safeInteractionRespond(interaction, `❌ Account **${username}** not found.`);
                 }
 
                 const encryptedPassword = utils.encryptWithAES(data.bot.encryption_key, newPassword);
@@ -937,23 +937,23 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "RPG_CHANGE_PASSWORD", account[0].last_user_logged, `Changed password for ${username}`, { username, accountId: account[0].id });
-                return interaction.editReply(`🔐 **Password changed for ${username}**\nThe account has been logged out. User has been notified.`);
+                return utils.safeInteractionRespond(interaction, `🔐 **Password changed for ${username}**\nThe account has been logged out. User has been notified.`);
             }
 
             case "rpg_logout": {
                 const perm = ensureAdminPlus(executorRank);
-                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+                if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
 
                 const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
                 if (!account[0]) {
-                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                    return utils.safeInteractionRespond(interaction, `❌ Account **${username}** not found.`);
                 }
 
                 const session: any = await db.query("SELECT * FROM rpg_sessions WHERE account_id = ? AND active = TRUE", [account[0].id]);
                 if (!session[0]) {
-                    return interaction.editReply(`❌ Account **${username}** is not currently logged in.`);
+                    return utils.safeInteractionRespond(interaction, `❌ Account **${username}** is not currently logged in.`);
                 }
 
                 await db.query("UPDATE rpg_sessions SET active = FALSE WHERE account_id = ?", [account[0].id]);
@@ -972,18 +972,18 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "RPG_LOGOUT", account[0].last_user_logged, `Force logged out ${username}`, { username, accountId: account[0].id });
-                return interaction.editReply(`🚪 **Account logged out:** ${username}`);
+                return utils.safeInteractionRespond(interaction, `🚪 **Account logged out:** ${username}`);
             }
 
             case "rpg_info": {
                 const perm = ensureModPlus(executorRank);
-                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+                if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
 
                 const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
                 if (!account[0]) {
-                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                    return utils.safeInteractionRespond(interaction, `❌ Account **${username}** not found.`);
                 }
 
                 const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [account[0].id]);
@@ -1047,12 +1047,12 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "RPG_VIEW_INFO", account[0].last_user_logged, `Viewed RPG info for ${username}`, { username, accountId: account[0].id });
-                return interaction.editReply({ embeds: [infoEmbed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [infoEmbed], content: "" });
             }
 
             case "rpg_give_item": {
                 const perm = ensureAdminPlus(executorRank);
-                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+                if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
                 const itemId = interaction.options.getInteger("item_id", true);
@@ -1060,17 +1060,17 @@ export default {
 
                 const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
                 if (!account[0]) {
-                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                    return utils.safeInteractionRespond(interaction, `❌ Account **${username}** not found.`);
                 }
 
                 const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [account[0].id]);
                 if (!character[0]) {
-                    return interaction.editReply(`❌ No character found for account **${username}**.`);
+                    return utils.safeInteractionRespond(interaction, `❌ No character found for account **${username}**.`);
                 }
 
                 const item: any = await db.query("SELECT * FROM rpg_items WHERE id = ?", [itemId]);
                 if (!item[0]) {
-                    return interaction.editReply(`❌ Item ID **${itemId}** not found.`);
+                    return utils.safeInteractionRespond(interaction, `❌ Item ID **${itemId}** not found.`);
                 }
 
                 const existingItem: any = await db.query("SELECT * FROM rpg_inventory WHERE character_id = ? AND item_id = ?", [character[0].id, itemId]);
@@ -1088,12 +1088,12 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "RPG_GIVE_ITEM", account[0].last_user_logged, `Gave ${quantity}x ${item[0].name} to ${username}`, { username, itemId, itemName: item[0].name, quantity });
-                return interaction.editReply(`✅ **Item given to ${username}**\n**Item:** ${item[0].name}\n**Quantity:** ${quantity}`);
+                return utils.safeInteractionRespond(interaction, `✅ **Item given to ${username}**\n**Item:** ${item[0].name}\n**Quantity:** ${quantity}`);
             }
 
             case "rpg_remove_item": {
                 const perm = ensureAdminPlus(executorRank);
-                if (!perm.ok) return interaction.editReply(perm.error || "Permission denied.");
+                if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
                 const itemId = interaction.options.getInteger("item_id", true);
@@ -1101,23 +1101,23 @@ export default {
 
                 const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
                 if (!account[0]) {
-                    return interaction.editReply(`❌ Account **${username}** not found.`);
+                    return utils.safeInteractionRespond(interaction, `❌ Account **${username}** not found.`);
                 }
 
                 const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [account[0].id]);
                 if (!character[0]) {
-                    return interaction.editReply(`❌ No character found for account **${username}**.`);
+                    return utils.safeInteractionRespond(interaction, `❌ No character found for account **${username}**.`);
                 }
 
                 const item: any = await db.query("SELECT * FROM rpg_items WHERE id = ?", [itemId]);
                 if (!item[0]) {
-                    return interaction.editReply(`❌ Item ID **${itemId}** not found.`);
+                    return utils.safeInteractionRespond(interaction, `❌ Item ID **${itemId}** not found.`);
                 }
 
                 const existingItem: any = await db.query("SELECT * FROM rpg_inventory WHERE character_id = ? AND item_id = ?", [character[0].id, itemId]);
 
                 if (!existingItem[0]) {
-                    return interaction.editReply(`❌ Character does not have this item.`);
+                    return utils.safeInteractionRespond(interaction, `❌ Character does not have this item.`);
                 }
 
                 if (existingItem[0].quantity <= quantity) {
@@ -1127,7 +1127,7 @@ export default {
                 }
 
                 await logStaffAction(executor.id, "RPG_REMOVE_ITEM", account[0].last_user_logged, `Removed ${quantity}x ${item[0].name} from ${username}`, { username, itemId, itemName: item[0].name, quantity });
-                return interaction.editReply(`✅ **Item removed from ${username}**\n**Item:** ${item[0].name}\n**Quantity:** ${quantity}`);
+                return utils.safeInteractionRespond(interaction, `✅ **Item removed from ${username}**\n**Item:** ${item[0].name}\n**Quantity:** ${quantity}`);
             }
 
         }

@@ -1,4 +1,5 @@
 import { ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder } from "discord.js";
+import utils from "../utils";
 
 export default {
     data: new SlashCommandBuilder()
@@ -25,7 +26,7 @@ export default {
             .setFooter({ text: `Requested by ${interaction.user.username}` })
             .setTimestamp();
 
-        await interaction.editReply({ embeds: [embed], content: "" });
+        await utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
     },
     ephemeral: false
 };

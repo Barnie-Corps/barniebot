@@ -18,7 +18,7 @@ export default {
     const warningData: any = await db.query("SELECT * FROM global_warnings WHERE id = ? AND userid = ?", [warningId, user.id]);
 
     if (!warningData[0]) {
-      return interaction.editReply(`Warning #${warningId} not found or doesn't belong to you.`);
+      return utils.safeInteractionRespond(interaction, `Warning #${warningId} not found or doesn't belong to you.`);
     }
 
     const warning = warningData[0];
@@ -26,22 +26,22 @@ export default {
     // Check if already appealed
     if (warning.appealed) {
       if (warning.appeal_status === "pending") {
-        return interaction.editReply(`Warning #${warningId} has already been appealed and is pending review.`);
+        return utils.safeInteractionRespond(interaction, `Warning #${warningId} has already been appealed and is pending review.`);
       } else if (warning.appeal_status === "approved") {
-        return interaction.editReply(`Warning #${warningId} has already been appealed and was approved.`);
+        return utils.safeInteractionRespond(interaction, `Warning #${warningId} has already been appealed and was approved.`);
       } else if (warning.appeal_status === "denied") {
-        return interaction.editReply(`Warning #${warningId} has already been appealed and was denied. Appeals cannot be resubmitted.`);
+        return utils.safeInteractionRespond(interaction, `Warning #${warningId} has already been appealed and was denied. Appeals cannot be resubmitted.`);
       }
     }
 
     // Check if warning is expired
     if (warning.expires_at <= Date.now()) {
-      return interaction.editReply(`Warning #${warningId} has already expired and doesn't need to be appealed.`);
+      return utils.safeInteractionRespond(interaction, `Warning #${warningId} has already expired and doesn't need to be appealed.`);
     }
 
     // Check if warning is inactive
     if (!warning.active) {
-      return interaction.editReply(`Warning #${warningId} is already inactive.`);
+      return utils.safeInteractionRespond(interaction, `Warning #${warningId} is already inactive.`);
     }
 
     // Update warning with appeal
@@ -91,7 +91,7 @@ export default {
       .setFooter({ text: "Please be patient while staff reviews your appeal." })
       .setTimestamp();
 
-    return interaction.editReply({ embeds: [confirmEmbed] });
+    return utils.safeInteractionRespond(interaction, { embeds: [confirmEmbed] });
   },
   ephemeral: true
 };

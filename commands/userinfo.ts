@@ -75,6 +75,6 @@ export default {
             )
             .setColor("Purple")
             .setTimestamp()
-        await interaction.editReply({ embeds: [embed], content: "" });
+        await utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
     }
 }

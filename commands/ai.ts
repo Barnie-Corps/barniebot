@@ -97,7 +97,7 @@ export default {
         }
         const subcmd = interaction.options.getSubcommand();
         const reply = (content: any) => {
-            return interaction.replied ? interaction.editReply(content) : interaction.reply(content);
+            return utils.safeInteractionRespond(interaction, content);
         }
         switch (subcmd) {
             case "ask": {
@@ -171,14 +171,14 @@ export default {
                 break;
             }
             case "voice": {
-                if (!interaction.guild) return await interaction.editReply(texts.errors.guild_only);
-                if (!await utils.isVIP(interaction.user.id) && !data.bot.owners.includes(interaction.user.id)) return await interaction.editReply(texts.errors.not_vip);
+                if (!interaction.guild) return await utils.safeInteractionRespond(interaction, texts.errors.guild_only);
+                if (!await utils.isVIP(interaction.user.id) && !data.bot.owners.includes(interaction.user.id)) return await utils.safeInteractionRespond(interaction, texts.errors.not_vip);
 
                 const member = await interaction.guild.members.fetch(interaction.user.id);
                 const voiceChannel = member?.voice?.channel;
 
                 if (!voiceChannel) {
-                    return await interaction.editReply(texts.errors.not_in_voice);
+                    return await utils.safeInteractionRespond(interaction, texts.errors.not_in_voice);
                 }
 
                 const langCode = lang === "en" ? "en-US" : lang === "es" ? "es-US" : lang === "fr" ? "fr-FR" : lang === "de" ? "de-DE" : lang === "zh" ? "zh-CN" : "en-US";

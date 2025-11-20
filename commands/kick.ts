@@ -1,4 +1,5 @@
 import { ChatInputCommandInteraction, PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
+import utils from "../utils";
 
 export default {
     data: new SlashCommandBuilder()
@@ -8,24 +9,24 @@ export default {
         .addUserOption(o => o.setName("user").setDescription("The target user.").setRequired(true)),
     category: "Moderation",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
-        if (!interaction.guild) return await interaction.reply("No.");
+        if (!interaction.guild) return await utils.safeInteractionRespond(interaction, "No.");
         await interaction.deferReply({ ephemeral: true });
         await interaction.guild?.members.fetch();
         const user = interaction.options.getUser('user');
         if (!user) {
-            await interaction.editReply('User not found');
+            await utils.safeInteractionRespond(interaction, 'User not found');
             return;
         }
         const member = interaction.guild?.members.cache.get(user.id);
         if (!member) {
-            await interaction.editReply('Member not found');
+            await utils.safeInteractionRespond(interaction, 'Member not found');
             return;
         }
         try {
             await member.kick();
-            await interaction.editReply(':white_check_mark:');
+            await utils.safeInteractionRespond(interaction, ':white_check_mark:');
         } catch (error) {
-            await interaction.editReply(':x:');
+            await utils.safeInteractionRespond(interaction, ':x:');
         }
     },
     ephemeral: false

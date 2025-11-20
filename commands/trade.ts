@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import db from "../mysql/database";
 import client from "..";
+import utils from "../utils";
 
 async function getSession(userId: string) {
     const session: any = await db.query(
@@ -71,12 +72,12 @@ export default {
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return interaction.editReply("❌ You need to log in first! Use `/login` to access your account.");
+            return utils.safeInteractionRespond(interaction, "❌ You need to log in first! Use `/login` to access your account.");
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return interaction.editReply("❌ You need to create a character first! Use `/rpg create` to begin your adventure.");
+            return utils.safeInteractionRespond(interaction, "❌ You need to create a character first! Use `/rpg create` to begin your adventure.");
         }
 
         const sub = interaction.options.getSubcommand();
@@ -86,21 +87,21 @@ export default {
                 const targetUser = interaction.options.getUser("player", true);
                 
                 if (targetUser.id === interaction.user.id) {
-                    return interaction.editReply("❌ You cannot trade with yourself!");
+                    return utils.safeInteractionRespond(interaction, "❌ You cannot trade with yourself!");
                 }
 
                 if (targetUser.bot) {
-                    return interaction.editReply("❌ You cannot trade with bots!");
+                    return utils.safeInteractionRespond(interaction, "❌ You cannot trade with bots!");
                 }
 
                 const targetSession = await getSession(targetUser.id);
                 if (!targetSession) {
-                    return interaction.editReply("❌ That player is not logged in!");
+                    return utils.safeInteractionRespond(interaction, "❌ That player is not logged in!");
                 }
 
                 const targetCharacter = await getCharacter(targetSession.account_id);
                 if (!targetCharacter) {
-                    return interaction.editReply("❌ That player doesn't have a character!");
+                    return utils.safeInteractionRespond(interaction, "❌ That player doesn't have a character!");
                 }
 
                 const gold = interaction.options.getInteger("gold") || 0;
@@ -110,11 +111,11 @@ export default {
                 const item2Qty = interaction.options.getInteger("item2_quantity") || 1;
 
                 if (gold === 0 && !item1Id && !item2Id) {
-                    return interaction.editReply("❌ You must offer at least gold or an item!");
+                    return utils.safeInteractionRespond(interaction, "❌ You must offer at least gold or an item!");
                 }
 
                 if (gold > character.gold) {
-                    return interaction.editReply(`❌ You only have ${character.gold} gold!`);
+                    return utils.safeInteractionRespond(interaction, `❌ You only have ${character.gold} gold!`);
                 }
 
                 const offeredItems: any[] = [];
@@ -128,19 +129,19 @@ export default {
                     );
                     
                     if (!item[0]) {
-                        return interaction.editReply(`❌ Item ID ${item1Id} not found in your inventory!`);
+                        return utils.safeInteractionRespond(interaction, `❌ Item ID ${item1Id} not found in your inventory!`);
                     }
                     
                     if (!item[0].tradeable) {
-                        return interaction.editReply(`❌ ${item[0].name} cannot be traded!`);
+                        return utils.safeInteractionRespond(interaction, `❌ ${item[0].name} cannot be traded!`);
                     }
                     
                     if (item[0].bound) {
-                        return interaction.editReply(`❌ ${item[0].name} is bound to you!`);
+                        return utils.safeInteractionRespond(interaction, `❌ ${item[0].name} is bound to you!`);
                     }
                     
                     if (item[0].quantity < item1Qty) {
-                        return interaction.editReply(`❌ You only have ${item[0].quantity}x ${item[0].name}!`);
+                        return utils.safeInteractionRespond(interaction, `❌ You only have ${item[0].quantity}x ${item[0].name}!`);
                     }
                     
                     offeredItems.push({ id: item1Id, name: item[0].name, quantity: item1Qty });
@@ -155,19 +156,19 @@ export default {
                     );
                     
                     if (!item[0]) {
-                        return interaction.editReply(`❌ Item ID ${item2Id} not found in your inventory!`);
+                        return utils.safeInteractionRespond(interaction, `❌ Item ID ${item2Id} not found in your inventory!`);
                     }
                     
                     if (!item[0].tradeable) {
-                        return interaction.editReply(`❌ ${item[0].name} cannot be traded!`);
+                        return utils.safeInteractionRespond(interaction, `❌ ${item[0].name} cannot be traded!`);
                     }
                     
                     if (item[0].bound) {
-                        return interaction.editReply(`❌ ${item[0].name} is bound to you!`);
+                        return utils.safeInteractionRespond(interaction, `❌ ${item[0].name} is bound to you!`);
                     }
                     
                     if (item[0].quantity < item2Qty) {
-                        return interaction.editReply(`❌ You only have ${item[0].quantity}x ${item[0].name}!`);
+                        return utils.safeInteractionRespond(interaction, `❌ You only have ${item[0].quantity}x ${item[0].name}!`);
                     }
                     
                     offeredItems.push({ id: item2Id, name: item[0].name, quantity: item2Qty });
@@ -217,7 +218,7 @@ export default {
                     await targetUser.send({ embeds: [notifyEmbed] });
                 } catch {}
 
-                return interaction.editReply({ embeds: [offerEmbed] });
+                return utils.safeInteractionRespond(interaction, { embeds: [offerEmbed] });
             }
 
             case "view": {
@@ -238,7 +239,7 @@ export default {
                 );
 
                 if (sent.length === 0 && received.length === 0) {
-                    return interaction.editReply("📭 You have no pending trades!");
+                    return utils.safeInteractionRespond(interaction, "📭 You have no pending trades!");
                 }
 
                 const viewEmbed = new EmbedBuilder()
@@ -272,7 +273,7 @@ export default {
                     viewEmbed.addFields({ name: "Offers You Received", value: receivedText, inline: false });
                 }
 
-                return interaction.editReply({ embeds: [viewEmbed] });
+                return utils.safeInteractionRespond(interaction, { embeds: [viewEmbed] });
             }
 
             case "cancel": {
@@ -284,12 +285,12 @@ export default {
                 );
 
                 if (!trade[0]) {
-                    return interaction.editReply("❌ Trade not found or you cannot cancel it!");
+                    return utils.safeInteractionRespond(interaction, "❌ Trade not found or you cannot cancel it!");
                 }
 
                 await db.query("UPDATE rpg_trades SET status = 'cancelled' WHERE id = ?", [tradeId]);
 
-                return interaction.editReply(`✅ Trade #${tradeId} has been cancelled!`);
+                return utils.safeInteractionRespond(interaction, `✅ Trade #${tradeId} has been cancelled!`);
             }
 
             case "accept": {
@@ -301,7 +302,7 @@ export default {
                 );
 
                 if (!trade[0]) {
-                    return interaction.editReply("❌ Trade not found or already completed!");
+                    return utils.safeInteractionRespond(interaction, "❌ Trade not found or already completed!");
                 }
 
                 const initiator: any = await db.query("SELECT * FROM rpg_characters WHERE id = ?", [trade[0].initiator_id]);
@@ -313,7 +314,7 @@ export default {
                 const item2Qty = interaction.options.getInteger("item2_quantity") || 1;
 
                 if (gold > character.gold) {
-                    return interaction.editReply(`❌ You only have ${character.gold} gold!`);
+                    return utils.safeInteractionRespond(interaction, `❌ You only have ${character.gold} gold!`);
                 }
 
                 const returnItems: any[] = [];
@@ -327,7 +328,7 @@ export default {
                     );
                     
                     if (!item[0] || !item[0].tradeable || item[0].bound || item[0].quantity < item1Qty) {
-                        return interaction.editReply("❌ Invalid item in your return offer!");
+                        return utils.safeInteractionRespond(interaction, "❌ Invalid item in your return offer!");
                     }
                     
                     returnItems.push({ id: item1Id, name: item[0].name, quantity: item1Qty, item_id: item[0].item_id });
@@ -342,7 +343,7 @@ export default {
                     );
                     
                     if (!item[0] || !item[0].tradeable || item[0].bound || item[0].quantity < item2Qty) {
-                        return interaction.editReply("❌ Invalid item in your return offer!");
+                        return utils.safeInteractionRespond(interaction, "❌ Invalid item in your return offer!");
                     }
                     
                     returnItems.push({ id: item2Id, name: item[0].name, quantity: item2Qty, item_id: item[0].item_id });
@@ -353,12 +354,12 @@ export default {
                 for (const item of initiatorItems) {
                     const invItem: any = await db.query("SELECT * FROM rpg_inventory WHERE id = ? AND character_id = ?", [item.id, initiator[0].id]);
                     if (!invItem[0] || invItem[0].quantity < item.quantity) {
-                        return interaction.editReply("❌ Initiator no longer has the offered items!");
+                        return utils.safeInteractionRespond(interaction, "❌ Initiator no longer has the offered items!");
                     }
                 }
 
                 if (initiator[0].gold < trade[0].initiator_gold) {
-                    return interaction.editReply("❌ Initiator no longer has enough gold!");
+                    return utils.safeInteractionRespond(interaction, "❌ Initiator no longer has enough gold!");
                 }
 
                 for (const item of initiatorItems) {
@@ -428,7 +429,7 @@ export default {
                     .setDescription(`Trade with **${initiator[0].name}** has been completed!`)
                     .setTimestamp();
 
-                return interaction.editReply({ embeds: [completeEmbed] });
+                return utils.safeInteractionRespond(interaction, { embeds: [completeEmbed] });
             }
 
             case "decline": {
@@ -440,12 +441,12 @@ export default {
                 );
 
                 if (!trade[0]) {
-                    return interaction.editReply("❌ Trade not found!");
+                    return utils.safeInteractionRespond(interaction, "❌ Trade not found!");
                 }
 
                 await db.query("UPDATE rpg_trades SET status = 'declined' WHERE id = ?", [tradeId]);
 
-                return interaction.editReply(`✅ Trade #${tradeId} has been declined!`);
+                return utils.safeInteractionRespond(interaction, `✅ Trade #${tradeId} has been declined!`);
             }
         }
     },

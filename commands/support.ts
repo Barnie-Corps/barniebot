@@ -15,7 +15,7 @@ export default {
         if (interaction.guild && interaction.member) {
             const member = interaction.member as any;
             if (!member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-                return await interaction.editReply("You need the `Manage Messages` permission to use this command in a server. Try using it in DMs instead.");
+                return await utils.safeInteractionRespond(interaction, "You need the `Manage Messages` permission to use this command in a server. Try using it in DMs instead.");
             }
         }
         let texts = {
@@ -47,12 +47,12 @@ export default {
         try {
             const homeGuild = await client.guilds.fetch(data.bot.home_guild);
             if (!homeGuild) {
-                return await interaction.editReply(texts.no_home_guild);
+                return await utils.safeInteractionRespond(interaction, texts.no_home_guild);
             }
 
             const category = homeGuild.channels.cache.get(data.bot.support_category);
             if (!category || category.type !== ChannelType.GuildCategory) {
-                return await interaction.editReply(texts.no_home_guild);
+                return await utils.safeInteractionRespond(interaction, texts.no_home_guild);
             }
 
             // Find available staff for auto-assignment
@@ -206,11 +206,11 @@ export default {
                 ? texts.created 
                 : `${texts.created}\n${texts.guild_warning}`;
 
-            await interaction.editReply(responseText);
+            await utils.safeInteractionRespond(interaction, responseText);
 
         } catch (error: any) {
             console.error("Support ticket creation error:", error);
-            await interaction.editReply(texts.error);
+            await utils.safeInteractionRespond(interaction, texts.error);
         }
     },
     ephemeral: true

@@ -61,30 +61,30 @@ export default {
         if (lang !== "en") {
             texts = await utils.autoTranslate(texts, "en", lang);
         }
-        if (!interaction.guildId) return await interaction.editReply(texts.errors.only_guild);
-        if (!interaction.memberPermissions?.has("ManageGuild")) return await interaction.editReply(texts.errors.no_permission);
+        if (!interaction.guildId) return await utils.safeInteractionRespond(interaction, texts.errors.only_guild);
+        if (!interaction.memberPermissions?.has("ManageGuild")) return await utils.safeInteractionRespond(interaction, texts.errors.no_permission);
         const subcommand = interaction.options.getSubcommand();
         switch (subcommand) {
             case "add": {
                 const command = interaction.options.getString("command", true);
                 const response = interaction.options.getString("response", true);
                 await db.query("INSERT INTO custom_responses (guild, command, response) VALUES (?, ?, ?)", [interaction.guildId, command, response]);
-                await interaction.editReply(`${texts.success.added}: \`${command}\` => \`${response}\``);
+                await utils.safeInteractionRespond(interaction, `${texts.success.added}: \`${command}\` => \`${response}\``);
                 break;
             }
             case "remove": {
                 const command = interaction.options.getString("command", true);
                 await db.query("DELETE FROM custom_responses WHERE guild = ? AND command = ?", [interaction.guildId, command]);
-                await interaction.editReply(texts.success.removed);
+                await utils.safeInteractionRespond(interaction, texts.success.removed);
                 break;
             }
             case "list": {
                 const responses: any = await db.query("SELECT * FROM custom_responses WHERE guild = ?", [interaction.guildId]);
                 if (responses.length === 0) {
-                    await interaction.editReply(texts.errors.no_responses);
+                    await utils.safeInteractionRespond(interaction, texts.errors.no_responses);
                 } else {
-                    const responseList = responses.map((r: any) => `\`${r.command}\` => \`${r.response}\``).join("\n");
-                    await interaction.editReply(`${texts.common.custom_responses}\n${responseList}`);
+                    const responseList = responses.map((r, i) => `${i + 1}. **${r.command}** → ${r.response}`).join("\n");
+                    await utils.safeInteractionRespond(interaction, `${texts.common.custom_responses}\n${responseList}`);
                 }
                 break;
             }

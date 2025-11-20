@@ -53,7 +53,7 @@ export default {
                 .setTitle(texts.titles.login_failed)
                 .setDescription(texts.errors.invalid_credentials)
                 .setTimestamp();
-            return interaction.editReply({ embeds: [failEmbed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [failEmbed], content: "" });
         }
 
         const decryptedPassword = utils.decryptWithAES(data.bot.encryption_key, account[0].password);
@@ -64,7 +64,7 @@ export default {
                 .setTitle(texts.titles.login_failed)
                 .setDescription(texts.errors.invalid_credentials)
                 .setTimestamp();
-            return interaction.editReply({ embeds: [failEmbed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [failEmbed], content: "" });
         }
 
         if (!account[0].verified) {
@@ -73,7 +73,7 @@ export default {
                 .setTitle(texts.titles.login_failed)
                 .setDescription(texts.errors.not_verified)
                 .setTimestamp();
-            return interaction.editReply({ embeds: [failEmbed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [failEmbed], content: "" });
         }
 
         const status: any = await db.query("SELECT * FROM rpg_account_status WHERE account_id = ?", [account[0].id]);
@@ -84,7 +84,7 @@ export default {
                     .setTitle(texts.titles.login_failed)
                     .setDescription(`${texts.errors.frozen}\n**Reason:** ${status[0].frozen_reason || "No reason provided"}`)
                     .setTimestamp();
-                return interaction.editReply({ embeds: [failEmbed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [failEmbed], content: "" });
             }
             if (status[0].banned) {
                 const failEmbed = new EmbedBuilder()
@@ -92,7 +92,7 @@ export default {
                     .setTitle(texts.titles.login_failed)
                     .setDescription(`${texts.errors.banned}\n**Reason:** ${status[0].banned_reason || "No reason provided"}`)
                     .setTimestamp();
-                return interaction.editReply({ embeds: [failEmbed], content: "" });
+                return utils.safeInteractionRespond(interaction, { embeds: [failEmbed], content: "" });
             }
         }
 
@@ -108,7 +108,7 @@ export default {
                     { name: "Since", value: `<t:${Math.floor(existingSession[0].logged_in_at / 1000)}:R>`, inline: true }
                 )
                 .setTimestamp();
-            return interaction.editReply({ embeds: [failEmbed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [failEmbed], content: "" });
         }
 
         const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [account[0].id]);
@@ -139,7 +139,7 @@ export default {
                 )
                 .setFooter({ text: texts.success.session_info + new Date().toLocaleString() })
                 .setTimestamp();
-            return interaction.editReply({ embeds: [noCharEmbed], content: "" });
+            return utils.safeInteractionRespond(interaction, { embeds: [noCharEmbed], content: "" });
         }
 
         const successEmbed = new EmbedBuilder()
@@ -157,7 +157,7 @@ export default {
             .setFooter({ text: texts.success.session_info + new Date().toLocaleString() })
             .setTimestamp();
 
-        await interaction.editReply({ embeds: [successEmbed], content: "" });
+        await utils.safeInteractionRespond(interaction, { embeds: [successEmbed], content: "" });
     },
     ephemeral: true
 };

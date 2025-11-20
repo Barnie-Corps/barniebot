@@ -62,13 +62,13 @@ export default {
   async execute(interaction: ChatInputCommandInteraction) {
     const rank = await utils.getUserStaffRank(interaction.user.id);
     if (!rank || !HIGH_RANKS.includes(rank.toLowerCase())) {
-      return interaction.editReply("You do not have permission to run database backups.");
+      return utils.safeInteractionRespond(interaction, "You do not have permission to run database backups.");
     }
 
     const makePublic = interaction.options.getBoolean("public") || false;
     if (makePublic) { };
 
-    await interaction.editReply("Starting backup... This may take a moment.");
+    await utils.safeInteractionRespond(interaction, "Starting backup... This may take a moment.");
 
     const backupDir = path.join(process.cwd(), "database_backups");
     if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
@@ -86,7 +86,7 @@ export default {
         .setDescription("mysqldump executable not found. Please install MySQL/MariaDB client tools.")
         .addFields({ name: "Platform", value: os.platform() })
         .setTimestamp();
-      return interaction.editReply({ content: "", embeds: [embed] });
+      return utils.safeInteractionRespond(interaction, { content: "", embeds: [embed] });
     }
 
     const args: string[] = [
@@ -113,7 +113,7 @@ export default {
       if (makePublic) {
         await interaction.followUp({ embeds: [embed] });
       } else {
-        await interaction.editReply({ content: "", embeds: [embed] });
+        await utils.safeInteractionRespond(interaction, { content: "", embeds: [embed] });
       }
     };
 
