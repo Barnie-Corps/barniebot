@@ -441,7 +441,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
     const Lang = foundLang[0] ? foundLang[0].lang : "en"; // If the user has a language set, use it, otherwise use English
     let texts = {
         new: "Hey! It looks like this is the first time you're using one of my commands, at least on this account. Don't forget to read my privacy policy!",
-        error: "Whoops... An unexpected error occurred. I've already reported it, but if it keeps happening you can let us know at:",
+        error: "Whoops... An unexpected error occurred. I've already reported it, but if it keeps happening you can let us know by opening a ticket with `/support`.",
         loading: "Translating texts (this may take a moment)...",
         not_vip: "Hmm... You can't run this command unless you're a VIP.",
         expired_vip: "Wow! It seems your VIP subscription has ended. I've revoked your VIP access.",
@@ -485,24 +485,60 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
         }
         catch (err: any) {
             // If an error occurs while executing the command, reply with an error message
-            if (interaction.deferred || interaction.replied) {
+            const errorId = `error_${interaction.commandName}_${Date.now()}`;
+            const logDir = path.join(process.cwd(), "logs");
+            try {
+                if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+                const logPath = path.join(logDir, `${errorId}.log`);
+                const logContents = [
+                    `[Command Error Report]`,
+                    `Timestamp: ${new Date().toISOString()}`,
+                    `User: ${interaction.user.username} (${interaction.user.id})`,
+                    `Command: /${interaction.commandName}`,
+                    `Guild: ${interaction.guild?.name ?? "DM"} (${interaction.guild?.id ?? "none"})`,
+                    `Interaction ID: ${interaction.id}`,
+                    `Error Name: ${err?.name ?? "Unknown"}`,
+                    `Error Message: ${err?.message ?? String(err)}`,
+                    `Stack Trace:`,
+                    `${err?.stack ?? "<no stack available>"}`
+                ].join("\n");
+                fs.writeFileSync(logPath, logContents);
+
+                const enhancedMsg = `⚠️ **Unexpected Error**\nYour request \`/${interaction.commandName}\` failed internally.\nReference: \
+\`${errorId}\`\nA detailed log has been saved and attached. If this keeps happening, open \`/support\` and provide the reference ID.`;
+
+                if (interaction.deferred || interaction.replied) {
+                    try {
+                        await interaction.editReply({ content: enhancedMsg, files: [logPath] });
+                    } catch (sendErr: any) {
+                        // Fallback: attempt followUp (may be ephemeral)
+                        try {
+                            await interaction.followUp({ content: enhancedMsg, files: [logPath], ephemeral: true });
+                        } catch (followErr: any) {
+                            // Final fallback: send to channel without file
+                            await (interaction.channel as TextChannel)?.send(`<@${interaction.user.id}> ${texts.error} (Ref: ${errorId})`);
+                            Log.warn("Failed to attach error log to interaction", { component: "ErrorHandler", reason: followErr?.message });
+                        }
+                    }
+                } else {
+                    try {
+                        await interaction.reply({ content: enhancedMsg, files: [logPath], ephemeral: true });
+                    } catch (replyErr: any) {
+                        try {
+                            await interaction.followUp({ content: enhancedMsg, files: [logPath], ephemeral: true });
+                        } catch (followErr: any) {
+                            await (interaction.channel as TextChannel)?.send(`<@${interaction.user.id}> ${texts.error} (Ref: ${errorId})`);
+                            Log.warn("Failed to send error reply with log file", { component: "ErrorHandler", reason: followErr?.message });
+                        }
+                    }
+                }
+            } catch (fileErr: any) {
+                Log.error("Failed to persist error log", new Error(fileErr?.message || String(fileErr)));
+                // Attempt minimal fallback message
                 try {
-                    await interaction.editReply(`${texts.error} https://discord.gg/BKFa6tFYJx`);
-                }
-                catch (err: any) {
-                    Log.error("Error sending message to user", new Error(`Failed to send error message to ${interaction.user.username}`));
-                    await (interaction.channel as TextChannel).send(`<@${interaction.user.id}>, ${texts.error} https://discord.gg/BKFa6tFYJx`);
-                    Log.error("Slash command execution failed", new Error(`Error executing command ${cmd.data.name}`));
-                    console.error(err.stack, err);
-                }
-            }
-            else {
-                try {
-                    await interaction.reply({ ephemeral: true, content: `${texts.error} https://discord.gg/BKFa6tFYJx` });
-                }
-                catch (err: any) {
-                    Log.error("Error sending message to user", new Error(`Failed to send error message to ${interaction.user.username}`));
-                }
+                    if (interaction.deferred || interaction.replied) await interaction.editReply(`${texts.error} (Failed to write log file)`);
+                    else await interaction.reply({ content: `${texts.error} (Failed to write log file)`, ephemeral: true });
+                } catch { /* ignore */ }
             }
             Log.error("Slash command execution failed", new Error(`Error executing command ${cmd.data.name}`));
             console.error(err.stack, err);
