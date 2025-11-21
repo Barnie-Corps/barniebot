@@ -220,17 +220,233 @@ export default {
                 .setMinValue(10))),
     category: "RPG",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
+        let texts = {
+            errors: {
+                not_logged_in: "You need to log in first! Use ",
+                no_character: "You need to create a character first! Use ",
+                already_have_character: "You already have a character! Use ",
+                name_taken: "This character name is already taken!",
+                to_view: " to view it.",
+                to_begin: " to begin your adventure."
+            },
+            create: {
+                title: "Character Created!",
+                welcome: "Welcome to the realm, ",
+                class: "Class",
+                level: "Level",
+                starting_gold: "Starting Gold",
+                base_stats: "Base Stats",
+                class_info: "Class Info",
+                adventure_begins: "Your adventure begins now! Use /rpg profile to see your stats"
+            },
+            profile: {
+                gold: "Gold",
+                experience: "Experience",
+                combat_stats: "Combat Stats",
+                equipment: "Equipment",
+                no_equipment: "No equipment",
+                stat_points_available: "Stat Points Available: "
+            },
+            stats: {
+                title: "Character Statistics",
+                level: "Level",
+                strength: "Strength",
+                strength_desc: "Increases physical damage",
+                defense: "Defense",
+                defense_desc: "Reduces damage taken",
+                agility: "Agility",
+                agility_desc: "Increases critical rate & evasion",
+                intelligence: "Intelligence",
+                intelligence_desc: "Increases magic damage",
+                luck: "Luck",
+                luck_desc: "Increases item drop rate & critical damage",
+                available_points: "Available Points",
+                use_allocate: "Use /rpg stats allocate to distribute your points",
+                allocated_title: "Stats Allocated!",
+                increased_by: " increased by ",
+                new_value: "New Value",
+                remaining_points: "Remaining Points",
+                specify_stat_points: "Please specify both stat and points to allocate!",
+                only_have: "You only have ",
+                stat_points: " stat points available!"
+            },
+            inventory: {
+                title: "Inventory",
+                belongings: "'s belongings",
+                page: "Page",
+                total_items: "Total items: ",
+                empty: "Your inventory is empty!",
+                use_to_view: "Use /pet info <id> to view detailed information"
+            },
+            equip: {
+                not_found: "Item not found in your inventory!",
+                cannot_equip: "This item cannot be equipped!",
+                need_level: "You need to be level ",
+                to_equip: " to equip this item!",
+                only_for_class: "This item can only be equipped by ",
+                already_equipped: " is already equipped! Unequip it first before equipping another copy.",
+                equipped: " has been equipped in the ",
+                slot: " slot!",
+                title: "Item Equipped!"
+            },
+            unequip: {
+                no_item: "No item equipped in that slot!",
+                unequipped: "Item unequipped from ",
+                title: "Item Unequipped!"
+            },
+            rest: {
+                can_rest_in: "You can rest again in ",
+                minutes: " minute(s)!",
+                title: "Resting...",
+                description: " takes a moment to rest and recover.",
+                hp_restored: "HP Restored",
+                mp_restored: "MP Restored",
+                refreshed: "You feel refreshed and ready for battle!"
+            },
+            battle: {
+                title_victory: "Victory! ",
+                title_defeat: "Defeat! ",
+                you_defeated: "You defeated the ",
+                defeated_by: "You were defeated by the ",
+                battle_log: "Battle Log",
+                rewards: "Rewards",
+                hp_remaining: "HP Remaining",
+                level_up: "Level Up!",
+                now_level: "You are now level ",
+                stat_points_gained: "! +5 stat points gained.",
+                you_deal: "You deal ",
+                damage: " damage",
+                crit: " (CRIT!)",
+                deals_damage: " deals ",
+                survived: "You barely survived with 1 HP. Rest to recover!",
+                better_luck: "Better luck next time!",
+                dropped: "Dropped: "
+            },
+            leaderboard: {
+                title: "Leaderboard - ",
+                no_players: "No players on the leaderboard yet!"
+            },
+            adventure: {
+                recovering: "You're still recovering from your last adventure! Wait ",
+                danger_title: " - Danger!",
+                success_title: " - Success!",
+                took_damage: "You encountered danger and took ",
+                be_careful: "Be more careful next time!",
+                completed: "You successfully completed your adventure!",
+                gold_earned: "Gold Earned",
+                items_found: "Items Found",
+                none: "None"
+            },
+            work: {
+                still_working: "You're still working! Wait ",
+                before_another: " before taking another job.",
+                excellent: "Excellent performance! Your high stats earned you a bonus!",
+                completed: "Job completed successfully.",
+                payment: "Payment",
+                come_back: "Come back later for more work!"
+            },
+            gather: {
+                still_gathering: "You're still gathering! Wait ",
+                gathered: "You gathered ",
+                worth: " worth ",
+                gold: " gold!",
+                value: "Value",
+                quantity: "Quantity",
+                sold: "Resources sold automatically to merchants"
+            },
+            market: {
+                title: "Player Marketplace",
+                welcome: "Welcome, ",
+                your_gold: "Your Gold: ",
+                use_buy: "Use `/shop buy <item_id>` to purchase",
+                empty: "The marketplace is empty! List some items for sale.",
+                seller: "Seller: ",
+                browse: "Browse items listed by other players\n\nUse `/rpg market` with listing ID to purchase",
+                invalid_item: "Invalid item ID! Use `/shop browse` to see available items.",
+                not_enough_gold: "Not enough gold! You need ",
+                but_only_have: " gold but only have ",
+                purchase_complete: "Purchase Complete!",
+                you_bought: "You bought ",
+                total_cost: "Total Cost",
+                remaining_gold: "Remaining Gold",
+                thank_you: "Thank you for your purchase!",
+                provide_item_price: "Please provide both item_id and price to list an item!",
+                price_min: "Price must be at least 1 gold!",
+                cannot_sell_equipped: "You cannot sell equipped items! Unequip it first.",
+                listed: "Item listed for ",
+                other_players_can_buy: "! Other players can now purchase it.",
+                your_listings: "Your Marketplace Listings",
+                you_have: "You have ",
+                active_listings: " active listing(s)",
+                no_listings: "You have no active listings.",
+                price: "Price: ",
+                provide_listing_id: "Please provide a listing_id to purchase an item!",
+                listing_not_found: "Listing not found or no longer available!",
+                cannot_buy_own: "You cannot buy your own listings!",
+                need_gold: "You need ",
+                cannot_trade: "This item cannot be sold!",
+                item_bound: "This item is bound to you and cannot be sold!",
+                only_have_qty: "You only have ",
+                of_this_item: " of this item!",
+                must_unequip: "You must unequip this item before selling it!",
+                item_sold: "Item Sold!",
+                you_sold: "You sold ",
+                gold_received: "Gold Received",
+                new_total: "New Total"
+            },
+            quest: {
+                no_quests: "No quests available at your level!",
+                available_title: "Available Quests",
+                accept_desc: "Accept a quest to start your journey!",
+                reward: "Reward: ",
+                no_active: "You have no active quests. Accept some from available quests!",
+                active_title: "Active Quests",
+                track_progress: "Track your progress!",
+                progress: "Progress: ",
+                provide_id: "Please provide a quest_id to accept!",
+                not_found: "Quest not found!",
+                need_level_quest: "You need to be level ",
+                for_quest: " for this quest!",
+                already_have: "You already have this quest!",
+                accepted: "Quest accepted: ",
+                check_active: "\nCheck your active quests to track progress!",
+                complete_provide_id: "Please provide a quest_id to complete!",
+                not_found_completed: "Quest not found or already completed!",
+                not_ready: "Quest not ready! Progress: ",
+                complete_title: "Quest Complete!",
+                has_been_completed: " has been completed!"
+            },
+            gamble: {
+                not_enough: "You don't have enough gold to place this bet!",
+                max_bet: "Maximum bet is 1000 gold!",
+                you_rolled: "You rolled ",
+                house_rolled: " | House rolled ",
+                you_drew: "You drew ",
+                house_drew: " | House drew ",
+                bet: "Bet",
+                result: "Result",
+                won: "Won ",
+                lost: "Lost ",
+                congratulations: "Congratulations!",
+                better_luck: "Better luck next time!"
+            }
+        };
+
+        if (lang !== "en") {
+            texts = await utils.autoTranslate(texts, "en", lang);
+        }
+
         const sub = interaction.options.getSubcommand();
         
         if (sub === "create") {
             const session = await getSession(interaction.user.id);
             if (!session) {
-                return utils.safeInteractionRespond(interaction, "❌ You need to log in first! Use `/login` to access your account.");
+                return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.not_logged_in + "`/login`.");
             }
 
             const existingChar = await getCharacter(session.account_id);
             if (existingChar) {
-                return utils.safeInteractionRespond(interaction, "❌ You already have a character! Use `/rpg profile` to view it.");
+                return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.already_have_character + "`/rpg profile`" + texts.errors.to_view);
             }
 
             const name = interaction.options.getString("name", true);
@@ -239,7 +455,7 @@ export default {
 
             const nameCheck: any = await db.query("SELECT * FROM rpg_characters WHERE name = ?", [name]);
             if (nameCheck.length > 0) {
-                return utils.safeInteractionRespond(interaction, "❌ This character name is already taken!");
+                return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.name_taken);
             }
 
             await db.query("INSERT INTO rpg_characters SET ?", [{
@@ -266,19 +482,19 @@ export default {
 
             const createEmbed = new EmbedBuilder()
                 .setColor("#FFD700")
-                .setTitle(`${classData.emoji} Character Created!`)
-                .setDescription(`Welcome to the realm, **${name}**!`)
+                .setTitle(classData.emoji + " " + texts.create.title)
+                .setDescription(texts.create.welcome + name + "!")
                 .addFields(
-                    { name: "Class", value: `${classData.emoji} ${classData.name}`, inline: true },
-                    { name: "Level", value: "1", inline: true },
-                    { name: "Starting Gold", value: "💰 100", inline: true },
+                    { name: texts.create.class, value: `${classData.emoji} ${classData.name}`, inline: true },
+                    { name: texts.create.level, value: "1", inline: true },
+                    { name: texts.create.starting_gold, value: "💰 100", inline: true },
                     { name: "HP", value: `❤️ ${classData.stats.hp}`, inline: true },
                     { name: "MP", value: `💙 ${classData.stats.mp}`, inline: true },
                     { name: "⚡", value: "\u200b", inline: true },
-                    { name: "Base Stats", value: `**STR:** ${classData.stats.str} | **DEF:** ${classData.stats.def} | **AGI:** ${classData.stats.agi}\n**INT:** ${classData.stats.int} | **LUK:** ${classData.stats.luk}`, inline: false },
-                    { name: "Class Info", value: classData.description, inline: false }
+                    { name: texts.create.base_stats, value: `**STR:** ${classData.stats.str} | **DEF:** ${classData.stats.def} | **AGI:** ${classData.stats.agi}\n**INT:** ${classData.stats.int} | **LUK:** ${classData.stats.luk}`, inline: false },
+                    { name: texts.create.class_info, value: classData.description, inline: false }
                 )
-                .setFooter({ text: "Your adventure begins now! Use /rpg profile to see your stats" })
+                .setFooter({ text: texts.create.adventure_begins })
                 .setTimestamp();
 
             return utils.safeInteractionRespond(interaction, { embeds: [createEmbed], content: "" });
@@ -286,12 +502,12 @@ export default {
 
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return utils.safeInteractionRespond(interaction, "❌ You need to log in first! Use `/login` to access your account.");
+            return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.not_logged_in + "`/login`.");
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return utils.safeInteractionRespond(interaction, "❌ You need to create a character first! Use `/rpg create` to begin your adventure.");
+            return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.no_character + "`/rpg create`" + texts.errors.to_begin);
         }
 
         switch (sub) {
@@ -334,16 +550,16 @@ export default {
                 const profileEmbed = new EmbedBuilder()
                     .setColor("#9B59B6")
                     .setTitle(`${classData.emoji} ${character.name}`)
-                    .setDescription(`**${classData.name}** • Level ${character.level}`)
+                    .setDescription(`**${classData.name}** • ` + texts.create.level + " " + character.level)
                     .addFields(
-                        { name: "💰 Gold", value: character.gold.toLocaleString(), inline: true },
+                        { name: "💰 " + texts.profile.gold, value: character.gold.toLocaleString(), inline: true },
                         { name: "❤️ HP", value: `${character.hp}/${character.max_hp}`, inline: true },
                         { name: "💙 MP", value: `${character.mp}/${character.max_mp}`, inline: true },
-                        { name: "📊 Experience", value: `${character.experience}/${expNeeded}\n${progressBar}`, inline: false },
-                        { name: "⚔️ Combat Stats", value: `**STR:** ${totalStats.str} | **DEF:** ${totalStats.def} | **AGI:** ${totalStats.agi}\n**INT:** ${totalStats.int} | **LUK:** ${totalStats.luk}`, inline: false },
-                        { name: "📦 Equipment", value: equipmentText, inline: false }
+                        { name: "📊 " + texts.profile.experience, value: `${character.experience}/${expNeeded}\n${progressBar}`, inline: false },
+                        { name: "⚔️ " + texts.profile.combat_stats, value: `**STR:** ${totalStats.str} | **DEF:** ${totalStats.def} | **AGI:** ${totalStats.agi}\n**INT:** ${totalStats.int} | **LUK:** ${totalStats.luk}`, inline: false },
+                        { name: "📦 " + texts.profile.equipment, value: equipmentText, inline: false }
                     )
-                    .setFooter({ text: `Stat Points Available: ${character.stat_points}` })
+                    .setFooter({ text: texts.profile.stat_points_available + character.stat_points })
                     .setTimestamp();
 
                 return utils.safeInteractionRespond(interaction, { embeds: [profileEmbed], content: "" });
@@ -355,17 +571,17 @@ export default {
                 if (action === "view") {
                     const statsEmbed = new EmbedBuilder()
                         .setColor("#3498DB")
-                        .setTitle("📊 Character Statistics")
-                        .setDescription(`**${character.name}** - Level ${character.level}`)
+                        .setTitle("📊 " + texts.stats.title)
+                        .setDescription(character.name + " - " + texts.create.level + " " + character.level)
                         .addFields(
-                            { name: "⚔️ Strength", value: `${character.strength}\n*Increases physical damage*`, inline: true },
-                            { name: "🛡️ Defense", value: `${character.defense}\n*Reduces damage taken*`, inline: true },
-                            { name: "⚡ Agility", value: `${character.agility}\n*Increases critical rate & evasion*`, inline: true },
-                            { name: "🔮 Intelligence", value: `${character.intelligence}\n*Increases magic damage*`, inline: true },
-                            { name: "🍀 Luck", value: `${character.luck}\n*Increases item drop rate & critical damage*`, inline: true },
-                            { name: "✨ Available Points", value: `${character.stat_points}`, inline: true }
+                            { name: "⚔️ " + texts.stats.strength, value: `${character.strength}\n*${texts.stats.strength_desc}*`, inline: true },
+                            { name: "🛡️ " + texts.stats.defense, value: `${character.defense}\n*${texts.stats.defense_desc}*`, inline: true },
+                            { name: "⚡ " + texts.stats.agility, value: `${character.agility}\n*${texts.stats.agility_desc}*`, inline: true },
+                            { name: "🔮 " + texts.stats.intelligence, value: `${character.intelligence}\n*${texts.stats.intelligence_desc}*`, inline: true },
+                            { name: "🍀 " + texts.stats.luck, value: `${character.luck}\n*${texts.stats.luck_desc}*`, inline: true },
+                            { name: "✨ " + texts.stats.available_points, value: `${character.stat_points}`, inline: true }
                         )
-                        .setFooter({ text: "Use /rpg stats allocate to distribute your points" })
+                        .setFooter({ text: texts.stats.use_allocate })
                         .setTimestamp();
 
                     return utils.safeInteractionRespond(interaction, { embeds: [statsEmbed], content: "" });
@@ -376,11 +592,11 @@ export default {
                     const points = interaction.options.getInteger("points");
 
                     if (!stat || !points) {
-                        return utils.safeInteractionRespond(interaction, "❌ Please specify both stat and points to allocate!");
+                        return utils.safeInteractionRespond(interaction, "❌ " + texts.stats.specify_stat_points);
                     }
 
                     if (character.stat_points < points) {
-                        return utils.safeInteractionRespond(interaction, `❌ You only have ${character.stat_points} stat points available!`);
+                        return utils.safeInteractionRespond(interaction, "❌ " + texts.stats.only_have + character.stat_points + texts.stats.stat_points);
                     }
 
                     await db.query(
@@ -398,11 +614,11 @@ export default {
 
                     const allocateEmbed = new EmbedBuilder()
                         .setColor("#2ECC71")
-                        .setTitle("✨ Stats Allocated!")
-                        .setDescription(`${statIcons[stat]} **${stat.toUpperCase()}** increased by ${points}!`)
+                        .setTitle("✨ " + texts.stats.allocated_title)
+                        .setDescription(`${statIcons[stat]} **${stat.toUpperCase()}**` + texts.stats.increased_by + points + "!")
                         .addFields(
-                            { name: "New Value", value: `${character[stat] + points}`, inline: true },
-                            { name: "Remaining Points", value: `${character.stat_points - points}`, inline: true }
+                            { name: texts.stats.new_value, value: `${character[stat] + points}`, inline: true },
+                            { name: texts.stats.remaining_points, value: `${character.stat_points - points}`, inline: true }
                         )
                         .setTimestamp();
 
@@ -474,19 +690,19 @@ export default {
                 );
 
                 if (!invItem[0]) {
-                    return utils.safeInteractionRespond(interaction, "❌ Item not found in your inventory!");
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.equip.not_found);
                 }
 
                 if (!invItem[0].slot) {
-                    return utils.safeInteractionRespond(interaction, "❌ This item cannot be equipped!");
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.equip.cannot_equip);
                 }
 
                 if (invItem[0].required_level > character.level) {
-                    return utils.safeInteractionRespond(interaction, `❌ You need to be level ${invItem[0].required_level} to equip this item!`);
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.equip.need_level + invItem[0].required_level + texts.equip.to_equip);
                 }
 
                 if (invItem[0].required_class && invItem[0].required_class !== character.class) {
-                    return utils.safeInteractionRespond(interaction, `❌ This item can only be equipped by ${invItem[0].required_class}s!`);
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.equip.only_for_class + invItem[0].required_class + "s!");
                 }
 
                 // Check if this item is already equipped in any slot
@@ -549,7 +765,7 @@ export default {
 
                 if (timeLeft > 0) {
                     const minutes = Math.ceil(timeLeft / 60000);
-                    return utils.safeInteractionRespond(interaction, `⏰ You can rest again in ${minutes} minute(s)!`);
+                    return utils.safeInteractionRespond(interaction, "⏰ " + texts.rest.can_rest_in + minutes + texts.rest.minutes);
                 }
 
                 await db.query(
@@ -559,13 +775,13 @@ export default {
 
                 const restEmbed = new EmbedBuilder()
                     .setColor("#3498DB")
-                    .setTitle("😴 Resting...")
-                    .setDescription(`**${character.name}** takes a moment to rest and recover.`)
+                    .setTitle("😴 " + texts.rest.title)
+                    .setDescription(character.name + texts.rest.description)
                     .addFields(
-                        { name: "❤️ HP Restored", value: `${character.max_hp}`, inline: true },
-                        { name: "💙 MP Restored", value: `${character.max_mp}`, inline: true }
+                        { name: "❤️ " + texts.rest.hp_restored, value: `${character.max_hp}`, inline: true },
+                        { name: "💙 " + texts.rest.mp_restored, value: `${character.max_mp}`, inline: true }
                     )
-                    .setFooter({ text: "You feel refreshed and ready for battle!" })
+                    .setFooter({ text: texts.rest.refreshed })
                     .setTimestamp();
 
                 return utils.safeInteractionRespond(interaction, { embeds: [restEmbed], content: "" });

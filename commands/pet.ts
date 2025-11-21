@@ -50,14 +50,61 @@ export default {
                 .setMaxLength(30))),
     category: "RPG",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
+        let texts = {
+            errors: {
+                not_logged_in: "You need to log in first! Use ",
+                no_character: "You need to create a character first! Use ",
+                pet_not_found: "Pet not found!",
+                already_equipped: "This pet is already equipped!",
+                no_active_pet: "You don't have an active pet!",
+                max_happiness: "This pet is already at maximum happiness!",
+                need_gold_feed: "You need ",
+                to_feed: " gold to feed your pet!"
+            },
+            list: {
+                title: "Your Pets",
+                companions: "'s companions",
+                no_pets: "You don't have any pets yet! Visit the shop to adopt one.",
+                level: "Level ",
+                use_info: "Use /pet info <id> to view detailed information"
+            },
+            equip: {
+                now_active: " is now your active companion!"
+            },
+            unequip: {
+                unequipped: " has been unequipped."
+            },
+            feed: {
+                you_fed: "You fed ",
+                happiness: "! Happiness: "
+            },
+            info: {
+                rarity: "Rarity",
+                happiness: "Happiness",
+                experience: "Experience",
+                stat_bonuses: "Stat Bonuses",
+                special_ability: "Special Ability",
+                last_fed: "Last Fed",
+                currently_equipped: "Currently equipped",
+                not_equipped: "Not equipped"
+            },
+            rename: {
+                renamed: "Pet renamed to "
+            }
+        };
+
+        if (lang !== "en") {
+            texts = await utils.autoTranslate(texts, "en", lang);
+        }
+
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ You need to log in first! Use `/login` to access your account." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.not_logged_in + "`/login`." });
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.no_character + "`/rpg create`." });
         }
 
         const sub = interaction.options.getSubcommand();
@@ -73,13 +120,13 @@ export default {
             );
 
             if (pets.length === 0) {
-                return utils.safeInteractionRespond(interaction, { content: "🐾 You don't have any pets yet! Visit the shop to adopt one." });
+                return utils.safeInteractionRespond(interaction, { content: "🐾 " + texts.list.no_pets });
             }
 
             const embed = new EmbedBuilder()
                 .setColor("#FF69B4")
-                .setTitle("🐾 Your Pets")
-                .setDescription(`**${character.name}**'s companions`)
+                .setTitle("🐾 " + texts.list.title)
+                .setDescription(character.name + texts.list.companions)
                 .setTimestamp();
 
             for (const pet of pets) {
@@ -103,7 +150,7 @@ export default {
                 });
             }
 
-            embed.setFooter({ text: "Use /pet info <id> to view detailed information" });
+            embed.setFooter({ text: texts.list.use_info });
 
             return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
@@ -117,11 +164,11 @@ export default {
             );
 
             if (!pet[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ Pet not found!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.pet_not_found });
             }
 
             if (pet[0].is_active) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ This pet is already equipped!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.already_equipped });
             }
 
             await db.query("UPDATE rpg_character_pets SET is_active = FALSE WHERE character_id = ?", [character.id]);
@@ -130,7 +177,7 @@ export default {
             const petInfo: any = await db.query("SELECT * FROM rpg_pets WHERE id = ?", [pet[0].pet_id]);
 
             return utils.safeInteractionRespond(interaction, { 
-                content: `✅ ${petInfo[0].emoji} **${pet[0].name}** is now your active companion!` 
+                content: "✅ " + petInfo[0].emoji + " " + pet[0].name + texts.equip.now_active
             });
         }
 
@@ -141,12 +188,12 @@ export default {
             );
 
             if (!activePet[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ You don't have an active pet!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.no_active_pet });
             }
 
             await db.query("UPDATE rpg_character_pets SET is_active = FALSE WHERE id = ?", [activePet[0].id]);
 
-            return utils.safeInteractionRespond(interaction, { content: `✅ **${activePet[0].name}** has been unequipped.` });
+            return utils.safeInteractionRespond(interaction, { content: "✅ " + activePet[0].name + texts.unequip.unequipped });
         }
 
         if (sub === "feed") {
@@ -158,16 +205,16 @@ export default {
             );
 
             if (!pet[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ Pet not found!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.pet_not_found });
             }
 
             if (pet[0].happiness >= 100) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ This pet is already at maximum happiness!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.max_happiness });
             }
 
             const feedCost = 50;
             if (character.gold < feedCost) {
-                return utils.safeInteractionRespond(interaction, { content: `❌ You need ${feedCost} gold to feed your pet!` });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.need_gold_feed + feedCost + texts.errors.to_feed });
             }
 
             const happinessGain = Math.floor(Math.random() * 20) + 10;
@@ -182,7 +229,7 @@ export default {
             const petInfo: any = await db.query("SELECT emoji FROM rpg_pets WHERE id = ?", [pet[0].pet_id]);
 
             return utils.safeInteractionRespond(interaction, { 
-                content: `✅ You fed ${petInfo[0].emoji} **${pet[0].name}**! Happiness: ${pet[0].happiness} → ${newHappiness} (+${happinessGain})` 
+                content: "✅ " + texts.feed.you_fed + petInfo[0].emoji + " " + pet[0].name + texts.feed.happiness + pet[0].happiness + " → " + newHappiness + " (+" + happinessGain + ")" 
             });
         }
 
@@ -252,12 +299,12 @@ export default {
             );
 
             if (!pet[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ Pet not found!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.pet_not_found });
             }
 
             await db.query("UPDATE rpg_character_pets SET name = ? WHERE id = ?", [newName, petId]);
 
-            return utils.safeInteractionRespond(interaction, { content: `✅ Pet renamed to **${newName}**!` });
+            return utils.safeInteractionRespond(interaction, { content: "✅ " + texts.rename.renamed + newName + "!" });
         }
     },
     ephemeral: false

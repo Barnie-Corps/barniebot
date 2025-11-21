@@ -70,14 +70,75 @@ export default {
                 .setRequired(true))),
     category: "RPG",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
+        let texts = {
+            errors: {
+                not_logged_in: "You need to log in first! Use ",
+                no_character: "You need to create a character first! Use ",
+                cannot_trade_self: "You cannot trade with yourself!",
+                cannot_trade_bots: "You cannot trade with bots!",
+                player_not_logged: "That player is not logged in!",
+                player_no_character: "That player doesn't have a character!",
+                must_offer_something: "You must offer at least gold or an item!",
+                only_have: "You only have ",
+                gold: " gold!",
+                not_in_inventory: " not found in your inventory!",
+                cannot_be_traded: " cannot be traded!",
+                is_bound: " is bound to you!",
+                only_have_qty: "You only have ",
+                of: "x ",
+                not_found_or_cannot: "Trade not found or you cannot cancel it!",
+                not_found_or_completed: "Trade not found or already completed!",
+                initiator_no_items: "Initiator no longer has the offered items!",
+                initiator_no_gold: "Initiator no longer has enough gold!",
+                invalid_item_return: "Invalid item in your return offer!"
+            },
+            offer: {
+                title: "Trade Offer Sent!",
+                you_offered: "You offered a trade to ",
+                your_offer: "Your Offer",
+                trade_id: "Trade ID",
+                waiting: "Waiting for the other player to respond...",
+                new_offer_title: "New Trade Offer!",
+                wants_to_trade: " wants to trade with you!",
+                they_offer: "They Offer",
+                use_commands: "Use /trade accept or /trade decline",
+                nothing: "Nothing"
+            },
+            view: {
+                title: "Pending Trades",
+                no_trades: "You have no pending trades!",
+                offers_sent: "Offers You Sent",
+                offers_received: "Offers You Received",
+                to: "to ",
+                from: "from "
+            },
+            cancel: {
+                cancelled: "Trade #",
+                has_been_cancelled: " has been cancelled!"
+            },
+            complete: {
+                title: "Trade Complete!",
+                with: "Trade with ",
+                has_been_completed: " has been completed!"
+            },
+            decline: {
+                declined: "Trade #",
+                has_been_declined: " has been declined!"
+            }
+        };
+
+        if (lang !== "en") {
+            texts = await utils.autoTranslate(texts, "en", lang);
+        }
+
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return utils.safeInteractionRespond(interaction, "❌ You need to log in first! Use `/login` to access your account.");
+            return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.not_logged_in + "`/login`.");
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return utils.safeInteractionRespond(interaction, "❌ You need to create a character first! Use `/rpg create` to begin your adventure.");
+            return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.no_character + "`/rpg create`.");
         }
 
         const sub = interaction.options.getSubcommand();
@@ -87,21 +148,21 @@ export default {
                 const targetUser = interaction.options.getUser("player", true);
                 
                 if (targetUser.id === interaction.user.id) {
-                    return utils.safeInteractionRespond(interaction, "❌ You cannot trade with yourself!");
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.cannot_trade_self);
                 }
 
                 if (targetUser.bot) {
-                    return utils.safeInteractionRespond(interaction, "❌ You cannot trade with bots!");
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.cannot_trade_bots);
                 }
 
                 const targetSession = await getSession(targetUser.id);
                 if (!targetSession) {
-                    return utils.safeInteractionRespond(interaction, "❌ That player is not logged in!");
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.player_not_logged);
                 }
 
                 const targetCharacter = await getCharacter(targetSession.account_id);
                 if (!targetCharacter) {
-                    return utils.safeInteractionRespond(interaction, "❌ That player doesn't have a character!");
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.player_no_character);
                 }
 
                 const gold = interaction.options.getInteger("gold") || 0;
@@ -111,11 +172,11 @@ export default {
                 const item2Qty = interaction.options.getInteger("item2_quantity") || 1;
 
                 if (gold === 0 && !item1Id && !item2Id) {
-                    return utils.safeInteractionRespond(interaction, "❌ You must offer at least gold or an item!");
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.must_offer_something);
                 }
 
                 if (gold > character.gold) {
-                    return utils.safeInteractionRespond(interaction, `❌ You only have ${character.gold} gold!`);
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.only_have + character.gold + texts.errors.gold);
                 }
 
                 const offeredItems: any[] = [];
@@ -129,19 +190,19 @@ export default {
                     );
                     
                     if (!item[0]) {
-                        return utils.safeInteractionRespond(interaction, `❌ Item ID ${item1Id} not found in your inventory!`);
+                        return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.not_in_inventory.replace(" not found", item1Id + texts.errors.not_in_inventory));
                     }
                     
                     if (!item[0].tradeable) {
-                        return utils.safeInteractionRespond(interaction, `❌ ${item[0].name} cannot be traded!`);
+                        return utils.safeInteractionRespond(interaction, "❌ " + item[0].name + texts.errors.cannot_be_traded);
                     }
                     
                     if (item[0].bound) {
-                        return utils.safeInteractionRespond(interaction, `❌ ${item[0].name} is bound to you!`);
+                        return utils.safeInteractionRespond(interaction, "❌ " + item[0].name + texts.errors.is_bound);
                     }
                     
                     if (item[0].quantity < item1Qty) {
-                        return utils.safeInteractionRespond(interaction, `❌ You only have ${item[0].quantity}x ${item[0].name}!`);
+                        return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.only_have_qty + item[0].quantity + texts.errors.of + item[0].name + "!");
                     }
                     
                     offeredItems.push({ id: item1Id, name: item[0].name, quantity: item1Qty });
@@ -239,12 +300,12 @@ export default {
                 );
 
                 if (sent.length === 0 && received.length === 0) {
-                    return utils.safeInteractionRespond(interaction, "📭 You have no pending trades!");
+                    return utils.safeInteractionRespond(interaction, "📫 " + texts.view.no_trades);
                 }
 
                 const viewEmbed = new EmbedBuilder()
                     .setColor("#9B59B6")
-                    .setTitle("🤝 Pending Trades")
+                    .setTitle("🤝 " + texts.view.title)
                     .setTimestamp();
 
                 if (sent.length > 0) {
@@ -285,12 +346,12 @@ export default {
                 );
 
                 if (!trade[0]) {
-                    return utils.safeInteractionRespond(interaction, "❌ Trade not found or you cannot cancel it!");
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.not_found_or_cannot);
                 }
 
                 await db.query("UPDATE rpg_trades SET status = 'cancelled' WHERE id = ?", [tradeId]);
 
-                return utils.safeInteractionRespond(interaction, `✅ Trade #${tradeId} has been cancelled!`);
+                return utils.safeInteractionRespond(interaction, "✅ " + texts.cancel.cancelled + tradeId + texts.cancel.has_been_cancelled);
             }
 
             case "accept": {
@@ -441,12 +502,12 @@ export default {
                 );
 
                 if (!trade[0]) {
-                    return utils.safeInteractionRespond(interaction, "❌ Trade not found!");
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.decline.declined.replace("Trade #", texts.errors.not_found_or_completed));
                 }
 
                 await db.query("UPDATE rpg_trades SET status = 'declined' WHERE id = ?", [tradeId]);
 
-                return utils.safeInteractionRespond(interaction, `✅ Trade #${tradeId} has been declined!`);
+                return utils.safeInteractionRespond(interaction, "✅ " + texts.decline.declined + tradeId + texts.decline.has_been_declined);
             }
         }
     },

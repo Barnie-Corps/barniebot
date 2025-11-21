@@ -32,14 +32,87 @@ export default {
             .setDescription("Check your current dungeon progress")),
     category: "RPG",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
+        let texts = {
+            errors: {
+                not_logged_in: "You need to log in first! Use ",
+                no_character: "You need to create a character first! Use ",
+                already_in_dungeon: "You're already in a dungeon! Use ",
+                or_abandon: " or abandon it first.",
+                dungeon_not_found: "Dungeon not found!",
+                need_level: "You need to be level ",
+                to_enter: " to enter this dungeon!",
+                too_injured: "You're too injured to enter a dungeon! Rest first with ",
+                not_in_dungeon: "You're not in a dungeon! Use ",
+                to_start: " to start one."
+            },
+            list: {
+                title: "Available Dungeons",
+                test_strength: "Test your strength in these challenging dungeons!",
+                no_dungeons: "No dungeons available yet. Check back soon!",
+                required_level: "Required Level: ",
+                difficulty: "Difficulty: ",
+                stages: "Stages: ",
+                boss: "Boss: ",
+                rewards: "Rewards: ",
+                gold: " gold",
+                xp: " XP",
+                use_enter: "Use /dungeon enter <id> to challenge a dungeon!"
+            },
+            enter: {
+                title: "Entering: ",
+                steps_into: " steps into the darkness...",
+                total_stages: "Total Stages",
+                final_boss: "Final Boss",
+                warning: "Warning",
+                cannot_leave: "You cannot leave until the dungeon is complete or you're defeated!",
+                use_continue: "Use /dungeon continue to progress!"
+            },
+            continue: {
+                stage_complete: "Stage ",
+                complete: " Complete!",
+                defeated: " defeated the ",
+                battle_log: "Battle Log",
+                rewards: "Rewards",
+                hp_remaining: "HP Remaining",
+                progress: "Progress",
+                stage: "Stage ",
+                boss_next: " (Boss Next!)",
+                use_advance: "Use /dungeon continue to advance!",
+                dungeon_completed: "Dungeon Completed!",
+                has_conquered: " has conquered ",
+                bonus: "Bonus: ",
+                total_rewards: "Total Rewards",
+                defeat_title: "Defeat!",
+                was_defeated: " was defeated by the ",
+                progress_lost: "Progress Lost",
+                failed_at: "Failed at Stage ",
+                rest_and_try: "Rest up and try again!"
+            },
+            status: {
+                title: "Dungeon Progress",
+                progress: "Progress",
+                stage: "Stage ",
+                status: "Status",
+                boss_stage: "Boss Stage!",
+                in_progress: "In Progress",
+                started: "Started",
+                keep_going: "Use /dungeon continue to keep going!",
+                not_in: "You're not currently in a dungeon."
+            }
+        };
+
+        if (lang !== "en") {
+            texts = await utils.autoTranslate(texts, "en", lang);
+        }
+
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ You need to log in first! Use `/login` to access your account." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.not_logged_in + "`/login`." });
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.no_character + "`/rpg create`." });
         }
 
         const sub = interaction.options.getSubcommand();
@@ -48,13 +121,13 @@ export default {
             const dungeons: any = await db.query("SELECT * FROM rpg_dungeons ORDER BY required_level");
 
             if (dungeons.length === 0) {
-                return utils.safeInteractionRespond(interaction, { content: "🏰 No dungeons available yet. Check back soon!" });
+                return utils.safeInteractionRespond(interaction, { content: "🏰 " + texts.list.no_dungeons });
             }
 
             const embed = new EmbedBuilder()
                 .setColor("#8B0000")
-                .setTitle("🏰 Available Dungeons")
-                .setDescription("Test your strength in these challenging dungeons!")
+                .setTitle("🏰 " + texts.list.title)
+                .setDescription(texts.list.test_strength)
                 .setTimestamp();
 
             for (const dungeon of dungeons) {
@@ -85,21 +158,21 @@ export default {
             );
 
             if (activeRun[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ You're already in a dungeon! Use `/dungeon continue` or abandon it first." });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.already_in_dungeon + "`/dungeon continue`" + texts.errors.or_abandon });
             }
 
             const dungeon: any = await db.query("SELECT * FROM rpg_dungeons WHERE id = ?", [dungeonId]);
             
             if (!dungeon[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ Dungeon not found!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.dungeon_not_found });
             }
 
             if (character.level < dungeon[0].required_level) {
-                return utils.safeInteractionRespond(interaction, { content: `❌ You need to be level ${dungeon[0].required_level} to enter this dungeon!` });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.need_level + dungeon[0].required_level + texts.errors.to_enter });
             }
 
             if (character.hp < character.max_hp * 0.5) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ You're too injured to enter a dungeon! Rest first with `/rpg rest`." });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.too_injured + "`/rpg rest`." });
             }
 
             await db.query("INSERT INTO rpg_dungeon_runs SET ?", [{
@@ -114,15 +187,15 @@ export default {
 
             const embed = new EmbedBuilder()
                 .setColor("#8B0000")
-                .setTitle(`🏰 Entering: ${dungeon[0].name}`)
-                .setDescription(`**${character.name}** steps into the darkness...`)
+                .setTitle("🏰 " + texts.enter.title + dungeon[0].name)
+                .setDescription(character.name + texts.enter.steps_into)
                 .addFields(
-                    { name: "📊 Difficulty", value: dungeon[0].difficulty, inline: true },
-                    { name: "🎯 Total Stages", value: dungeon[0].stages.toString(), inline: true },
-                    { name: "👑 Final Boss", value: dungeon[0].boss_name, inline: true },
-                    { name: "⚠️ Warning", value: "You cannot leave until the dungeon is complete or you're defeated!", inline: false }
+                    { name: "📊 " + texts.list.difficulty, value: dungeon[0].difficulty, inline: true },
+                    { name: "🎯 " + texts.enter.total_stages, value: dungeon[0].stages.toString(), inline: true },
+                    { name: "👑 " + texts.enter.final_boss, value: dungeon[0].boss_name, inline: true },
+                    { name: "⚠️ " + texts.enter.warning, value: texts.enter.cannot_leave, inline: false }
                 )
-                .setFooter({ text: "Use /dungeon continue to progress!" })
+                .setFooter({ text: texts.enter.use_continue })
                 .setTimestamp();
 
             return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
@@ -135,7 +208,7 @@ export default {
             );
 
             if (!activeRun[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ You're not in a dungeon! Use `/dungeon enter` to start one." });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.not_in_dungeon + "`/dungeon enter`" + texts.errors.to_start });
             }
 
             const run = activeRun[0];
@@ -282,7 +355,7 @@ export default {
             );
 
             if (!activeRun[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ You're not currently in a dungeon." });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.status.not_in });
             }
 
             const run = activeRun[0];

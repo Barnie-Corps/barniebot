@@ -21,14 +21,55 @@ export default {
         .setDescription("Claim your daily rewards and maintain your streak!"),
     category: "RPG",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
+        let texts = {
+            errors: {
+                not_logged_in: "You need to log in first! Use ",
+                no_character: "You need to create a character first! Use ",
+                already_claimed: "You've already claimed your daily reward! Come back in ",
+                come_back: ".",
+                hours: "h",
+                minutes: "m"
+            },
+            daily_reward: {
+                title: "Daily Reward Claimed!",
+                collected: " collected their daily rewards!",
+                gold: "Gold",
+                experience: "Experience",
+                streak: "Streak",
+                day: "day",
+                days: "days",
+                streak_bonus: "Streak Bonus",
+                multiplier: " multiplier",
+                total_claims: "Total claims: ",
+                claim_again: " | Claim again in 24 hours!",
+                bonus_gold: "Bonus: ",
+                bonus_gold_item: " Gold + Random Item!",
+                bonus_rare: " Gold + Rare Item!",
+                streak_lost: "Streak Lost",
+                streak_lost_desc: "Your ",
+                streak_lost_desc2: " day streak was lost! Claim daily to maintain your streak."
+            },
+            first_daily: {
+                title: "First Daily Reward!",
+                welcome: "Welcome to the daily reward system, ",
+                tip: "Tip",
+                tip_desc: "Claim your rewards every day to build a streak and earn bigger bonuses!",
+                come_back_tomorrow: "Come back tomorrow for your next reward!"
+            }
+        };
+
+        if (lang !== "en") {
+            texts = await utils.autoTranslate(texts, "en", lang);
+        }
+
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ You need to log in first! Use `/login` to access your account." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.not_logged_in + "`/login`" + texts.errors.come_back });
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.no_character + "`/rpg create`" + texts.errors.come_back });
         }
 
         const dailyData: any = await db.query("SELECT * FROM rpg_daily_rewards WHERE character_id = ?", [character.id]);
@@ -44,7 +85,7 @@ export default {
                 const minutesLeft = Math.floor((timeLeft % 3600000) / 60000);
                 
                 return utils.safeInteractionRespond(interaction, { 
-                    content: `⏰ You've already claimed your daily reward! Come back in **${hoursLeft}h ${minutesLeft}m**.` 
+                    content: "⏰ " + texts.errors.already_claimed + hoursLeft + texts.errors.hours + " " + minutesLeft + texts.errors.minutes + texts.errors.come_back
                 });
             }
             
@@ -68,9 +109,9 @@ export default {
             );
 
             const streakBonuses = [
-                { day: 7, bonus: "🎁 Bonus: 500 Gold!" },
-                { day: 14, bonus: "🎁 Bonus: 1000 Gold + Random Item!" },
-                { day: 30, bonus: "🎁 Bonus: 5000 Gold + Rare Item!" }
+                { day: 7, bonus: "🎁 " + texts.daily_reward.bonus_gold + "500" + texts.daily_reward.bonus_gold.slice(6) },
+                { day: 14, bonus: "🎁 " + texts.daily_reward.bonus_gold + "1000" + texts.daily_reward.bonus_gold_item },
+                { day: 30, bonus: "🎁 " + texts.daily_reward.bonus_gold + "5000" + texts.daily_reward.bonus_rare }
             ];
             
             let bonusText = "";
@@ -86,15 +127,15 @@ export default {
 
             const embed = new EmbedBuilder()
                 .setColor("#00FF00")
-                .setTitle("🎁 Daily Reward Claimed!")
-                .setDescription(`**${character.name}** collected their daily rewards!`)
+                .setTitle("🎁 " + texts.daily_reward.title)
+                .setDescription(character.name + texts.daily_reward.collected)
                 .addFields(
-                    { name: "💰 Gold", value: `+${gold}`, inline: true },
-                    { name: "⭐ Experience", value: `+${exp}`, inline: true },
-                    { name: "🔥 Streak", value: `${newStreak} day${newStreak > 1 ? "s" : ""}`, inline: true },
-                    { name: "📊 Streak Bonus", value: `x${streakMultiplier.toFixed(1)} multiplier`, inline: false }
+                    { name: "💰 " + texts.daily_reward.gold, value: `+${gold}`, inline: true },
+                    { name: "⭐ " + texts.daily_reward.experience, value: `+${exp}`, inline: true },
+                    { name: "🔥 " + texts.daily_reward.streak, value: `${newStreak} ${newStreak > 1 ? texts.daily_reward.days : texts.daily_reward.day}`, inline: true },
+                    { name: "📊 " + texts.daily_reward.streak_bonus, value: "x" + streakMultiplier.toFixed(1) + texts.daily_reward.multiplier, inline: false }
                 )
-                .setFooter({ text: `Total claims: ${dailyData[0].total_claims + 1} | Claim again in 24 hours!` })
+                .setFooter({ text: texts.daily_reward.total_claims + (dailyData[0].total_claims + 1) + texts.daily_reward.claim_again })
                 .setTimestamp();
 
             if (bonusText) {
@@ -103,8 +144,8 @@ export default {
 
             if (!isStreakValid && dailyData[0].streak > 0) {
                 embed.addFields({ 
-                    name: "⚠️ Streak Lost", 
-                    value: `Your ${dailyData[0].streak} day streak was lost! Claim daily to maintain your streak.`, 
+                    name: "⚠️ " + texts.daily_reward.streak_lost, 
+                    value: texts.daily_reward.streak_lost_desc + dailyData[0].streak + texts.daily_reward.streak_lost_desc2, 
                     inline: false 
                 });
             }
@@ -129,15 +170,15 @@ export default {
 
             const embed = new EmbedBuilder()
                 .setColor("#00FF00")
-                .setTitle("🎁 First Daily Reward!")
-                .setDescription(`Welcome to the daily reward system, **${character.name}**!`)
+                .setTitle("🎁 " + texts.first_daily.title)
+                .setDescription(texts.first_daily.welcome + character.name + "!")
                 .addFields(
-                    { name: "💰 Gold", value: `+${gold}`, inline: true },
-                    { name: "⭐ Experience", value: `+${exp}`, inline: true },
-                    { name: "🔥 Streak", value: "1 day", inline: true },
-                    { name: "💡 Tip", value: "Claim your rewards every day to build a streak and earn bigger bonuses!", inline: false }
+                    { name: "💰 " + texts.daily_reward.gold, value: `+${gold}`, inline: true },
+                    { name: "⭐ " + texts.daily_reward.experience, value: `+${exp}`, inline: true },
+                    { name: "🔥 " + texts.daily_reward.streak, value: "1 " + texts.daily_reward.day, inline: true },
+                    { name: "💡 " + texts.first_daily.tip, value: texts.first_daily.tip_desc, inline: false }
                 )
-                .setFooter({ text: "Come back tomorrow for your next reward!" })
+                .setFooter({ text: texts.first_daily.come_back_tomorrow })
                 .setTimestamp();
 
             return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });

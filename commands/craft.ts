@@ -33,14 +33,62 @@ export default {
                 .setRequired(true))),
     category: "RPG",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
+        let texts = {
+            errors: {
+                not_logged_in: "You need to log in first! Use ",
+                no_character: "You need to create a character first! Use ",
+                recipe_not_found: "Recipe not found!",
+                need_level: "You need to be level ",
+                to_craft: " to craft this!",
+                need_gold: "You need ",
+                gold_to_craft: " gold to craft this!",
+                not_enough: "You don't have enough ",
+                need: "! Need: ",
+                have: ", Have: "
+            },
+            materials: {
+                title: "Crafting Materials",
+                storage: "'s material storage",
+                no_materials: "You don't have any crafting materials yet. Defeat monsters to collect them!",
+                crafting_material: "Crafting material",
+                use_recipes: "Use /craft recipes to see what you can make!"
+            },
+            recipes: {
+                title: "Crafting Recipes",
+                page: "Page ",
+                no_recipes: "No recipes found on this page.",
+                creates: "Creates: ",
+                level_required: "Level Required: ",
+                materials: "Materials:",
+                gold_cost: "Gold Cost: ",
+                success_rate: "Success Rate: ",
+                use_create: "Use /craft create <recipe_id> to craft | Page "
+            },
+            create: {
+                success_title: "Crafting Success!",
+                successfully_crafted: " successfully crafted ",
+                item: "Item",
+                check_inventory: "Check your inventory with /rpg inventory",
+                failed_title: "Crafting Failed!",
+                failed_to_craft: " failed to craft ",
+                materials_lost: "Materials Lost",
+                all_consumed: "All materials were consumed in the attempt.",
+                better_luck: "Better luck next time!"
+            }
+        };
+
+        if (lang !== "en") {
+            texts = await utils.autoTranslate(texts, "en", lang);
+        }
+
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ You need to log in first! Use `/login` to access your account." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.not_logged_in + "`/login`." });
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
+            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.no_character + "`/rpg create`." });
         }
 
         const sub = interaction.options.getSubcommand();
@@ -56,13 +104,13 @@ export default {
             );
 
             if (materials.length === 0) {
-                return utils.safeInteractionRespond(interaction, { content: "🔧 You don't have any crafting materials yet. Defeat monsters to collect them!" });
+                return utils.safeInteractionRespond(interaction, { content: "🔧 " + texts.materials.no_materials });
             }
 
             const embed = new EmbedBuilder()
                 .setColor("#FFA500")
-                .setTitle("🔧 Crafting Materials")
-                .setDescription(`**${character.name}**'s material storage`)
+                .setTitle("🔧 " + texts.materials.title)
+                .setDescription(character.name + texts.materials.storage)
                 .setTimestamp();
 
             const rarityColors: any = {
@@ -81,7 +129,7 @@ export default {
                 });
             }
 
-            embed.setFooter({ text: "Use /craft recipes to see what you can make!" });
+            embed.setFooter({ text: texts.materials.use_recipes });
 
             return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
@@ -104,13 +152,13 @@ export default {
             const totalPages = Math.ceil(totalRecipes[0].count / recipesPerPage);
 
             if (recipes.length === 0) {
-                return utils.safeInteractionRespond(interaction, { content: "📜 No recipes found on this page." });
+                return utils.safeInteractionRespond(interaction, { content: "📜 " + texts.recipes.no_recipes });
             }
 
             const embed = new EmbedBuilder()
                 .setColor("#FFA500")
-                .setTitle("📜 Crafting Recipes")
-                .setDescription(`Page ${page}/${totalPages || 1}`)
+                .setTitle("📜 " + texts.recipes.title)
+                .setDescription(texts.recipes.page + page + "/" + (totalPages || 1))
                 .setTimestamp();
 
             for (const recipe of recipes) {
@@ -179,17 +227,17 @@ export default {
             );
 
             if (!recipe[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ Recipe not found!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.recipe_not_found });
             }
 
             const r = recipe[0];
 
             if (character.level < r.required_level) {
-                return utils.safeInteractionRespond(interaction, { content: `❌ You need to be level ${r.required_level} to craft this!` });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.need_level + r.required_level + texts.errors.to_craft });
             }
 
             if (character.gold < r.gold_cost) {
-                return utils.safeInteractionRespond(interaction, { content: `❌ You need ${r.gold_cost} gold to craft this!` });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.need_gold + r.gold_cost + texts.errors.gold_to_craft });
             }
 
             const requiredMaterials = [
@@ -234,26 +282,26 @@ export default {
 
                 const embed = new EmbedBuilder()
                     .setColor("#2ECC71")
-                    .setTitle("✨ Crafting Success!")
-                    .setDescription(`**${character.name}** successfully crafted **${r.item_name}**!`)
+                    .setTitle("✨ " + texts.create.success_title)
+                    .setDescription(character.name + texts.create.successfully_crafted + r.item_name + "!")
                     .addFields(
-                        { name: "Item", value: `${r.item_name} (${r.rarity})`, inline: true },
-                        { name: "Success Rate", value: `${r.success_rate}%`, inline: true }
+                        { name: texts.create.item, value: `${r.item_name} (${r.rarity})`, inline: true },
+                        { name: texts.recipes.success_rate, value: `${r.success_rate}%`, inline: true }
                     )
-                    .setFooter({ text: "Check your inventory with /rpg inventory" })
+                    .setFooter({ text: texts.create.check_inventory })
                     .setTimestamp();
 
                 return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             } else {
                 const embed = new EmbedBuilder()
                     .setColor("#E74C3C")
-                    .setTitle("💥 Crafting Failed!")
-                    .setDescription(`**${character.name}** failed to craft **${r.item_name}**...`)
+                    .setTitle("💥 " + texts.create.failed_title)
+                    .setDescription(character.name + texts.create.failed_to_craft + r.item_name + "...")
                     .addFields(
-                        { name: "Materials Lost", value: "All materials were consumed in the attempt.", inline: false },
-                        { name: "Success Rate", value: `${r.success_rate}%`, inline: true }
+                        { name: texts.create.materials_lost, value: texts.create.all_consumed, inline: false },
+                        { name: texts.recipes.success_rate, value: `${r.success_rate}%`, inline: true }
                     )
-                    .setFooter({ text: "Better luck next time!" })
+                    .setFooter({ text: texts.create.better_luck })
                     .setTimestamp();
 
                 return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });

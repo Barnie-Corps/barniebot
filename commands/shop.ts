@@ -50,14 +50,57 @@ export default {
                 .setMaxValue(99))),
     category: "RPG",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
+        let texts = {
+            errors: {
+                not_logged_in: "You need to log in first! Use ",
+                no_character: "You need to create a character first! Use ",
+                no_items: "No items available in this category!",
+                invalid_item: "Invalid item ID! Use ",
+                to_see_items: " to see available items.",
+                not_enough_gold: "Not enough gold! You need ",
+                but_only_have: " gold but only have ",
+                item_not_found: "Item not found in your inventory!",
+                cannot_sell: "This item cannot be sold!",
+                is_bound: "This item is bound to you and cannot be sold!",
+                only_have: "You only have ",
+                of_item: " of this item!",
+                must_unequip: "You must unequip this item before selling it!"
+            },
+            browse: {
+                welcome: "Welcome, ",
+                your_gold: "Your Gold: ",
+                use_buy: "Use ",
+                to_purchase: " to purchase",
+                prices_vary: "Prices may vary based on market conditions"
+            },
+            buy: {
+                title: "Purchase Complete!",
+                you_bought: "You bought ",
+                total_cost: "Total Cost",
+                remaining_gold: "Remaining Gold",
+                thank_you: "Thank you for your purchase!"
+            },
+            sell: {
+                title: "Item Sold!",
+                you_sold: "You sold ",
+                gold_received: "Gold Received",
+                new_total: "New Total",
+                come_back: "Come back anytime!"
+            }
+        };
+
+        if (lang !== "en") {
+            texts = await utils.autoTranslate(texts, "en", lang);
+        }
+
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return utils.safeInteractionRespond(interaction, "❌ You need to log in first! Use `/login` to access your account.");
+            return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.not_logged_in + "`/login`.");
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return utils.safeInteractionRespond(interaction, "❌ You need to create a character first! Use `/rpg create` to begin your adventure.");
+            return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.no_character + "`/rpg create`.");
         }
 
         const sub = interaction.options.getSubcommand();
@@ -79,7 +122,7 @@ export default {
                 );
 
                 if (items.length === 0) {
-                    return utils.safeInteractionRespond(interaction, "❌ No items available in this category!");
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.no_items);
                 }
 
                 const rarityColors: any = {
@@ -121,8 +164,8 @@ export default {
                 const shopEmbed = new EmbedBuilder()
                     .setColor("#F39C12")
                     .setTitle(categoryNames[category])
-                    .setDescription(`**Welcome, ${character.name}!**\n💰 Your Gold: **${character.gold.toLocaleString()}**\n\nUse \`/shop buy <item_id>\` to purchase`)
-                    .setFooter({ text: "Prices may vary based on market conditions" })
+                    .setDescription(texts.browse.welcome + character.name + "!\n💰 " + texts.browse.your_gold + character.gold.toLocaleString() + "\n\n" + texts.browse.use_buy + "`/shop buy <item_id>`" + texts.browse.to_purchase)
+                    .setFooter({ text: texts.browse.prices_vary })
                     .setTimestamp();
 
                 for (const item of items) {
@@ -145,14 +188,14 @@ export default {
                 const shopItem: any = await db.query("SELECT * FROM rpg_items WHERE id = ?", [itemId]);
 
                 if (!shopItem[0]) {
-                    return utils.safeInteractionRespond(interaction, "❌ Invalid item ID! Use `/shop browse` to see available items.");
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.invalid_item + "`/shop browse`" + texts.errors.to_see_items);
                 }
 
                 const item = shopItem[0];
                 const totalCost = item.base_value * quantity;
                 
                 if (character.gold < totalCost) {
-                    return utils.safeInteractionRespond(interaction, `❌ Not enough gold! You need **${totalCost}** gold but only have **${character.gold}**!`);
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.not_enough_gold + totalCost + texts.errors.but_only_have + character.gold + "!");
                 }
 
                 const emojiMap: Record<string, string> = {
@@ -201,13 +244,13 @@ export default {
                 const emoji = emojiMap[item.name] || "📦";
                 const purchaseEmbed = new EmbedBuilder()
                     .setColor("#2ECC71")
-                    .setTitle("✅ Purchase Complete!")
-                    .setDescription(`You bought **${quantity}x ${emoji} ${item.name}**!`)
+                    .setTitle("✅ " + texts.buy.title)
+                    .setDescription(texts.buy.you_bought + quantity + "x " + emoji + " " + item.name + "!")
                     .addFields(
-                        { name: "Total Cost", value: `💰 ${totalCost.toLocaleString()} Gold`, inline: true },
-                        { name: "Remaining Gold", value: `💰 ${(character.gold - totalCost).toLocaleString()}`, inline: true }
+                        { name: texts.buy.total_cost, value: "💰 " + totalCost.toLocaleString() + " Gold", inline: true },
+                        { name: texts.buy.remaining_gold, value: "💰 " + (character.gold - totalCost).toLocaleString(), inline: true }
                     )
-                    .setFooter({ text: "Thank you for your purchase!" })
+                    .setFooter({ text: texts.buy.thank_you })
                     .setTimestamp();
 
                 return utils.safeInteractionRespond(interaction, { embeds: [purchaseEmbed], content: "" });
@@ -226,19 +269,19 @@ export default {
                 );
 
                 if (!invItem[0]) {
-                    return utils.safeInteractionRespond(interaction, "❌ Item not found in your inventory!");
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.item_not_found);
                 }
 
                 if (!invItem[0].tradeable) {
-                    return utils.safeInteractionRespond(interaction, "❌ This item cannot be sold!");
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.cannot_sell);
                 }
 
                 if (invItem[0].bound) {
-                    return utils.safeInteractionRespond(interaction, "❌ This item is bound to you and cannot be sold!");
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.is_bound);
                 }
 
                 if (invItem[0].quantity < quantity) {
-                    return utils.safeInteractionRespond(interaction, `❌ You only have ${invItem[0].quantity} of this item!`);
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.only_have + invItem[0].quantity + texts.errors.of_item);
                 }
 
                 const equipped: any = await db.query(
@@ -247,7 +290,7 @@ export default {
                 );
 
                 if (equipped[0]) {
-                    return utils.safeInteractionRespond(interaction, "❌ You must unequip this item before selling it!");
+                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.must_unequip);
                 }
 
                 const sellPrice = Math.floor(invItem[0].base_value * 0.5 * quantity);
@@ -262,13 +305,13 @@ export default {
 
                 const sellEmbed = new EmbedBuilder()
                     .setColor("#F39C12")
-                    .setTitle("💰 Item Sold!")
-                    .setDescription(`You sold **${quantity}x ${invItem[0].name}**!`)
+                    .setTitle("💰 " + texts.sell.title)
+                    .setDescription(texts.sell.you_sold + quantity + "x " + invItem[0].name + "!")
                     .addFields(
-                        { name: "Gold Received", value: `💰 ${sellPrice.toLocaleString()}`, inline: true },
-                        { name: "New Total", value: `💰 ${(character.gold + sellPrice).toLocaleString()}`, inline: true }
+                        { name: texts.sell.gold_received, value: "💰 " + sellPrice.toLocaleString(), inline: true },
+                        { name: texts.sell.new_total, value: "💰 " + (character.gold + sellPrice).toLocaleString(), inline: true }
                     )
-                    .setFooter({ text: "Come back anytime!" })
+                    .setFooter({ text: texts.sell.come_back })
                     .setTimestamp();
 
                 return utils.safeInteractionRespond(interaction, { embeds: [sellEmbed], content: "" });
