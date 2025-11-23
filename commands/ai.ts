@@ -73,7 +73,7 @@ export default {
                 started_chat: "The chat with the AI has started. You can say one of the following phrases to stop it:",
                 stopped_ai: "The chat with the AI has been disabled.",
                 can_take_time: "Remember that the AI's reply can take a bit of time. If you send multiple messages before getting a response or start flooding the chat, you'll lose access to this command indefinitely.",
-                ai_left: "The AI decided to end the conversation. Here's the reason it gave.",
+                ai_left: "The AI decided to end the conversation: ",
                 reasons: "Reasons",
                 no_reasons: "No reason provided.",
                 reasoning: "reasoning",
@@ -155,7 +155,7 @@ export default {
                     }
                     if (response.call) {
                         if ((response.call as FunctionCall).name === "end_conversation") {
-                            await message.reply(`${texts.common.ai_left}\n${(response.call as FunctionCall).args?.reason || "No reason provided."}`);
+                            await message.reply(`${texts.common.ai_left}${(response.call as FunctionCall).args?.reason || "No reason provided."}`);
                             collector?.stop();
                             return;
                         }
