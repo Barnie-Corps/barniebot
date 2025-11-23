@@ -1082,6 +1082,12 @@ const utils = {
       }
       throw err;
     }
-  }
+  },
+  isStaff(uid: string): Promise<boolean> {
+    return new Promise(async (resolve) => {
+      const rank = await utils.getUserStaffRank(uid);
+      resolve(rank !== null);
+    });
+  },
 };
 export default utils;
