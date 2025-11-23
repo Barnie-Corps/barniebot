@@ -207,6 +207,8 @@ export default {
                 let silenceTimeout: NodeJS.Timeout | null = null;
                 const SILENCE_THRESHOLD = 1500;
                 let listeningMessage: any = null;
+                const safeEdit = async (m: any, content: any) => { if (!m) return; try { await m.edit(content); } catch (e: any) { if (e?.code === 10008) return; throw e; } };
+                const safeDelete = async (m: any) => { if (!m) return; try { await m.delete(); } catch (e: any) { if (e?.code === 10008) return; throw e; } };
 
                 console.log(`[Voice AI] Started voice conversation for user ${interaction.user.id} in guild ${interaction.guild.id}`);
                 console.log(`[Voice AI] Connection state: ${connection.state.status}`);
@@ -239,7 +241,7 @@ export default {
                     audioChunks = [];
 
                     if (listeningMessage) {
-                        await listeningMessage.delete().catch(() => { });
+                        await safeDelete(listeningMessage);
                     }
                     listeningMessage = await interaction.followUp(texts.voice.listening);
 
@@ -290,9 +292,7 @@ export default {
                             }
 
                             let statusMessage = listeningMessage;
-                            if (statusMessage) {
-                                await statusMessage.edit(texts.voice.processing).catch(() => { });
-                            }
+                            if (statusMessage) await safeEdit(statusMessage, texts.voice.processing);
 
                             try {
                                 const audioBuffer = Buffer.concat(audioChunks as any);
@@ -302,10 +302,7 @@ export default {
 
                                 if (audioBuffer.length < 10000) {
                                     console.log(`[Voice AI] Audio too short (${audioBuffer.length} bytes), skipping`);
-                                    if (statusMessage) {
-                                        await statusMessage.delete().catch(() => { });
-                                        listeningMessage = null;
-                                    }
+                                    if (statusMessage) { await safeDelete(statusMessage); listeningMessage = null; }
                                     isProcessing = false;
                                     return;
                                 }
@@ -337,10 +334,7 @@ export default {
 
                                 if (!transcript || transcript.trim().length === 0) {
                                     console.log(`[Voice AI] Empty transcript, skipping`);
-                                    if (statusMessage) {
-                                        await statusMessage.delete().catch(() => { });
-                                        listeningMessage = null;
-                                    }
+                                    if (statusMessage) { await safeDelete(statusMessage); listeningMessage = null; }
                                     // Ready for next input -> undeafen
                                     try {
                                         const me = interaction.guild?.members.me;
@@ -356,15 +350,11 @@ export default {
                                 }
 
                                 // Show what user said (without placeholder, just append text)
-                                if (statusMessage) {
-                                    await statusMessage.edit(`🎤 ${transcript}`).catch(() => { });
-                                }
+                                if (statusMessage) await safeEdit(statusMessage, `🎤 ${transcript}`);
 
                                 if (["stop", "end conversation", "goodbye"].some(word => transcript.toLowerCase().includes(word))) {
                                     console.log(`[Voice AI] User requested to end conversation`);
-                                    if (statusMessage) {
-                                        await statusMessage.edit(texts.voice.ending).catch(() => { });
-                                    }
+                                    if (statusMessage) await safeEdit(statusMessage, texts.voice.ending);
                                     connection.destroy();
                                     ai.ClearChat(interaction.user.id);
                                     return;
@@ -378,9 +368,7 @@ export default {
 
                                 if (!safety.safe) {
                                     console.log(`[Voice AI] Safety check failed, ending conversation`);
-                                    if (statusMessage) {
-                                        await statusMessage.edit(`${texts.errors.unsafe_message}`).catch(() => { });
-                                    }
+                                    if (statusMessage) await safeEdit(statusMessage, `${texts.errors.unsafe_message}`);
                                     connection.destroy();
                                     ai.ClearChat(interaction.user.id);
                                     // Ended -> undeafen
@@ -396,9 +384,7 @@ export default {
                                     return;
                                 }
 
-                                if (statusMessage) {
-                                    await statusMessage.edit(texts.voice.thinking).catch(() => { });
-                                }
+                                if (statusMessage) await safeEdit(statusMessage, texts.voice.thinking);
                                 console.log(`[Voice AI] Getting AI response...`);
                                 const response = await ai.GetVoiceResponse(interaction.user.id, transcript);
                                 console.log(`[Voice AI] AI response received: ${response.text.substring(0, 100)}... (call: ${!!response.call})`);
@@ -414,9 +400,7 @@ export default {
 
                                 if (response.call && (response.call as FunctionCall).name === "end_conversation") {
                                     console.log(`[Voice AI] AI requested to end conversation`);
-                                    if (statusMessage) {
-                                        await statusMessage.edit(`${texts.common.ai_left}\n${(response.call as FunctionCall).args?.reason || texts.common.no_reasons}`).catch(() => { });
-                                    }
+                                    if (statusMessage) await safeEdit(statusMessage, `${texts.common.ai_left}\n${(response.call as FunctionCall).args?.reason || texts.common.no_reasons}`);
                                     connection.destroy();
                                     ai.ClearChat(interaction.user.id);
                                     return;
@@ -426,9 +410,7 @@ export default {
 
                                 if (response.call) {
                                     console.log(`[Voice AI] Executing function: ${(response.call as FunctionCall).name}`);
-                                    if (statusMessage) {
-                                        await statusMessage.edit(`⚙️ Executing ${(response.call as FunctionCall).name}...`).catch(() => { });
-                                    }
+                                    if (statusMessage) await safeEdit(statusMessage, `⚙️ Executing ${(response.call as FunctionCall).name}...`);
 
                                     // Execute function - it will return the AI's response after seeing the function result
                                     const functionReply = await ai.ExecuteFunctionVoice(interaction.user.id, (response.call as FunctionCall).name!, (response.call as FunctionCall).args, null as any);
@@ -447,13 +429,9 @@ export default {
                                 }
 
                                 // Show what AI said (without placeholder, just append text)
-                                if (statusMessage) {
-                                    await statusMessage.edit(`🤖 ${finalText.substring(0, 1950)}`).catch(() => { });
-                                }
+                                if (statusMessage) await safeEdit(statusMessage, `🤖 ${finalText.substring(0, 1950)}`);
 
-                                if (statusMessage) {
-                                    await statusMessage.edit(texts.voice.speaking).catch(() => { });
-                                }
+                                if (statusMessage) await safeEdit(statusMessage, texts.voice.speaking);
                                 console.log(`[Voice AI] Generating TTS for: "${finalText.substring(0, 50)}..."`);
                                 const ttsAudio = await NVIDIAModels.GetTextToSpeech(
                                     finalText,
@@ -479,16 +457,13 @@ export default {
                                 const resource = createAudioResource(tempFile);
                                 player.play(resource);
 
-                                player.once(AudioPlayerStatus.Idle, () => {
+                                player.once(AudioPlayerStatus.Idle, async () => {
                                     console.log(`[Voice AI] Finished playing audio`);
                                     if (fs.existsSync(tempFile)) {
                                         fs.unlinkSync(tempFile);
                                         console.log(`[Voice AI] Deleted temp file: ${tempFile}`);
                                     }
-                                    if (statusMessage) {
-                                        statusMessage.delete().catch(() => { });
-                                        listeningMessage = null;
-                                    }
+                                    if (statusMessage) { await safeDelete(statusMessage); listeningMessage = null; }
                                     isProcessing = false;
                                     // Ready to listen again -> undeafen
                                     (async () => {
@@ -508,9 +483,7 @@ export default {
                             } catch (error) {
                                 console.error("[Voice AI] Error in processAudio:", error);
                                 console.error("[Voice AI] Error stack:", (error as Error).stack);
-                                if (statusMessage) {
-                                    await statusMessage.edit(texts.errors.voice_processing_error).catch(() => { });
-                                }
+                                if (statusMessage) await safeEdit(statusMessage, texts.errors.voice_processing_error);
                                 // Error path -> attempt to undeafen so we can listen again
                                 try {
                                     const me = interaction.guild?.members.me;
