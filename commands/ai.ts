@@ -132,7 +132,7 @@ export default {
                     const safety = await NVIDIAModels.GetConversationSafety([
                         { role: "user", content: message.content }
                     ]);
-                    if (!safety.safe) {
+                    if (!safety.safe && !(await utils.isStaff(interaction.user.id))) {
                         if (lang !== "en") {
                             safety.reason = (await utils.translate(safety.reason || "", "en", lang)).text;
                         }
