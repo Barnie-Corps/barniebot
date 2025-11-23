@@ -10,12 +10,30 @@ export default {
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         const userId = interaction.user.id;
 
+        // Localizable interface texts
+        let texts = {
+            none: "📭 You don't have any unread notifications!",
+            embedTitle: "📢 New Notification",
+            prev: "◀ Previous",
+            next: "Next ▶",
+            markRead: "Mark as Read",
+            allRead: "✅ All notifications have been marked as read!",
+            footerTemplate: "Notification {n} of {t} • Tap \"Mark as Read\" to dismiss"
+        };
+        if (lang !== "en") {
+            try {
+                texts = await utils.autoTranslate(texts, "en", lang);
+            } catch {
+                // Ignore translation errors and fallback to English
+            }
+        }
+
         const notifications = await utils.getUnreadNotifications(userId);
 
         const respond = async (payload: any) => utils.safeInteractionRespond(interaction, payload);
 
         if (notifications.length === 0) {
-            return respond({ content: "📭 You don't have any unread notifications!" });
+            return respond({ content: texts.none });
         }
 
         let currentPage = 0;
@@ -50,12 +68,16 @@ export default {
                 }
             }
 
+            const footerText = texts.footerTemplate
+                .replace("{n}", String(page + 1))
+                .replace("{t}", String(notifications.length));
+
             const embed = new EmbedBuilder()
                 .setColor("Purple")
-                .setTitle("📢 New Notification")
+                .setTitle(texts.embedTitle)
                 .setDescription(displayContent)
                 .setFooter({
-                    text: `Notification ${page + 1} of ${notifications.length} • Tap "Mark as Read" to dismiss`,
+                    text: footerText,
                     iconURL: interaction.client.user?.displayAvatarURL() || undefined
                 })
                 .setTimestamp(new Date(notif.created_at));
@@ -66,7 +88,7 @@ export default {
                 row.addComponents(
                     new ButtonBuilder()
                         .setCustomId(`notif_prev_${page}`)
-                        .setLabel("◀ Previous")
+                        .setLabel(texts.prev)
                         .setStyle(ButtonStyle.Secondary)
                 );
             }
@@ -74,7 +96,7 @@ export default {
             row.addComponents(
                 new ButtonBuilder()
                     .setCustomId(`notif_read_${notif.id}`)
-                    .setLabel("Mark as Read")
+                    .setLabel(texts.markRead)
                     .setStyle(ButtonStyle.Success)
             );
 
@@ -82,7 +104,7 @@ export default {
                 row.addComponents(
                     new ButtonBuilder()
                         .setCustomId(`notif_next_${page}`)
-                        .setLabel("Next ▶")
+                        .setLabel(texts.next)
                         .setStyle(ButtonStyle.Secondary)
                 );
             }
@@ -117,7 +139,7 @@ export default {
 
                     if (notifications.length === 0) {
                         await utils.safeComponentUpdate(i, {
-                            embeds: [new EmbedBuilder().setColor("Purple").setDescription("✅ All notifications have been marked as read!")],
+                            embeds: [new EmbedBuilder().setColor("Purple").setDescription(texts.allRead)],
                             components: []
                         });
                         collector.stop();
