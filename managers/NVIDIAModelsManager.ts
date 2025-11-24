@@ -3,6 +3,8 @@ import type { ChatCompletionMessageParam } from "openai/resources/chat/completio
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import * as path from "path";
+import { promises as fs } from "fs";
+import sharp from "sharp";
 
 export default class NVIDIAModelsManager {
     private openai: OpenAi;
@@ -556,4 +558,68 @@ enum AudioEncoding {
             { name: "Magpie-Multilingual.ZH-CN.Louise", languageCode: "zh-CN", description: "Chinese - Female" }
         ];
     }
+    public GetVisualDescription = async (imageUrl: string, messageId: string, language: string, timeoutMs: number = 30000): Promise<string> => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
+        try {
+            const workspaceDir = path.join(__dirname, "..", "ai_workspace");
+            await fs.mkdir(workspaceDir, { recursive: true });
+
+            const imgResp = await fetch(imageUrl, { signal: controller.signal as any });
+            if (!imgResp.ok) {
+                clearTimeout(timer);
+                return "";
+            }
+            const arrayBuffer = await imgResp.arrayBuffer();
+            const originalBuffer = Buffer.from(arrayBuffer);
+
+            // Resize image to fit within token limits (max 1280px, PNG for quality)
+            // Higher resolution and PNG format for better text/UI recognition
+            const resizedBuffer = await sharp(originalBuffer)
+                .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
+                .png({ quality: 100, compressionLevel: 4 })
+                .toBuffer();
+
+            const b64 = resizedBuffer.toString("base64");
+            const mime = "image/png"; // PNG for better quality
+            console.log("[Vision] Resized image base64 length:", b64.length, "chars (~", Math.round(b64.length / 4), "tokens)");
+            const payload = {
+                model: "meta/llama-4-maverick-17b-128e-instruct",
+                messages: [{ role: "user", content: `Describe this image in detail, including any text, UI elements, games, apps, or websites shown (use this language: ${language}): <img src=\"data:${mime};base64,${b64}\" />` }],
+                max_tokens: 1024,
+                temperature: 0.7,
+                top_p: 0.9,
+                frequency_penalty: 0.0,
+                presence_penalty: 0.0,
+                stream: false
+            };
+            const visionResp = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${this.apiKey}`,
+                    Accept: "application/json",
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload),
+                signal: controller.signal as any
+            });
+            console.log("[Vision] Response status:", visionResp.status, visionResp.statusText);
+            clearTimeout(timer);
+            
+            if (!visionResp.ok) {
+                const errorText = await visionResp.text().catch(() => "");
+                console.error("[Vision] API error:", visionResp.status, errorText);
+                return "";
+            }
+            
+            const json: any = await visionResp.json();
+            const result = String(json?.choices?.[0]?.message?.content || "").trim();
+            console.log("[Vision] Result:", result.length, "chars -", result.substring(0, 100));
+            return result || "No visual details detected.";
+        } catch (err) {
+            clearTimeout(timer);
+            console.error("[Vision] Exception:", err);
+            return "";
+        }
+    };
 };

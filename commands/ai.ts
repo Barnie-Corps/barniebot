@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, TextChannel, VoiceChannel, GuildMember, AttachmentBuilder } from "discord.js";
+import { ChatInputCommandInteraction, SlashCommandBuilder, TextChannel, VoiceChannel, GuildMember, AttachmentBuilder, Message } from "discord.js";
 import {
     joinVoiceChannel,
     createAudioPlayer,
@@ -65,7 +65,8 @@ export default {
                 not_in_voice: "You must be in a voice channel to use this command.",
                 no_male_voice: "No male voice available for language: {lang}. Supported languages: en-US, es-US, fr-FR, de-DE, zh-CN",
                 voice_processing_error: "Sorry, I encountered an error processing your voice.",
-                temporary_unavailable: "Temporary unavailable due to high demand. Please use the chat command."
+                temporary_unavailable: "Temporary unavailable due to high demand. Please use the chat command.",
+                max_attachments: "You can only send up to 1 attachment per message."
             },
             common: {
                 question: "Your question was:",
@@ -76,7 +77,8 @@ export default {
                 ai_left: "The AI decided to end the conversation: ",
                 reasons: "Reasons",
                 no_reasons: "No reason provided.",
-                reasoning: "reasoning",
+                reasoning: "Reasoning",
+                analyzing_image: "Analyzing the image you provided...",
             },
             voice: {
                 joining: "Joining voice channel and starting AI conversation...\n\nSay \"stop\" or \"end conversation\" to stop.\nVoice:",
@@ -122,17 +124,35 @@ export default {
                     filter: (m: { author: { id: string } }) => m.author.id === interaction.user.id
                 });
                 await reply(`${texts.common.started_chat} \`stop ai, ai stop, stop chat, end ai\`\n${texts.common.can_take_time}`);
-                collector?.on("collect", async (message: any): Promise<any> => {
+                collector?.on("collect", async (message: Message): Promise<any> => {
                     await (interaction.channel as TextChannel).sendTyping?.();
                     if (["stop ai", "ai stop", "stop chat", "end ai"].some(stop => message.content.toLowerCase().includes(stop))) {
                         await reply(texts.common.stopped_ai);
                         collector?.stop();
                         return;
                     }
+                    
+                    let imageDescription = "";
+                    if (message.attachments.size > 0) {
+                        if (message.attachments.size > 1) return await message.reply(texts.errors.max_attachments);
+                        const attachment = message.attachments.first();
+                        if (attachment) {
+                            const analyzingMsg = await message.reply(texts.common.analyzing_image);
+                            try {
+                                imageDescription = await NVIDIAModels.GetVisualDescription(attachment.url, message.id, lang);
+                                await analyzingMsg.delete().catch(() => {});
+                            } catch {
+                                await analyzingMsg.delete().catch(() => {});
+                            }
+                        }
+                    }
+                    
+                    const userContent = message.attachments.size > 0 ? `<image>${imageDescription || 'No visual details detected.'}</image>\n\n${message.content}` : message.content;
+                    
                     const safety = await NVIDIAModels.GetConversationSafety([
-                        { role: "user", content: message.content }
+                        { role: "user", content: userContent }
                     ]);
-                    if (!safety.safe && !(await utils.isStaff(interaction.user.id))) {
+                    if (!safety.safe) {
                         if (lang !== "en") {
                             safety.reason = (await utils.translate(safety.reason || "", "en", lang)).text;
                         }
@@ -141,7 +161,7 @@ export default {
                         collector?.stop();
                         return;
                     }
-                    const response = await ai.GetResponse(interaction.user.id, message.content);
+                    const response = await ai.GetResponse(interaction.user.id, userContent);
                     if (response.text.length < 1 && !response.call) {
                         console.log("No response from AI", response);
                         return await message.reply(texts.errors.no_response);
@@ -155,7 +175,7 @@ export default {
                     }
                     if (response.call) {
                         if ((response.call as FunctionCall).name === "end_conversation") {
-                            await message.reply(`${texts.common.ai_left}${(response.call as FunctionCall).args?.reason || "No reason provided."}`);
+                            await message.reply(`${texts.common.ai_left} ${(response.call as FunctionCall).args?.reason || "No reason provided."}`);
                             collector?.stop();
                             return;
                         }
