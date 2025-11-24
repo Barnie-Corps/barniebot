@@ -412,7 +412,6 @@ export default {
                                     console.log(`[Voice AI] Executing function: ${(response.call as FunctionCall).name}`);
                                     if (statusMessage) await safeEdit(statusMessage, `⚙️ Executing ${(response.call as FunctionCall).name}...`);
 
-                                    // Execute function - it will return the AI's response after seeing the function result
                                     const functionReply = await ai.ExecuteFunctionVoice(interaction.user.id, (response.call as FunctionCall).name!, (response.call as FunctionCall).args, null as any);
                                     console.log(`[Voice AI] Function executed, got reply: ${functionReply?.substring(0, 100)}...`);
                                     finalText = functionReply || response.text;
@@ -428,7 +427,6 @@ export default {
                                     return;
                                 }
 
-                                // Show what AI said (without placeholder, just append text)
                                 if (statusMessage) await safeEdit(statusMessage, `🤖 ${finalText.substring(0, 1950)}`);
 
                                 if (statusMessage) await safeEdit(statusMessage, texts.voice.speaking);
