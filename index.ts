@@ -183,14 +183,36 @@ client.on("messageCreate", async (message): Promise<any> => {
     const [command, ...args] = message.content.slice(prefix.length).trim().split(" ");
     switch (command) {
         case "shutdown": {
-            await manager.announce("Hey! I'm shutting down in just a second. Sorry for the inconvenience.", "en");
+            const shutdownEmbed = new EmbedBuilder()
+                .setColor("#E74C3C")
+                .setTitle("🔴 System Shutdown Initiated")
+                .setDescription("```ansi\n\u001b[1;31m[CRITICAL]\u001b[0m Graceful shutdown sequence started...\n```")
+                .addFields(
+                    { name: "📡 Status", value: "Broadcasting shutdown notice...", inline: true },
+                    { name: "⏱️ ETA", value: "< 3 seconds", inline: true }
+                )
+                .setFooter({ text: `Initiated by ${message.author.username}` })
+                .setTimestamp();
+            await message.reply({ embeds: [shutdownEmbed] });
+            await manager.announce("⚠️ System going offline for maintenance. Be back soon!", "en");
             fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=0", "SAFELY_SHUTTED_DOWN=1"));
-            client.destroy();
-            process.exit(0);
-        } // Shutdown the bot
+            setTimeout(() => { client.destroy(); process.exit(0); }, 2000);
+            break;
+        }
         case "reboot": {
-            await manager.announce("🔄 Rebooting now! I'll be back in a few seconds.", "en");
-            // Update .env to mark safe shutdown + reboot intent
+            const rebootEmbed = new EmbedBuilder()
+                .setColor("#F39C12")
+                .setTitle("🔄 System Reboot Sequence")
+                .setDescription("```ansi\n\u001b[1;33m[SYSTEM]\u001b[0m Initiating controlled restart...\n```")
+                .addFields(
+                    { name: "📡 Phase 1", value: "✅ Broadcasting notice", inline: true },
+                    { name: "📡 Phase 2", value: "⏳ Saving state", inline: true },
+                    { name: "📡 Phase 3", value: "⏳ Restart", inline: true }
+                )
+                .setFooter({ text: `Initiated by ${message.author.username} • ProcessManager will auto-restart` })
+                .setTimestamp();
+            await message.reply({ embeds: [rebootEmbed] });
+            await manager.announce("🔄 Quick restart incoming! Back in ~10 seconds.", "en");
             try {
                 const envContents = fs.readFileSync('./.env').toString();
                 let newEnv = envContents.includes("SAFELY_SHUTTED_DOWN=0") ? envContents.replace("SAFELY_SHUTTED_DOWN=0", "SAFELY_SHUTTED_DOWN=1") : envContents;
@@ -201,213 +223,398 @@ client.on("messageCreate", async (message): Promise<any> => {
             } catch (e) {
                 Log.warn("Failed to set reboot flag", { component: "Reboot", error: (e as any)?.message });
             }
-            await message.reply("✅ Reboot initiated. Process Manager will restart the bot automatically.");
-
-            // Give time for the message to send
-            setTimeout(() => {
-                client.destroy();
-                process.exit(1); // Exit with code 1 to trigger ProcessManager restart
-            }, 1000);
+            setTimeout(() => { client.destroy(); process.exit(1); }, 1500);
             break;
-        } // Reboot the bot (requires ProcessManager)
+        }
         case "status": {
             const uptime = process.uptime();
-            const hours = Math.floor(uptime / 3600);
+            const days = Math.floor(uptime / 86400);
+            const hours = Math.floor((uptime % 86400) / 3600);
             const minutes = Math.floor((uptime % 3600) / 60);
             const seconds = Math.floor(uptime % 60);
-
-            await message.reply(`📊 **Bot Status**\n` +
-                `Uptime: ${hours}h ${minutes}m ${seconds}s\n` +
-                `Guilds: ${client.guilds.cache.size}\n` +
-                `Users: ${client.users.cache.size}\n` +
-                `Memory: ${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2)} MB\n` +
-                `Process ID: ${process.pid}`);
+            const mem = process.memoryUsage();
+            const cpuUsage = process.cpuUsage();
+            const totalMem = (mem.heapTotal / 1024 / 1024).toFixed(1);
+            const usedMem = (mem.heapUsed / 1024 / 1024).toFixed(1);
+            const memPercent = ((mem.heapUsed / mem.heapTotal) * 100).toFixed(1);
+            const memBar = "█".repeat(Math.floor(Number(memPercent) / 10)) + "░".repeat(10 - Math.floor(Number(memPercent) / 10));
+            const statusEmbed = new EmbedBuilder()
+                .setColor("#2ECC71")
+                .setTitle("📊 System Status Dashboard")
+                .setDescription("```ansi\n\u001b[1;32m[ONLINE]\u001b[0m All systems operational\n```")
+                .addFields(
+                    { name: "⏱️ Uptime", value: `\`${days}d ${hours}h ${minutes}m ${seconds}s\``, inline: true },
+                    { name: "🏰 Guilds", value: `\`${client.guilds.cache.size.toLocaleString()}\``, inline: true },
+                    { name: "👥 Users", value: `\`${client.users.cache.size.toLocaleString()}\``, inline: true },
+                    { name: "💾 Memory", value: `\`[${memBar}] ${memPercent}%\`\n${usedMem}MB / ${totalMem}MB`, inline: false },
+                    { name: "🔧 Process", value: `PID: \`${process.pid}\` | Node: \`${process.version}\``, inline: true },
+                    { name: "📦 Commands", value: `\`${data.bot.commands.size}\` loaded`, inline: true }
+                )
+                .setFooter({ text: `Last restart: ${new Date(Date.now() - uptime * 1000).toLocaleString()}` })
+                .setTimestamp();
+            await message.reply({ embeds: [statusEmbed] });
             break;
-        } // Show bot status
+        }
         case "announce": {
+            if (args.length < 2) {
+                const usageEmbed = new EmbedBuilder()
+                    .setColor("#E74C3C")
+                    .setTitle("📢 Announce Command")
+                    .setDescription("```\nb.announce <language> <message>\n```")
+                    .addFields({ name: "Example", value: "`b.announce en Hello everyone!`" });
+                return await message.reply({ embeds: [usageEmbed] });
+            }
             const [language, ...msg] = args;
+            const announceEmbed = new EmbedBuilder()
+                .setColor("#3498DB")
+                .setTitle("📢 Broadcasting Announcement")
+                .addFields(
+                    { name: "🌐 Language", value: `\`${language}\``, inline: true },
+                    { name: "📝 Message", value: msg.join(" ").substring(0, 100) + (msg.join(" ").length > 100 ? "..." : ""), inline: false }
+                )
+                .setFooter({ text: `Sent by ${message.author.username}` })
+                .setTimestamp();
+            await message.reply({ embeds: [announceEmbed] });
             await manager.announce(msg.join(" "), language, message.attachments);
             break;
-        } // Announce a message to all users through the global chat
+        }
         case "messages": {
             const [id] = args;
+            if (!id) {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Please provide a user ID.")] });
+            }
+            const loadMsg = await message.reply({ embeds: [new EmbedBuilder().setColor("#F39C12").setDescription("🔍 Fetching message history...")] });
             const msg: any = await db.query("SELECT * FROM global_messages WHERE uid = ?", [id]);
-            if (!msg[0]) return await message.reply("Not found.");
+            if (!msg[0]) return await loadMsg.edit({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ No messages found for this user.")] });
             const user = await client.users.fetch(msg[0].uid);
-            fs.writeFileSync(`./messages_report_${user.id}.txt`, `Messages report for user ${user.username} (${user.id}) - ${msg.length} messages\n\n${msg.map((m: any) => `[${m.id}] ${user.username}: ${utils.decryptWithAES(data.bot.encryption_key, m.content)}`).join(`\n`)}`);
-            await message.reply({ files: [`./messages_report_${user.id}.txt`] });
+            const report = `╔══════════════════════════════════════════════════════════════╗
+║                    GLOBAL CHAT MESSAGE REPORT                  ║
+╠══════════════════════════════════════════════════════════════╣
+║ User: ${user.username.padEnd(54)}║
+║ ID: ${user.id.padEnd(56)}║
+║ Total Messages: ${String(msg.length).padEnd(44)}║
+║ Generated: ${new Date().toISOString().padEnd(49)}║
+╚══════════════════════════════════════════════════════════════╝
+
+${"─".repeat(64)}
+${msg.map((m: any, i: number) => `[${String(i + 1).padStart(4, "0")}] ${new Date(m.created_at || Date.now()).toISOString()}\n       ${utils.decryptWithAES(data.bot.encryption_key, m.content)}`).join(`\n${"─".repeat(64)}\n`)}
+${"─".repeat(64)}`;
+            fs.writeFileSync(`./messages_report_${user.id}.txt`, report);
+            const reportEmbed = new EmbedBuilder()
+                .setColor("#2ECC71")
+                .setTitle("📋 Message Report Generated")
+                .addFields(
+                    { name: "👤 User", value: `${user.username} (\`${user.id}\`)`, inline: true },
+                    { name: "📊 Messages", value: `\`${msg.length}\``, inline: true }
+                )
+                .setTimestamp();
+            await loadMsg.edit({ embeds: [reportEmbed], files: [`./messages_report_${user.id}.txt`] });
             fs.unlinkSync(`./messages_report_${user.id}.txt`);
             break;
-        } // Get global chat messages report for a user by ID
+        }
         case "invite": {
             const [sid] = args;
+            if (!sid) return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Please provide a guild ID.")] });
             const server = client.guilds.cache.get(sid);
-            if (!server) return message.reply("Not found.");
+            if (!server) return message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Guild not found in cache.")] });
             const channel = server.channels.cache.find(c => c.isTextBased());
-            await message.reply({ content: (await channel?.guild.invites.create(channel as TextChannel, { maxAge: 0, maxUses: 0 }) as any).url });
+            if (!channel) return message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ No text channel found.")] });
+            const invite = await channel.guild.invites.create(channel as TextChannel, { maxAge: 0, maxUses: 1 });
+            const inviteEmbed = new EmbedBuilder()
+                .setColor("#9B59B6")
+                .setTitle("🔗 Invite Generated")
+                .addFields(
+                    { name: "🏰 Guild", value: server.name, inline: true },
+                    { name: "👥 Members", value: `\`${server.memberCount}\``, inline: true },
+                    { name: "🔗 Link", value: `||${invite.url}||`, inline: false }
+                )
+                .setThumbnail(server.iconURL({ size: 128 }))
+                .setFooter({ text: "Single-use invite • Never expires" })
+                .setTimestamp();
+            await message.reply({ embeds: [inviteEmbed] });
             break;
-        } // Get an invite for a server (first text channel found)
+        }
         case "guilds": {
-            fs.writeFileSync("./guilds.txt", client.guilds.cache.map(g => `${g.name} | ${g.memberCount} | ${g.id}`).join("\n"));
-            await message.reply({ files: ["./guilds.txt"] });
+            const sorted = [...client.guilds.cache.values()].sort((a, b) => b.memberCount - a.memberCount);
+            const totalMembers = sorted.reduce((acc, g) => acc + g.memberCount, 0);
+            const report = `╔══════════════════════════════════════════════════════════════════════════════╗
+║                           GUILD REGISTRY REPORT                              ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║ Total Guilds: ${String(sorted.length).padEnd(62)}║
+║ Total Members: ${String(totalMembers.toLocaleString()).padEnd(61)}║
+║ Generated: ${new Date().toISOString().padEnd(65)}║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+${"═".repeat(78)}
+${"#".padEnd(5)} ${"Guild Name".padEnd(35)} ${"Members".padEnd(10)} ${"ID".padEnd(20)}
+${"═".repeat(78)}
+${sorted.map((g, i) => `${String(i + 1).padEnd(5)} ${g.name.substring(0, 33).padEnd(35)} ${String(g.memberCount).padEnd(10)} ${g.id}`).join("\n")}
+${"═".repeat(78)}`;
+            fs.writeFileSync("./guilds.txt", report);
+            const guildsEmbed = new EmbedBuilder()
+                .setColor("#3498DB")
+                .setTitle("🏰 Guild Registry")
+                .addFields(
+                    { name: "📊 Total Guilds", value: `\`${sorted.length}\``, inline: true },
+                    { name: "👥 Total Members", value: `\`${totalMembers.toLocaleString()}\``, inline: true },
+                    { name: "🏆 Largest", value: sorted[0] ? `${sorted[0].name} (${sorted[0].memberCount})` : "N/A", inline: true }
+                )
+                .setTimestamp();
+            await message.reply({ embeds: [guildsEmbed], files: ["./guilds.txt"] });
             fs.unlinkSync('./guilds.txt');
             break;
-        } // Get a list of guilds the bot is in (name, member count, id)
+        }
         case "eval": {
-            // Check if the user is an owner
-            if (!data.bot.owners.includes(message.author.id)) return message.reply('no');
-
+            if (!data.bot.owners.includes(message.author.id)) return message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("🔒 Access Denied")] });
             const targetCode = args.join(' ');
-            if (!targetCode) return message.reply('You must provide code to evaluate.');
-
+            if (!targetCode) return message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ No code provided.\n```\nb.eval <code>\n```")] });
             try {
                 const start = Date.now();
                 let evalued = eval(targetCode);
-
-                // Handle promises
-                if (evalued instanceof Promise) {
-                    evalued = await evalued;
-                }
-
+                if (evalued instanceof Promise) evalued = await evalued;
                 const done = Date.now() - start;
                 const outputType = typeof evalued;
-                const output = inspect(evalued, { depth: 1, maxArrayLength: 100 });
-
-                // Create response embed
+                const output = inspect(evalued, { depth: 2, maxArrayLength: 50 });
                 const embed = new EmbedBuilder()
-                    .setColor("Green")
-                    .setTitle('Code Evaluated Successfully')
+                    .setColor("#2ECC71")
+                    .setTitle("✅ Code Executed Successfully")
+                    .setDescription("```ansi\n\u001b[1;32m[SUCCESS]\u001b[0m Evaluation complete\n```")
                     .addFields(
-                        {
-                            name: "Type",
-                            value: `\`\`\`prolog\n${outputType}\`\`\``,
-                            inline: true
-                        },
-                        {
-                            name: "Time",
-                            value: `\`\`\`yaml\n${done}ms\`\`\``,
-                            inline: true
-                        },
-                        {
-                            name: "Input",
-                            value: `\`\`\`js\n${targetCode.length > 1000 ? `${targetCode.substring(0, 1000)}...` : targetCode}\`\`\``
-                        },
-                        {
-                            name: "Output",
-                            value: `\`\`\`js\n${output.length > 1900 ? `${output.substring(0, 1900)}...` : output}\`\`\``
-                        }
-                    );
-
+                        { name: "📊 Type", value: `\`\`\`ts\n${outputType}\`\`\``, inline: true },
+                        { name: "⏱️ Execution", value: `\`\`\`yaml\n${done}ms\`\`\``, inline: true },
+                        { name: "📥 Input", value: `\`\`\`js\n${targetCode.length > 900 ? `${targetCode.substring(0, 900)}...` : targetCode}\`\`\`` },
+                        { name: "📤 Output", value: `\`\`\`js\n${output.length > 900 ? `${output.substring(0, 900)}...` : output}\`\`\`` }
+                    )
+                    .setFooter({ text: `Executed by ${message.author.username}` })
+                    .setTimestamp();
                 await message.reply({ embeds: [embed] });
             } catch (error: any) {
                 const errorMessage = error?.stack || error?.message || String(error);
-
                 const errorEmbed = new EmbedBuilder()
-                    .setColor('Red')
-                    .setTitle('Evaluation Error')
+                    .setColor("#E74C3C")
+                    .setTitle("❌ Execution Failed")
+                    .setDescription("```ansi\n\u001b[1;31m[ERROR]\u001b[0m Runtime exception caught\n```")
                     .addFields(
-                        {
-                            name: "Input",
-                            value: `\`\`\`js\n${targetCode.length > 1000 ? `${targetCode.substring(0, 1000)}...` : targetCode}\`\`\``
-                        },
-                        {
-                            name: "Error",
-                            value: `\`\`\`js\n${errorMessage.length > 1900 ? `${errorMessage.substring(0, 1900)}...` : errorMessage}\`\`\``
-                        }
-                    );
-
+                        { name: "📥 Input", value: `\`\`\`js\n${targetCode.length > 900 ? `${targetCode.substring(0, 900)}...` : targetCode}\`\`\`` },
+                        { name: "💥 Error", value: `\`\`\`js\n${errorMessage.length > 900 ? `${errorMessage.substring(0, 900)}...` : errorMessage}\`\`\`` }
+                    )
+                    .setFooter({ text: `Failed for ${message.author.username}` })
+                    .setTimestamp();
                 await message.reply({ embeds: [errorEmbed] });
             }
             break;
         }
-        case "active_guilds": {
-            const guilds = [...(function () {
-                let guilds = [];
-                for (const guildId of activeGuilds.keys()) {
-                    guilds.push({ id: guildId, value: activeGuilds.get(guildId), name: client.guilds.cache.get(guildId)?.name });
-                }
-                return guilds;
-            })()]; // Get active guilds and their message count (value)
-            const sliced = guilds.slice(0, 19); // Slice the array to get the first 20 guilds
-            if (sliced.length < 1) return await message.reply("No active guilds.");
-            await message.reply("```\n" + `${guilds.length} Guilds. Showing ${sliced.length} (Max 20)\n\n${sliced.map(g => `${g.name} (${g.id}) -> ${g.value}`).join("\n")}` + "\n```"); // Reply with the active guilds
-            break;
-        } // Get active guilds
-        case "add_vip": {
-            if (!args[0]) return await message.reply("You must provide the user ID.");
-            // Get the arguments from the message content
-            const [uid, newTime, timeType] = args;
-            // Check if the arguments are missing and reply with a message if they are missing
-            if ([uid, newTime, timeType].some(v => !v)) return await message.reply("Missing arguments. Required arguments: ID TIME TIME_TYPE");
-            const multiply = {
-                seconds: 1,
-                minutes: 60,
-                hours: 3600,
-                days: 86400,
-            } // Time types and their multipliers
-            if (isNaN(parseInt(uid))) return await message.reply("Invalid ID.");
-            let validUser = false;
+        case "sql": {
+            if (!data.bot.owners.includes(message.author.id)) return message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("🔒 Access Denied")] });
+            const query = args.join(' ');
+            if (!query) return message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ No query provided.\n```\nb.sql <query>\n```")] });
             try {
-                // Check if the user exists and if it does, set validUser to true
-                await client.users.fetch(uid);
-                validUser = true;
+                const start = Date.now();
+                const result: any = await db.query(query);
+                const done = Date.now() - start;
+                const output = inspect(result, { depth: 2, maxArrayLength: 20 });
+                const embed = new EmbedBuilder()
+                    .setColor("#3498DB")
+                    .setTitle("🗄️ SQL Query Executed")
+                    .addFields(
+                        { name: "⏱️ Time", value: `\`${done}ms\``, inline: true },
+                        { name: "📊 Rows", value: `\`${Array.isArray(result) ? result.length : "N/A"}\``, inline: true },
+                        { name: "📥 Query", value: `\`\`\`sql\n${query.length > 500 ? query.substring(0, 500) + "..." : query}\`\`\`` },
+                        { name: "📤 Result", value: `\`\`\`js\n${output.length > 900 ? output.substring(0, 900) + "..." : output}\`\`\`` }
+                    )
+                    .setTimestamp();
+                await message.reply({ embeds: [embed] });
+            } catch (error: any) {
+                const errorEmbed = new EmbedBuilder()
+                    .setColor("#E74C3C")
+                    .setTitle("❌ SQL Error")
+                    .addFields(
+                        { name: "📥 Query", value: `\`\`\`sql\n${query.length > 500 ? query.substring(0, 500) + "..." : query}\`\`\`` },
+                        { name: "💥 Error", value: `\`\`\`\n${error?.message || String(error)}\`\`\`` }
+                    )
+                    .setTimestamp();
+                await message.reply({ embeds: [errorEmbed] });
             }
-            catch (error) {
-                // If the user does not exist, reply with a message and break the switch statement
-                await message.reply("Invalid ID.");
-                break;
+            break;
+        }
+        case "cache": {
+            const cacheEmbed = new EmbedBuilder()
+                .setColor("#9B59B6")
+                .setTitle("💾 Cache Statistics")
+                .addFields(
+                    { name: "👥 Users", value: `\`${client.users.cache.size.toLocaleString()}\``, inline: true },
+                    { name: "🏰 Guilds", value: `\`${client.guilds.cache.size.toLocaleString()}\``, inline: true },
+                    { name: "📢 Channels", value: `\`${client.channels.cache.size.toLocaleString()}\``, inline: true },
+                    { name: "😀 Emojis", value: `\`${client.emojis.cache.size.toLocaleString()}\``, inline: true },
+                    { name: "📝 Messages", value: `\`${[...client.channels.cache.values()].reduce((acc: number, c: any) => acc + (c.messages?.cache?.size || 0), 0).toLocaleString()}\``, inline: true },
+                    { name: "🎭 Roles", value: `\`${[...client.guilds.cache.values()].reduce((acc, g) => acc + g.roles.cache.size, 0).toLocaleString()}\``, inline: true }
+                )
+                .setTimestamp();
+            await message.reply({ embeds: [cacheEmbed] });
+            break;
+        }
+        case "active_guilds": {
+            const guilds = [...activeGuilds.entries()].map(([id, value]) => ({
+                id,
+                value,
+                name: client.guilds.cache.get(id)?.name || "Unknown",
+                members: client.guilds.cache.get(id)?.memberCount || 0
+            })).sort((a, b) => b.value - a.value);
+            if (guilds.length < 1) return await message.reply({ embeds: [new EmbedBuilder().setColor("#F39C12").setDescription("📊 No active guilds recorded this session.")] });
+            const top10 = guilds.slice(0, 10);
+            const totalMessages = guilds.reduce((acc, g) => acc + g.value, 0);
+            const activeEmbed = new EmbedBuilder()
+                .setColor("#2ECC71")
+                .setTitle("📊 Active Guilds Leaderboard")
+                .setDescription(`\`${guilds.length}\` guilds active • \`${totalMessages.toLocaleString()}\` total messages`)
+                .addFields(
+                    ...top10.map((g, i) => ({
+                        name: `${["🥇", "🥈", "🥉"][i] || `#${i + 1}`} ${g.name}`,
+                        value: `\`${g.value.toLocaleString()}\` msgs • \`${g.members.toLocaleString()}\` members\n\`${g.id}\``,
+                        inline: true
+                    }))
+                )
+                .setFooter({ text: "Showing top 10 • Reset on restart" })
+                .setTimestamp();
+            await message.reply({ embeds: [activeEmbed] });
+            break;
+        }
+        case "add_vip": {
+            if (!args[0]) {
+                const usageEmbed = new EmbedBuilder()
+                    .setColor("#9B59B6")
+                    .setTitle("👑 Add VIP Command")
+                    .setDescription("```\nb.add_vip <userId> <duration> <unit>\n```")
+                    .addFields(
+                        { name: "Units", value: "`seconds` `minutes` `hours` `days`", inline: false },
+                        { name: "Example", value: "`b.add_vip 123456789 30 days`", inline: false }
+                    );
+                return await message.reply({ embeds: [usageEmbed] });
             }
-            if (isNaN(parseInt(newTime))) return await message.reply("Invalid time provided."); // Check if the time is a number and if it is not, reply with a message and break the switch statement
-            if (!Object.keys(multiply).some(m => m === timeType.toLowerCase())) return await message.reply(`Invalid time type provided. Supported types: \`${Object.keys(multiply).join(", ")}.\``); // Check if the time type is valid and if it is not, reply with a message and break the switch statement
-            const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [uid]); // Check if the user is already VIP
-            const totalTime = (1000 * multiply[timeType as keyof typeof multiply]) * parseInt(newTime); // Calculate the total time in milliseconds
+            const [uid, newTime, timeType] = args;
+            if ([uid, newTime, timeType].some(v => !v)) {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Missing arguments: `<userId> <duration> <unit>`")] });
+            }
+            const multiply = { seconds: 1, minutes: 60, hours: 3600, days: 86400 };
+            if (isNaN(parseInt(uid))) return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Invalid user ID.")] });
+            let targetUser;
+            try {
+                targetUser = await client.users.fetch(uid);
+            } catch {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ User not found.")] });
+            }
+            if (isNaN(parseInt(newTime))) return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Invalid duration.")] });
+            if (!Object.keys(multiply).includes(timeType.toLowerCase())) {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription(`❌ Invalid unit. Use: \`${Object.keys(multiply).join("`, `")}\``)] });
+            }
+            const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [uid]);
+            const totalTime = (1000 * multiply[timeType.toLowerCase() as keyof typeof multiply]) * parseInt(newTime);
             const now = Date.now();
             const end = now + totalTime;
+            const vipEmbed = new EmbedBuilder()
+                .setColor("#FFD700")
+                .setTitle("👑 VIP Status Updated")
+                .setThumbnail(targetUser.displayAvatarURL({ size: 128 }))
+                .addFields(
+                    { name: "👤 User", value: `${targetUser.username}\n\`${targetUser.id}\``, inline: true },
+                    { name: "⏱️ Duration", value: `\`${newTime} ${timeType}\``, inline: true },
+                    { name: "📅 Expires", value: `${time(Math.round(end / 1000), TimestampStyles.ShortDateTime)}\n${time(Math.round(end / 1000), TimestampStyles.RelativeTime)}`, inline: true }
+                )
+                .setTimestamp();
             if (foundVip[0]) {
-                // If the user is already VIP, update the VIP time
+                vipEmbed.setDescription("```ansi\n\u001b[1;33m[UPDATED]\u001b[0m VIP subscription extended\n```");
+                vipEmbed.addFields({ name: "📊 Previous Expiry", value: `${time(Math.round(foundVip[0].end_date / 1000), TimestampStyles.ShortDateTime)}`, inline: true });
                 await db.query("UPDATE vip_users SET end_date = ? WHERE id = ?", [end, uid]);
-                await message.reply(`VIP time has been updated to ${newTime} ${timeType} for user with ID ${uid}. ${time(Math.round(foundVip[0].end_date / 1000), TimestampStyles.ShortDate)} -> ${time(Math.round(end / 1000), TimestampStyles.ShortDate)} (Ends in ${time(Math.round(end / 1000), TimestampStyles.RelativeTime)})`);
-                break;
+            } else {
+                vipEmbed.setDescription("```ansi\n\u001b[1;32m[NEW]\u001b[0m VIP subscription activated\n```");
+                await db.query("INSERT INTO vip_users SET ?", [{ id: uid, start_date: now, end_date: end }]);
             }
-            else {
-                // If the user is not VIP, add VIP to the user
-                await db.query("INSERT INTO vip_users SET ?", [{
-                    id: uid,
-                    start_date: now,
-                    end_date: end,
-                }]);
-                await message.reply(`VIP has been added to user with ID ${uid} for ${newTime} ${timeType} -> ${time(Math.round(end / 1000), TimestampStyles.ShortDate)} (${time(Math.round(end / 1000), TimestampStyles.RelativeTime)})`);
-                break;
-            }
+            await message.reply({ embeds: [vipEmbed] });
+            break;
         }
         case "remove_vip": {
-            if (!args[0]) return await message.reply("You must provide the user ID.");
+            if (!args[0]) {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#9B59B6").setTitle("👑 Remove VIP").setDescription("```\nb.remove_vip <userId>\n```")] });
+            }
             const [uid] = args;
-            if (!uid) return await message.reply("Missing arguments. Required arguments: ID");
-            if (isNaN(parseInt(uid))) return await message.reply("Invalid ID.");
-            let validUser = false;
+            if (isNaN(parseInt(uid))) return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Invalid user ID.")] });
+            let targetUser;
             try {
-                await client.users.fetch(uid);
-                validUser = true;
+                targetUser = await client.users.fetch(uid);
+            } catch {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ User not found.")] });
             }
-            catch (error) {
-                await message.reply("Invalid ID.");
-                break;
-            }
-            const user = await client.users.fetch(uid);
             const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [uid]);
-            if (!foundVip[0]) return await message.reply("User is not VIP.");
+            if (!foundVip[0]) {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#F39C12").setDescription(`⚠️ **${targetUser.username}** is not a VIP member.`)] });
+            }
             await db.query("DELETE FROM vip_users WHERE id = ?", [uid]);
-            await message.reply(`VIP has been removed from user with ID ${uid} [@${user.username} / ${user.displayName}].`);
+            const removeEmbed = new EmbedBuilder()
+                .setColor("#E74C3C")
+                .setTitle("👑 VIP Revoked")
+                .setDescription("```ansi\n\u001b[1;31m[REMOVED]\u001b[0m VIP subscription terminated\n```")
+                .setThumbnail(targetUser.displayAvatarURL({ size: 128 }))
+                .addFields(
+                    { name: "👤 User", value: `${targetUser.username}\n\`${targetUser.id}\``, inline: true },
+                    { name: "📅 Was Active Until", value: `${time(Math.round(foundVip[0].end_date / 1000), TimestampStyles.ShortDateTime)}`, inline: true }
+                )
+                .setFooter({ text: `Revoked by ${message.author.username}` })
+                .setTimestamp();
+            await message.reply({ embeds: [removeEmbed] });
+            break;
+        }
+        case "vip_list": {
+            const vips: any = await db.query("SELECT * FROM vip_users ORDER BY end_date DESC");
+            if (!vips.length) {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#F39C12").setDescription("👑 No VIP members currently.")] });
+            }
+            const vipList = await Promise.all(vips.slice(0, 15).map(async (v: any, i: number) => {
+                try {
+                    const u = await client.users.fetch(v.id);
+                    const isExpired = v.end_date < Date.now();
+                    return `${isExpired ? "⚫" : "🟢"} **${u.username}** • ${time(Math.round(v.end_date / 1000), TimestampStyles.RelativeTime)}`;
+                } catch {
+                    return `⚫ \`${v.id}\` • ${time(Math.round(v.end_date / 1000), TimestampStyles.RelativeTime)}`;
+                }
+            }));
+            const listEmbed = new EmbedBuilder()
+                .setColor("#FFD700")
+                .setTitle("👑 VIP Members")
+                .setDescription(vipList.join("\n"))
+                .setFooter({ text: `${vips.length} total VIP members` })
+                .setTimestamp();
+            await message.reply({ embeds: [listEmbed] });
             break;
         }
         case "fetch_guilds_members": {
-            const msg = await message.reply(`${data.bot.loadingEmoji.mention} Fetching members from guilds...`);
+            const fetchEmbed = new EmbedBuilder()
+                .setColor("#3498DB")
+                .setTitle("📡 Fetching Guild Members")
+                .setDescription("```ansi\n\u001b[1;34m[SYNC]\u001b[0m Synchronizing member cache...\n```")
+                .addFields({ name: "📊 Current Cache", value: `\`${client.users.cache.size.toLocaleString()}\` users`, inline: true });
+            const msg = await message.reply({ embeds: [fetchEmbed] });
             const startTime = Date.now();
             const startCacheSize = client.users.cache.size;
-            for (const g of client.guilds.cache.values()) await g.members.fetch();
+            let fetchedGuilds = 0;
+            for (const g of client.guilds.cache.values()) {
+                await g.members.fetch();
+                fetchedGuilds++;
+            }
             process.env.MEMBERS_FETCHED = "1";
-            await msg.edit(`Finished fetching members from guilds. Took ${(Date.now() - startTime) / 1000}s. Members fetched: ${client.users.cache.size - startCacheSize}.`);
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+            const newMembers = client.users.cache.size - startCacheSize;
+            const doneEmbed = new EmbedBuilder()
+                .setColor("#2ECC71")
+                .setTitle("📡 Member Fetch Complete")
+                .setDescription("```ansi\n\u001b[1;32m[DONE]\u001b[0m Cache synchronization complete\n```")
+                .addFields(
+                    { name: "⏱️ Duration", value: `\`${elapsed}s\``, inline: true },
+                    { name: "🏰 Guilds Synced", value: `\`${fetchedGuilds}\``, inline: true },
+                    { name: "👥 New Users", value: `\`+${newMembers.toLocaleString()}\``, inline: true },
+                    { name: "📊 Total Cache", value: `\`${client.users.cache.size.toLocaleString()}\` users`, inline: true }
+                )
+                .setTimestamp();
+            await msg.edit({ embeds: [doneEmbed] });
             break;
         }
     }
