@@ -131,7 +131,7 @@ export default {
                         collector?.stop();
                         return;
                     }
-                    
+
                     let imageDescription = "";
                     if (message.attachments.size > 0) {
                         if (message.attachments.size > 1) return await message.reply(texts.errors.max_attachments);
@@ -140,15 +140,15 @@ export default {
                             const analyzingMsg = await message.reply(texts.common.analyzing_image);
                             try {
                                 imageDescription = await NVIDIAModels.GetVisualDescription(attachment.url, message.id, lang);
-                                await analyzingMsg.delete().catch(() => {});
+                                await analyzingMsg.delete().catch(() => { });
                             } catch {
-                                await analyzingMsg.delete().catch(() => {});
+                                await analyzingMsg.delete().catch(() => { });
                             }
                         }
                     }
-                    
+
                     const userContent = message.attachments.size > 0 ? `<image>${imageDescription || 'No visual details detected.'}</image>\n\n${message.content}` : message.content;
-                    
+
                     const safety = await NVIDIAModels.GetConversationSafety([
                         { role: "user", content: userContent }
                     ]);
@@ -235,8 +235,12 @@ export default {
                 console.log(`[Voice AI] Receiver ready: ${connection.receiver ? 'YES' : 'NO'}`);
 
                 // Wait for connection to be ready
-                connection.on(VoiceConnectionStatus.Ready, () => {
+                connection.on(VoiceConnectionStatus.Ready, async () => {
                     console.log(`[Voice AI] Connection is now READY, setting up audio receiver`);
+                    if (interaction.guild?.members.me && interaction.guild.members.me.voice.serverDeaf) {
+                        await interaction.guild.members.me.voice.setDeaf(false, "No TTS to play");
+                        console.log(`[Voice AI] Bot undeafened (no TTS)`);
+                    }
                 });
 
                 connection.receiver.speaking.on("start", async (userId) => {
@@ -444,6 +448,10 @@ export default {
                                         listeningMessage = null;
                                     }
                                     isProcessing = false;
+                                    if (interaction.guild?.members.me && interaction.guild.members.me.voice.serverDeaf) {
+                                        await interaction.guild.members.me.voice.setDeaf(false, "No TTS to play");
+                                        console.log(`[Voice AI] Bot undeafened (no TTS)`);
+                                    }
                                     return;
                                 }
 
