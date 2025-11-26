@@ -278,6 +278,7 @@ npm run start:managed  # Run with Process Manager (recommended production)
 - **Privacy Policy:** [privacy.md](./privacy.md)
 - **Security Policy:** [SECURITY.md](./SECURITY.md)
 - **Usage Policy:** [usage_policy.md](./usage_policy.md)
+- **Special contributors:** [SPECIAL_CONTRIBUTORS.md](./SPECIAL_CONTRIBUTORS.md)
 
 ## Contact
 - **Email:** barniecorps@gmail.com
