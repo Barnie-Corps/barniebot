@@ -160,6 +160,7 @@
     "openai": "^4.104.0",
     "optional-require": "^1.0.3",
     "optionator": "^0.9.1",
+    "opusscript": "^0.0.8",
     "parent-module": "^1.0.1",
     "path": "^0.12.7",
     "path-is-absolute": "^1.0.1",
