@@ -86,6 +86,7 @@ export default {
                 is_bound: " is bound to you!",
                 only_have_qty: "You only have ",
                 of: "x ",
+                is_equipped: " is currently equipped! Unequip it first.",
                 not_found_or_cannot: "Trade not found or you cannot cancel it!",
                 not_found_or_completed: "Trade not found or already completed!",
                 initiator_no_items: "Initiator no longer has the offered items!",
@@ -201,6 +202,11 @@ export default {
                         return utils.safeInteractionRespond(interaction, "❌ " + item[0].name + texts.errors.is_bound);
                     }
                     
+                    const equipped: any = await db.query("SELECT * FROM rpg_equipped_items WHERE inventory_id = ?", [item1Id]);
+                    if (equipped[0]) {
+                        return utils.safeInteractionRespond(interaction, "❌ " + item[0].name + texts.errors.is_equipped);
+                    }
+                    
                     if (item[0].quantity < item1Qty) {
                         return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.only_have_qty + item[0].quantity + texts.errors.of + item[0].name + "!");
                     }
@@ -226,6 +232,11 @@ export default {
                     
                     if (item[0].bound) {
                         return utils.safeInteractionRespond(interaction, `❌ ${item[0].name} is bound to you!`);
+                    }
+                    
+                    const equipped: any = await db.query("SELECT * FROM rpg_equipped_items WHERE inventory_id = ?", [item2Id]);
+                    if (equipped[0]) {
+                        return utils.safeInteractionRespond(interaction, "❌ " + item[0].name + texts.errors.is_equipped);
                     }
                     
                     if (item[0].quantity < item2Qty) {

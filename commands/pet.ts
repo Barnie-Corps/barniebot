@@ -89,7 +89,10 @@ export default {
                 not_equipped: "Not equipped"
             },
             rename: {
-                renamed: "Pet renamed to "
+                renamed: "Pet renamed to ",
+                invalid_name: "Pet name can only contain letters, numbers, and spaces!",
+                old_name: "Old Name",
+                new_name: "New Name"
             }
         };
 
@@ -291,10 +294,14 @@ export default {
 
         if (sub === "rename") {
             const petId = interaction.options.getInteger("pet_id", true);
-            const newName = interaction.options.getString("name", true);
+            const newName = interaction.options.getString("name", true).trim();
+
+            if (!/^[a-zA-Z0-9 ]+$/.test(newName)) {
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.rename.invalid_name });
+            }
 
             const pet: any = await db.query(
-                "SELECT * FROM rpg_character_pets WHERE id = ? AND character_id = ?",
+                `SELECT cp.*, p.emoji FROM rpg_character_pets cp JOIN rpg_pets p ON cp.pet_id = p.id WHERE cp.id = ? AND cp.character_id = ?`,
                 [petId, character.id]
             );
 
@@ -302,9 +309,19 @@ export default {
                 return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.pet_not_found });
             }
 
+            const oldName = pet[0].name;
             await db.query("UPDATE rpg_character_pets SET name = ? WHERE id = ?", [newName, petId]);
 
-            return utils.safeInteractionRespond(interaction, { content: "✅ " + texts.rename.renamed + newName + "!" });
+            const embed = new EmbedBuilder()
+                .setColor("#FF69B4")
+                .setTitle(pet[0].emoji + " " + texts.rename.renamed + newName + "!")
+                .addFields(
+                    { name: texts.rename.old_name, value: oldName, inline: true },
+                    { name: texts.rename.new_name, value: newName, inline: true }
+                )
+                .setTimestamp();
+
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
     },
     ephemeral: false

@@ -47,7 +47,10 @@ export default {
                 bonus_rare: " Gold + Rare Item!",
                 streak_lost: "Streak Lost",
                 streak_lost_desc: "Your ",
-                streak_lost_desc2: " day streak was lost! Claim daily to maintain your streak."
+                streak_lost_desc2: " day streak was lost! Claim daily to maintain your streak.",
+                next_milestone: "Next Milestone",
+                days_until: " days until ",
+                next_claim: "Next Claim"
             },
             first_daily: {
                 title: "First Daily Reward!",
@@ -125,6 +128,11 @@ export default {
                 }
             }
 
+            const milestones = [7, 14, 30];
+            const nextMilestone = milestones.find(m => m > newStreak);
+            const daysUntil = nextMilestone ? nextMilestone - newStreak : 0;
+            const nextClaimAt = now + oneDay;
+
             const embed = new EmbedBuilder()
                 .setColor("#00FF00")
                 .setTitle("🎁 " + texts.daily_reward.title)
@@ -133,9 +141,11 @@ export default {
                     { name: "💰 " + texts.daily_reward.gold, value: `+${gold}`, inline: true },
                     { name: "⭐ " + texts.daily_reward.experience, value: `+${exp}`, inline: true },
                     { name: "🔥 " + texts.daily_reward.streak, value: `${newStreak} ${newStreak > 1 ? texts.daily_reward.days : texts.daily_reward.day}`, inline: true },
-                    { name: "📊 " + texts.daily_reward.streak_bonus, value: "x" + streakMultiplier.toFixed(1) + texts.daily_reward.multiplier, inline: false }
+                    { name: "📊 " + texts.daily_reward.streak_bonus, value: "x" + streakMultiplier.toFixed(1) + texts.daily_reward.multiplier, inline: true },
+                    { name: "🎯 " + texts.daily_reward.next_milestone, value: nextMilestone ? daysUntil + texts.daily_reward.days_until + "Day " + nextMilestone + " bonus!" : "🏆 All milestones reached!", inline: true },
+                    { name: "⏰ " + texts.daily_reward.next_claim, value: `<t:${Math.floor(nextClaimAt / 1000)}:R>`, inline: true }
                 )
-                .setFooter({ text: texts.daily_reward.total_claims + (dailyData[0].total_claims + 1) + texts.daily_reward.claim_again })
+                .setFooter({ text: texts.daily_reward.total_claims + (dailyData[0].total_claims + 1) })
                 .setTimestamp();
 
             if (bonusText) {

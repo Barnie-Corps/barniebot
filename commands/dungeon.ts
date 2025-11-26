@@ -29,7 +29,12 @@ export default {
         .addSubcommand(s => s.setName("list")
             .setDescription("View available dungeons"))
         .addSubcommand(s => s.setName("status")
-            .setDescription("Check your current dungeon progress")),
+            .setDescription("Check your current dungeon progress"))
+        .addSubcommand(s => s.setName("abandon")
+            .setDescription("Abandon your current dungeon run"))
+        .addSubcommand(s => s.setName("history")
+            .setDescription("View your dungeon run history")),
+
     category: "RPG",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
@@ -98,6 +103,18 @@ export default {
                 started: "Started",
                 keep_going: "Use /dungeon continue to keep going!",
                 not_in: "You're not currently in a dungeon."
+            },
+            abandon: {
+                title: "Dungeon Abandoned",
+                desc: "You fled from the dungeon. No rewards were earned.",
+                not_in: "You're not in a dungeon!"
+            },
+            history: {
+                title: "Dungeon History",
+                no_runs: "You haven't completed any dungeon runs yet!",
+                completed: "Completed",
+                failed: "Failed",
+                stage: "Stage "
             }
         };
 
@@ -373,6 +390,61 @@ export default {
                 )
                 .setFooter({ text: "Use /dungeon continue to keep going!" })
                 .setTimestamp();
+
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
+        }
+
+        if (sub === "abandon") {
+            const activeRun: any = await db.query(
+                "SELECT * FROM rpg_dungeon_runs WHERE character_id = ? AND status = 'in_progress'",
+                [character.id]
+            );
+
+            if (!activeRun[0]) {
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.abandon.not_in });
+            }
+
+            await db.query(
+                "UPDATE rpg_dungeon_runs SET status = 'abandoned', completed_at = ? WHERE character_id = ? AND status = 'in_progress'",
+                [Date.now(), character.id]
+            );
+
+            const embed = new EmbedBuilder()
+                .setColor("#E67E22")
+                .setTitle("🏃 " + texts.abandon.title)
+                .setDescription(texts.abandon.desc)
+                .setTimestamp();
+
+            return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
+        }
+
+        if (sub === "history") {
+            const runs: any = await db.query(
+                `SELECT dr.*, d.name FROM rpg_dungeon_runs dr 
+                JOIN rpg_dungeons d ON dr.dungeon_id = d.id 
+                WHERE dr.character_id = ? AND dr.status != 'in_progress' 
+                ORDER BY dr.completed_at DESC LIMIT 10`,
+                [character.id]
+            );
+
+            if (runs.length === 0) {
+                return utils.safeInteractionRespond(interaction, { content: "📜 " + texts.history.no_runs });
+            }
+
+            const embed = new EmbedBuilder()
+                .setColor("#8B0000")
+                .setTitle("📜 " + texts.history.title)
+                .setTimestamp();
+
+            for (const run of runs) {
+                const statusIcon = run.status === "completed" ? "✅" : run.status === "failed" ? "❌" : "🏃";
+                const statusText = run.status === "completed" ? texts.history.completed : run.status === "failed" ? texts.history.failed : "Abandoned";
+                embed.addFields({
+                    name: `${statusIcon} ${run.name}`,
+                    value: `${statusText} • ${texts.history.stage}${run.stage}\n<t:${Math.floor(run.completed_at / 1000)}:R>`,
+                    inline: true
+                });
+            }
 
             return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
