@@ -67,14 +67,14 @@ export default {
                             type: 2,
                             style: 5,
                             label: "Privacy Policy",
-                            url: "https://github.com/Barnie-Corps/barniebot/blob/main/privacy.md",
+                            url: "https://github.com/Barnie-Corps/barniebot/blob/master/privacy.md",
                             emoji: "🔒"
                         },
                         {
                             type: 2,
                             style: 5,
                             label: "Usage Policy",
-                            url: "https://github.com/Barnie-Corps/barniebot/blob/main/usage_policy.md",
+                            url: "https://github.com/Barnie-Corps/barniebot/blob/master/usage_policy.md",
                             emoji: "📜"
                         },
                         {
@@ -98,14 +98,14 @@ export default {
                             type: 2,
                             style: 5,
                             label: "Privacy Policy",
-                            url: "https://github.com/Barnie-Corps/barniebot/blob/main/privacy.md",
+                            url: "https://github.com/Barnie-Corps/barniebot/blob/master/privacy.md",
                             emoji: "🔒"
                         },
                         {
                             type: 2,
                             style: 5,
                             label: "Usage Policy",
-                            url: "https://github.com/Barnie-Corps/barniebot/blob/main/usage_policy.md",
+                            url: "https://github.com/Barnie-Corps/barniebot/blob/master/usage_policy.md",
                             emoji: "📜"
                         },
                         {
