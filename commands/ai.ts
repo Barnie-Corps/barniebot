@@ -123,8 +123,10 @@ export default {
                 const collector = (interaction.channel as any).createMessageCollector({
                     filter: (m: { author: { id: string } }) => m.author.id === interaction.user.id
                 });
+                let isWaitingForResponse = false;
                 await reply(`${texts.common.started_chat} \`stop ai, ai stop, stop chat, end ai\`\n${texts.common.can_take_time}`);
                 collector?.on("collect", async (message: Message): Promise<any> => {
+                    if (isWaitingForResponse) return;
                     await (interaction.channel as TextChannel).sendTyping?.();
                     if (["stop ai", "ai stop", "stop chat", "end ai"].some(stop => message.content.toLowerCase().includes(stop))) {
                         await reply(texts.common.stopped_ai);
@@ -146,6 +148,7 @@ export default {
                             }
                         }
                     }
+                    if (message.attachments.size > 0) await (interaction.channel as TextChannel).sendTyping?.();
 
                     const userContent = message.attachments.size > 0 ? `<image>${imageDescription || 'No visual details detected.'}</image>\n\n${message.content}` : message.content;
 
@@ -158,12 +161,14 @@ export default {
                         }
                         const reason = safety.reason ? `\n${texts.common.reasons}: ${safety.reason}` : "";
                         await message.reply(`${texts.errors.unsafe_message}${reason}`);
+                        isWaitingForResponse = false;
                         collector?.stop();
                         return;
                     }
                     const response = await ai.GetResponse(interaction.user.id, userContent);
                     if (response.text.length < 1 && !response.call) {
                         console.log("No response from AI", response);
+                        isWaitingForResponse = false;
                         return await message.reply(texts.errors.no_response);
                     }
                     if (response.text.length > 2000) {
@@ -171,6 +176,7 @@ export default {
                         fs.writeFileSync(filename, response.text, "utf-8");
                         await message.reply({ content: texts.errors.long_response, files: [filename] });
                         fs.unlinkSync(filename);
+                        isWaitingForResponse = false;
                         return;
                     }
                     if (response.call) {
@@ -183,6 +189,7 @@ export default {
                     const msg = await message.reply(response.call ? `Executing command ${(response.call as FunctionCall).name} ${data.bot.loadingEmoji.mention}` : response.text);
                     if (response.call) {
                         await ai.ExecuteFunction(interaction.user.id, (response.call as FunctionCall).name!, (response.call as FunctionCall).args, msg);
+                        isWaitingForResponse = false;
                     }
                 });
                 collector?.on("end", () => {
