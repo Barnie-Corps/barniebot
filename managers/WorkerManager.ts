@@ -11,31 +11,7 @@ type WorkerWaiter = {
 };
 
 export default class WorkerManager extends EventEmitter {
-    /**
-     * A cache that keeps track of workers.
-     * 
-     * @private
-     * @type {Collection<string, { type: string, worker: Worker, id: string }>}
-     * 
-     * @property {string} key - The unique identifier for the worker.
-     * @property {Object} value - The details of the worker.
-     * @property {string} value.type - The type of the worker.
-     * @property {Worker} value.worker - The worker instance.
-     * @property {string} value.id - The unique identifier for the worker instance.
-     */
     private Cache: Collection<string, WorkerHandle> = new Collection();
-    /**
-     * A cache that keeps track of running workers.
-     * 
-     * @private
-     * @type {Collection<string, { type: string, worker: Worker, id: string }>}
-     * 
-     * @property {string} key - The unique identifier for the worker.
-     * @property {Object} value - The details of the worker.
-     * @property {string} value.type - The type of the worker.
-     * @property {Worker} value.worker - The worker instance.
-     * @property {string} value.id - The unique identifier for the worker instance.
-     */
     private RunningCache: Collection<string, WorkerHandle> = new Collection();
     private waitingQueues: Map<string, WorkerWaiter[]> = new Map();
     private keepAliveTimers: Map<string, NodeJS.Timeout> = new Map();
@@ -44,22 +20,9 @@ export default class WorkerManager extends EventEmitter {
     private availableByType: Map<string, Set<string>> = new Map();
     // Lightweight health/latency metrics per worker
     private metrics: Map<string, { lastPingMs?: number; avgPingMs?: number; failures: number; lastActiveAt?: number }> = new Map();
-    /**
-     * Constructs a new instance of the WorkerManager.
-     * 
-     * @param IDLength - The length of the ID to be generated. Default is 20.
-     * @param cachePublic - A flag indicating whether the cache is public. Default is false.
-     * @param typeLimit - The limit on the number of types. Default is 10.
-     */
     constructor(public IDLength: number = 20, private cachePublic: boolean = false, public readonly typeLimit = 10, private keepAliveIntervalMs = 30000) {
         super();
     }
-    /**
-     * Retrieves a worker by its ID from the cache.
-     *
-     * @param id - The unique identifier of the worker.
-     * @returns An object containing the worker's ID and data if found, otherwise `null`.
-     */
     public getWorker(id: string): { id: string, workerData: WorkerHandle } | null {
         const worker = this.Cache.get(id);
         return worker ? { id, workerData: worker } : null;

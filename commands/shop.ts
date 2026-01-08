@@ -1,17 +1,18 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
+import { RPGSession, RPGCharacter, RPGItem, RPGInventoryItem } from "../types/interfaces";
 
 async function getSession(userId: string) {
-    const session: any = await db.query(
+    const session = (await db.query(
         "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
         [userId]
-    );
+    ) as unknown as RPGSession[]);
     return session[0] || null;
 }
 
 async function getCharacter(accountId: number) {
-    const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]);
+    const character = (await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]) as unknown as RPGCharacter[]);
     return character[0] || null;
 }
 
@@ -116,10 +117,10 @@ export default {
                     accessories: "accessory"
                 };
 
-                const items: any = await db.query(
+                const items = (await db.query(
                     "SELECT * FROM rpg_items WHERE type = ? ORDER BY base_value ASC",
                     [typeMap[category]]
-                );
+                ) as unknown as RPGItem[]);
 
                 if (items.length === 0) {
                     return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.no_items);
@@ -169,11 +170,11 @@ export default {
                     .setTimestamp();
 
                 for (const item of items) {
-                    const rarity = rarityColors[item.rarity] || "";
+                    const rarity = rarityColors[item.rarity || "common"] || "";
                     const emoji = emojiMap[item.name] || "📦";
                     shopEmbed.addFields({
                         name: `${emoji} ${item.name} ${rarity}`,
-                        value: `${item.description}\n💰 **${item.base_value} Gold** • ID: \`${item.id}\``,
+                        value: `${item.description || ""}\n💰 **${item.base_value || 0} Gold** • ID: \`${item.id}\``,
                         inline: true
                     });
                 }
@@ -185,14 +186,14 @@ export default {
                 const itemId = interaction.options.getInteger("item_id", true);
                 const quantity = interaction.options.getInteger("quantity") || 1;
 
-                const shopItem: any = await db.query("SELECT * FROM rpg_items WHERE id = ?", [itemId]);
+                const shopItem = (await db.query("SELECT * FROM rpg_items WHERE id = ?", [itemId]) as unknown as RPGItem[]);
 
                 if (!shopItem[0]) {
                     return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.invalid_item + "`/shop browse`" + texts.errors.to_see_items);
                 }
 
                 const item = shopItem[0];
-                const totalCost = item.base_value * quantity;
+                const totalCost = (item.base_value || 0) * quantity;
                 
                 if (character.gold < totalCost) {
                     return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.not_enough_gold + totalCost + texts.errors.but_only_have + character.gold + "!");
@@ -219,10 +220,10 @@ export default {
                     "Scholar's Amulet": "📿"
                 };
 
-                const existingItem: any = await db.query(
+                const existingItem = (await db.query(
                     "SELECT * FROM rpg_inventory WHERE character_id = ? AND item_id = ?",
                     [character.id, item.id]
-                );
+                ) as unknown as RPGInventoryItem[]);
 
                 if (existingItem[0] && item.stackable) {
                     await db.query(
@@ -260,13 +261,13 @@ export default {
                 const inventoryId = interaction.options.getInteger("inventory_id", true);
                 const quantity = interaction.options.getInteger("quantity") || 1;
 
-                const invItem: any = await db.query(
+                const invItem = (await db.query(
                     `SELECT inv.*, i.name, i.base_value, i.tradeable, i.stackable 
                     FROM rpg_inventory inv 
                     JOIN rpg_items i ON inv.item_id = i.id 
                     WHERE inv.id = ? AND inv.character_id = ?`,
                     [inventoryId, character.id]
-                );
+                ) as unknown as any[]);
 
                 if (!invItem[0]) {
                     return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.item_not_found);
@@ -284,10 +285,10 @@ export default {
                     return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.only_have + invItem[0].quantity + texts.errors.of_item);
                 }
 
-                const equipped: any = await db.query(
+                const equipped = (await db.query(
                     "SELECT * FROM rpg_equipped_items WHERE inventory_id = ?",
                     [inventoryId]
-                );
+                ) as unknown as any[]);
 
                 if (equipped[0]) {
                     return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.must_unequip);

@@ -2,6 +2,7 @@ import { ChatInputCommandInteraction, SlashCommandBuilder, ActionRowBuilder, But
 import utils from "../utils";
 import db from "../mysql/database";
 import client, { manager } from "..";
+import { GlobalWarning, SupportTicket, SupportMessage, LastInsertIdResult } from "../types/interfaces";
 
 // Helper to log staff actions
 async function logStaffAction(staffId: string, actionType: string, targetId: string | null, details: string, metadata?: any) {
@@ -22,13 +23,12 @@ async function logStaffAction(staffId: string, actionType: string, targetId: str
 // Calculate total active warning points and trigger auto-escalation
 async function checkUserPoints(userId: string, username: string, executorId: string, executorUsername: string): Promise<{ totalPoints: number; escalated: boolean; action?: string }> {
   try {
-    // Get all active warnings (not expired, not appealed/approved)
-    const warnings: any = await db.query(
+    const warnings = (await db.query(
       "SELECT * FROM global_warnings WHERE userid = ? AND active = TRUE AND (appeal_status IS NULL OR appeal_status != 'approved') AND expires_at > ?",
       [userId, Date.now()]
-    );
+    ) as unknown as GlobalWarning[]);
 
-    const totalPoints = warnings.reduce((sum: number, w: any) => sum + (w.points || 1), 0);
+    const totalPoints = warnings.reduce((sum, w) => sum + (w.points || 1), 0);
 
     // Auto-escalation thresholds
     if (totalPoints >= 5) {
@@ -174,8 +174,7 @@ export default {
           appealed: false
         }]);
 
-        // Get warning ID for reference
-        const warningResult: any = await db.query("SELECT LAST_INSERT_ID() as id");
+        const warningResult = (await db.query("SELECT LAST_INSERT_ID() as id") as unknown as LastInsertIdResult[]);
         const warningId = warningResult[0].id;
 
         // Check for auto-escalation
@@ -288,7 +287,7 @@ export default {
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
         try {
-          const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [ticketId]);
+          const ticketData = (await db.query("SELECT * FROM support_tickets WHERE id = ?", [ticketId]) as unknown as SupportTicket[]);
           if (!ticketData[0]) {
             return utils.safeInteractionRespond(interaction, `Ticket #${ticketId} not found.`);
           }
@@ -299,7 +298,7 @@ export default {
           }
 
           const user = await interaction.client.users.fetch(ticket.user_id);
-          const messages: any = await db.query("SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY timestamp ASC", [ticketId]);
+          const messages = (await db.query("SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY timestamp ASC", [ticketId]) as unknown as SupportMessage[]);
 
           // Calculate duration
           const durationMs = Date.now() - ticket.created_at;
@@ -501,14 +500,14 @@ export default {
         });
         if (allUsers.size === 0) return utils.safeInteractionRespond(interaction, `No users found matching '${username}'.`);
         const matches = Array.from(allUsers.values()).slice(0, 100);
-        const userStatusCache: any[] = [];
+        const userStatusCache: Array<{user: any; rank: string; blacklisted: boolean; muted: boolean; points: number}> = [];
         for (const u of matches) {
           const rank = await utils.getUserStaffRank(u.id);
           const blacklisted = await utils.isUserBlacklisted(u.id);
           const muted = await utils.isUserMuted(u.id);
-          const warnings: any = await db.query("SELECT points, expires_at, active, appeal_status FROM global_warnings WHERE userid = ?", [u.id]);
+          const warnings = (await db.query("SELECT points, expires_at, active, appeal_status FROM global_warnings WHERE userid = ?", [u.id]) as unknown as GlobalWarning[]);
           const now = Date.now();
-          const totalPoints = warnings.filter((w: any) => w.active && w.expires_at > now && (!w.appeal_status || w.appeal_status !== 'approved')).reduce((s: number, w: any) => s + (w.points || 1), 0);
+          const totalPoints = warnings.filter(w => w.active && w.expires_at > now && (!w.appeal_status || w.appeal_status !== 'approved')).reduce((s, w) => s + (w.points || 1), 0);
           userStatusCache.push({ user: u, rank: rank || "None", blacklisted, muted, points: totalPoints });
         }
         if (userStatusCache.length === 1) {

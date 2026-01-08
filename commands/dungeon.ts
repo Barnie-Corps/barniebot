@@ -1,17 +1,54 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
+import { RPGSession, RPGCharacter, RPGDungeon, RPGCraftingMaterial } from "../types/interfaces";
+
+type DungeonRunRow = RPGDungeon & {
+    stage: number;
+    status: string;
+    started_at: number;
+    completed_at?: number | null;
+    rewards_claimed?: boolean;
+    dungeon_id: number;
+    reward_gold_min: number;
+    reward_gold_max: number;
+    reward_exp_min: number;
+    reward_exp_max: number;
+    required_level: number;
+};
+
+type CharacterMaterialRow = {
+    id: number;
+    character_id: number;
+    material_id: number;
+    quantity: number;
+};
+
+type DungeonStatusRow = {
+    stage: number;
+    stages: number;
+    name: string;
+    started_at: number;
+    status: string;
+};
+
+type DungeonHistoryRow = {
+    name: string;
+    status: string;
+    stage: number;
+    completed_at: number;
+};
 
 async function getSession(userId: string) {
-    const session: any = await db.query(
+    const session = (await db.query(
         "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
         [userId]
-    );
+    ) as unknown as RPGSession[]);
     return session[0] || null;
 }
 
 async function getCharacter(accountId: number) {
-    const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]);
+    const character = (await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]) as unknown as RPGCharacter[]);
     return character[0] || null;
 }
 
@@ -135,7 +172,7 @@ export default {
         const sub = interaction.options.getSubcommand();
 
         if (sub === "list") {
-            const dungeons: any = await db.query("SELECT * FROM rpg_dungeons ORDER BY required_level");
+            const dungeons = (await db.query("SELECT * FROM rpg_dungeons ORDER BY required_level") as unknown as RPGDungeon[]);
 
             if (dungeons.length === 0) {
                 return utils.safeInteractionRespond(interaction, { content: "🏰 " + texts.list.no_dungeons });
@@ -150,12 +187,13 @@ export default {
             for (const dungeon of dungeons) {
                 const canEnter = character.level >= dungeon.required_level;
                 const status = canEnter ? "✅" : "🔒";
+                const bossName = dungeon.boss_name ?? "Unknown";
                 
                 embed.addFields({
                     name: `${status} [${dungeon.id}] ${dungeon.name}`,
                     value: `*${dungeon.description}*\n` +
                            `📊 Required Level: ${dungeon.required_level} | Difficulty: ${dungeon.difficulty}\n` +
-                           `🎯 Stages: ${dungeon.stages} | 👑 Boss: ${dungeon.boss_name}\n` +
+                           `🎯 Stages: ${dungeon.stages} | 👑 Boss: ${bossName}\n` +
                            `💰 Rewards: ${dungeon.reward_gold_min}-${dungeon.reward_gold_max} gold | ⭐ ${dungeon.reward_exp_min}-${dungeon.reward_exp_max} XP`,
                     inline: false
                 });
@@ -169,23 +207,25 @@ export default {
         if (sub === "enter") {
             const dungeonId = interaction.options.getInteger("id", true);
 
-            const activeRun: any = await db.query(
+            const activeRun = (await db.query(
                 "SELECT * FROM rpg_dungeon_runs WHERE character_id = ? AND status = 'in_progress'",
                 [character.id]
-            );
+            ) as unknown as DungeonRunRow[]);
 
             if (activeRun[0]) {
                 return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.already_in_dungeon + "`/dungeon continue`" + texts.errors.or_abandon });
             }
 
-            const dungeon: any = await db.query("SELECT * FROM rpg_dungeons WHERE id = ?", [dungeonId]);
-            
+            const dungeon = (await db.query("SELECT * FROM rpg_dungeons WHERE id = ?", [dungeonId]) as unknown as RPGDungeon[]);
+
             if (!dungeon[0]) {
                 return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.dungeon_not_found });
             }
 
-            if (character.level < dungeon[0].required_level) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.need_level + dungeon[0].required_level + texts.errors.to_enter });
+            const selectedDungeon = dungeon[0];
+
+            if (character.level < selectedDungeon.required_level) {
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.need_level + selectedDungeon.required_level + texts.errors.to_enter });
             }
 
             if (character.hp < character.max_hp * 0.5) {
@@ -204,12 +244,12 @@ export default {
 
             const embed = new EmbedBuilder()
                 .setColor("#8B0000")
-                .setTitle("🏰 " + texts.enter.title + dungeon[0].name)
+                .setTitle("🏰 " + texts.enter.title + selectedDungeon.name)
                 .setDescription(character.name + texts.enter.steps_into)
                 .addFields(
-                    { name: "📊 " + texts.list.difficulty, value: dungeon[0].difficulty, inline: true },
-                    { name: "🎯 " + texts.enter.total_stages, value: dungeon[0].stages.toString(), inline: true },
-                    { name: "👑 " + texts.enter.final_boss, value: dungeon[0].boss_name, inline: true },
+                    { name: "📊 " + texts.list.difficulty, value: selectedDungeon.difficulty, inline: true },
+                    { name: "🎯 " + texts.enter.total_stages, value: selectedDungeon.stages.toString(), inline: true },
+                    { name: "👑 " + texts.enter.final_boss, value: selectedDungeon.boss_name ?? "Unknown", inline: true },
                     { name: "⚠️ " + texts.enter.warning, value: texts.enter.cannot_leave, inline: false }
                 )
                 .setFooter({ text: texts.enter.use_continue })
@@ -219,10 +259,10 @@ export default {
         }
 
         if (sub === "continue") {
-            const activeRun: any = await db.query(
+            const activeRun = (await db.query(
                 "SELECT dr.*, d.* FROM rpg_dungeon_runs dr JOIN rpg_dungeons d ON dr.dungeon_id = d.id WHERE dr.character_id = ? AND dr.status = 'in_progress'",
                 [character.id]
-            );
+            ) as unknown as DungeonRunRow[]);
 
             if (!activeRun[0]) {
                 return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.not_in_dungeon + "`/dungeon enter`" + texts.errors.to_start });
@@ -234,7 +274,7 @@ export default {
             const enemyHp = isBossStage ? 200 + (run.required_level * 20) : 80 + (run.required_level * 10);
             const enemyAtk = isBossStage ? 20 + (run.required_level * 3) : 10 + (run.required_level * 2);
             const enemyDef = isBossStage ? 15 + (run.required_level * 2) : 5 + run.required_level;
-            const enemyName = isBossStage ? run.boss_name : `Stage ${run.stage} Monster`;
+            const enemyName = isBossStage ? (run.boss_name || "Boss") : `Stage ${run.stage} Monster`;
 
             let playerHp = character.hp;
             let monsterHp = enemyHp;
@@ -285,13 +325,13 @@ export default {
                     const materialDrop = Math.random() < 0.3;
                     let materialText = "";
                     if (materialDrop) {
-                        const materials: any = await db.query("SELECT * FROM rpg_crafting_materials ORDER BY RAND() LIMIT 1");
+                        const materials = (await db.query("SELECT * FROM rpg_crafting_materials ORDER BY RAND() LIMIT 1") as unknown as RPGCraftingMaterial[]);
                         if (materials[0]) {
                             const qty = Math.floor(Math.random() * 3) + 1;
-                            const existing: any = await db.query(
+                            const existing = (await db.query(
                                 "SELECT * FROM rpg_character_materials WHERE character_id = ? AND material_id = ?",
                                 [character.id, materials[0].id]
-                            );
+                            ) as unknown as CharacterMaterialRow[]);
                             
                             if (existing[0]) {
                                 await db.query(
@@ -366,10 +406,10 @@ export default {
         }
 
         if (sub === "status") {
-            const activeRun: any = await db.query(
+            const activeRun = (await db.query(
                 "SELECT dr.*, d.name, d.stages FROM rpg_dungeon_runs dr JOIN rpg_dungeons d ON dr.dungeon_id = d.id WHERE dr.character_id = ? AND dr.status = 'in_progress'",
                 [character.id]
-            );
+            ) as unknown as DungeonStatusRow[]);
 
             if (!activeRun[0]) {
                 return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.status.not_in });
@@ -395,10 +435,10 @@ export default {
         }
 
         if (sub === "abandon") {
-            const activeRun: any = await db.query(
+            const activeRun = (await db.query(
                 "SELECT * FROM rpg_dungeon_runs WHERE character_id = ? AND status = 'in_progress'",
                 [character.id]
-            );
+            ) as unknown as { id: number }[]);
 
             if (!activeRun[0]) {
                 return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.abandon.not_in });
@@ -419,13 +459,13 @@ export default {
         }
 
         if (sub === "history") {
-            const runs: any = await db.query(
+            const runs = (await db.query(
                 `SELECT dr.*, d.name FROM rpg_dungeon_runs dr 
                 JOIN rpg_dungeons d ON dr.dungeon_id = d.id 
                 WHERE dr.character_id = ? AND dr.status != 'in_progress' 
                 ORDER BY dr.completed_at DESC LIMIT 10`,
                 [character.id]
-            );
+            ) as unknown as DungeonHistoryRow[]);
 
             if (runs.length === 0) {
                 return utils.safeInteractionRespond(interaction, { content: "📜 " + texts.history.no_runs });

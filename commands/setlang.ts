@@ -2,6 +2,7 @@ import { ChatInputCommandInteraction, Collection, Message, SlashCommandBuilder }
 import langs from "langs";
 import utils from "../utils";
 import db from "../mysql/database";
+import type { UserLanguage } from "../types/interfaces";
 
 export default {
     data: new SlashCommandBuilder()
@@ -17,7 +18,7 @@ export default {
         if (newLang === lang) return respond("```\n" + `/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Cannot set same language twice.` + "\n```");
         if (newLang.length > 2) return respond("```\n" + `/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Language code cannot have more than 2 characters.` + "\n```");
         if (!langs.has(1, newLang) || ["ch", "br", "wa"].some(v => newLang === v)) return respond("```\n" + `/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Invalid language code.` + "\n```");
-        const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
+        const foundLang = await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown as UserLanguage[];
         if (foundLang[0]) {
             await db.query("UPDATE languages SET ? WHERE userid = ?", [{ lang: newLang }, interaction.user.id]);
         }

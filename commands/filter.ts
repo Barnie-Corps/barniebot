@@ -1,9 +1,9 @@
-import { ActionRow, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChatInputCommandInteraction, Embed, EmbedBuilder, PermissionFlagsBits, SlashCommandBuilder, TimestampStyles, time } from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChatInputCommandInteraction, PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
-import data from "../data";
 import path from "path";
 import * as fs from "fs";
+import { FilterConfig, FilterWord } from "../types/interfaces";
 export default {
     data: new SlashCommandBuilder()
         .setName("filter")
@@ -121,11 +121,10 @@ export default {
         if (lang !== "en") {
             texts = await utils.autoTranslate(texts, "en", lang);
         }
-        // if (!data.bot.owners.includes(interaction.user.id)) return await utils.safeInteractionRespond(interaction, texts.default);
         if (!interaction.inGuild()) return await utils.safeInteractionRespond(interaction, texts.errors.no_guild);
         const subcmd = interaction.options.getSubcommand();
         if (subcmd) {
-            const filterMain: any = (await db.query("SELECT * FROM filter_configs WHERE guild = ?", [interaction.guildId]) as any)[0];
+            const filterMain = ((await db.query("SELECT * FROM filter_configs WHERE guild = ?", [interaction.guildId])) as unknown as FilterConfig[])[0];
             switch (subcmd) {
                 case "toggle": {
                     if (!filterMain) {
@@ -137,7 +136,7 @@ export default {
                         break;
                     }
                     else {
-                        const set = Number(filterMain.enabled) === 1 ? false : true;
+                        const set = !Boolean(filterMain.enabled);
                         await db.query("UPDATE filter_configs SET ? WHERE guild = ?", [{ enabled: set }, interaction.guildId]);
                         await utils.safeInteractionRespond(interaction, `${set ? texts.success.toggled_on : texts.success.toggled_off}`);
                         break;
@@ -150,7 +149,7 @@ export default {
                     const isProtected = interaction.options.getBoolean("protected") as boolean;
                     const isSingle = interaction.options.getBoolean("single") as boolean;
                     if (!allow_repeat) {
-                        const foundWord: any = await db.query("SELECT * FROM filter_words WHERE guild = ? AND content = ?", [interaction.guildId, word.toLowerCase()]);
+                        const foundWord = (await db.query("SELECT * FROM filter_words WHERE guild = ? AND content = ?", [interaction.guildId, word.toLowerCase()]) as unknown as FilterWord[]);
                         if (foundWord[0]) return await utils.safeInteractionRespond(interaction, texts.errors.repeated);
                         if (isProtected && !interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) return await utils.safeInteractionRespond(interaction, texts.errors.not_admin_add);
                         await db.query("INSERT INTO filter_words SET ?", [{ guild: interaction.guildId, content: word.toLowerCase(), protected: isProtected ? true : false, single: isSingle ? true : false }]);
@@ -162,9 +161,9 @@ export default {
                 case "view": {
                     if (!filterMain) return await utils.safeInteractionRespond(interaction, `${texts.errors.not_setup} /filter setup`);
                     const format = interaction.options.getString("format") as string;
-                    const words: any = await db.query("SELECT * FROM filter_words WHERE guild = ?", [interaction.guildId]);
+                    const words = (await db.query("SELECT * FROM filter_words WHERE guild = ?", [interaction.guildId]) as unknown as FilterWord[]);
                     if (words.length < 1) return await utils.safeInteractionRespond(interaction, texts.errors.no_words);
-                    const mapped = words.map((w: any) => `[${w.id}] ${w.content} ${Boolean(w.protected) ? `[${texts.common.protected_text}]` : ""}`);
+                    const mapped = words.map((w: FilterWord) => `[${w.id}] ${w.content} ${Boolean(w.protected) ? `[${texts.common.protected_text}]` : ""}`);
                     switch (format) {
                         case "file": {
                             const filePath = path.join(__dirname, `filter_content_${interaction.guildId}.txt`);
@@ -186,11 +185,11 @@ export default {
                     if (!filterMain) return await utils.safeInteractionRespond(interaction, `${texts.errors.not_setup} /filter setup`);
                     const queries = interaction.options.getString("query") as string;
                     const format = interaction.options.getString("format") as string;
-                    const words: any = await db.query("SELECT * FROM filter_words WHERE guild = ?", [interaction.guildId]);
+                    const words = (await db.query("SELECT * FROM filter_words WHERE guild = ?", [interaction.guildId]) as unknown as FilterWord[]);
                     if (words.length < 1) return await utils.safeInteractionRespond(interaction, texts.errors.no_words);
-                    const filtered = words.filter((w: any) => queries.trim().split(",").some((q: string) => w.content.includes(q.toLowerCase())));
+                    const filtered = words.filter((w: FilterWord) => queries.trim().split(",").some((q: string) => w.content.includes(q.toLowerCase())));
                     if (filtered.length < 1) return await utils.safeInteractionRespond(interaction, texts.errors.no_results);
-                    const mapped = filtered.map((w: any) => `[${w.id}] ${w.content} ${Boolean(w.protected) ? `[${texts.common.protected_text}]` : ""}`);
+                    const mapped = filtered.map((w: FilterWord) => `[${w.id}] ${w.content} ${Boolean(w.protected) ? `[${texts.common.protected_text}]` : ""}`);
                     switch (format) {
                         case "file": {
                             const filePath = path.join(__dirname, `filter_content_${interaction.guildId}.txt`);
@@ -213,18 +212,18 @@ export default {
                     const wid = interaction.options.getInteger("id") as number;
                     const force = interaction.options.getBoolean("force") as boolean;
                     if (force && !interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) return await utils.safeInteractionRespond(interaction, texts.errors.not_admin_delete);
-                    const word: any = await db.query("SELECT * FROM filter_words WHERE guild = ? AND id = ?", [interaction.guildId, wid]);
+                    const word = (await db.query("SELECT * FROM filter_words WHERE guild = ? AND id = ?", [interaction.guildId, wid]) as unknown as FilterWord[]);
                     if (!word[0]) return await utils.safeInteractionRespond(interaction, texts.errors.invalid_id);
                     if (Boolean(word[0].protected) && !force) return await utils.safeInteractionRespond(interaction, `${texts.common.protected_word} ${texts.errors.missing_force}`);
                     await db.query("DELETE FROM filter_words WHERE guild = ? AND id = ?", [interaction.guildId, wid]);
-                    await utils.safeInteractionRespond(interaction, `${texts.success.removed_word} -> \`${word[0].content}\`${Boolean(word[0]) && force ? `. ${texts.common.was_forced}` : ""}`);
+                    await utils.safeInteractionRespond(interaction, `${texts.success.removed_word} -> \`${word[0].content}\`${word[0] && force ? `. ${texts.common.was_forced}` : ""}`);
                     break;
                 }
                 case "setup": {
                     const row = new ActionRowBuilder()
                         .addComponents(
                             new ButtonBuilder()
-                                .setLabel("Continuar")
+                                .setLabel(texts.setup.continue_btn)
                                 .setCustomId(`continue_setup-${interaction.user.id}-${!filterMain ? "0" : "1"}`)
                                 .setStyle(ButtonStyle.Success),
                             new ButtonBuilder()

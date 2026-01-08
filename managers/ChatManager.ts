@@ -9,8 +9,6 @@ import Log from "../Log";
 import data from "../data";
 import https from "https";
 import dns from "dns";
-
-// Windows DNS optimization - use system resolver instead of c-ares
 if (process.platform === "win32") {
     dns.setDefaultResultOrder("verbatim");
 }
@@ -31,25 +29,22 @@ const BLACKLIST_CACHE = new Map<string, { value: boolean, expires: number }>();
 const MUTE_CACHE = new Map<string, { value: boolean, until: number, expires: number }>();
 const MODERATION_CACHE_TTL = 60000;
 
-// Application-level translation cache for hot translations
 const APP_TRANSLATION_CACHE = new Map<string, { text: string, expires: number }>();
-const APP_TRANSLATION_CACHE_TTL = 600000; // 10 minutes
+const APP_TRANSLATION_CACHE_TTL = 600000;
 const APP_TRANSLATION_CACHE_LIMIT = 1000;
 
-// Translation circuit breaker per-manager
 let translationFailureCount = 0;
 let lastTranslationFailure = 0;
 const TRANSLATION_CIRCUIT_THRESHOLD = 15;
 const TRANSLATION_CIRCUIT_TIMEOUT = 120000;
 
-// Optimized for Windows - reduced maxSockets, increased timeout, FIFO scheduling
 const httpsAgent = new https.Agent({
     keepAlive: true,
     maxSockets: process.platform === "win32" ? 50 : 150,
     maxFreeSockets: process.platform === "win32" ? 25 : 75,
     timeout: 30000,
     keepAliveMsecs: 30000,
-    scheduling: 'fifo' // FIFO works better on Windows
+    scheduling: 'fifo'
 });
 interface QueuedMessage {
     message: Message<true>;

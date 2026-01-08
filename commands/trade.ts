@@ -2,17 +2,18 @@ import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionR
 import db from "../mysql/database";
 import client from "..";
 import utils from "../utils";
+import { RPGSession, RPGCharacter } from "../types/interfaces";
 
 async function getSession(userId: string) {
-    const session: any = await db.query(
+    const session = (await db.query(
         "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
         [userId]
-    );
+    ) as unknown as RPGSession[]);
     return session[0] || null;
 }
 
 async function getCharacter(accountId: number) {
-    const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]);
+    const character = (await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]) as unknown as RPGCharacter[]);
     return character[0] || null;
 }
 

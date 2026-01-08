@@ -1,17 +1,18 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
+import { RPGSession, RPGCharacter, RPGPet } from "../types/interfaces";
 
 async function getSession(userId: string) {
-    const session: any = await db.query(
+    const session = (await db.query(
         "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
         [userId]
-    );
+    ) as unknown as RPGSession[]);
     return session[0] || null;
 }
 
 async function getCharacter(accountId: number) {
-    const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]);
+    const character = (await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]) as unknown as RPGCharacter[]);
     return character[0] || null;
 }
 
@@ -113,14 +114,14 @@ export default {
         const sub = interaction.options.getSubcommand();
 
         if (sub === "list") {
-            const pets: any = await db.query(
+            const pets = (await db.query(
                 `SELECT cp.*, p.emoji, p.rarity, p.strength_bonus, p.defense_bonus, p.agility_bonus, p.intelligence_bonus, p.luck_bonus, p.special_ability 
                 FROM rpg_character_pets cp 
                 JOIN rpg_pets p ON cp.pet_id = p.id 
                 WHERE cp.character_id = ? 
                 ORDER BY cp.is_active DESC, cp.level DESC`,
                 [character.id]
-            );
+            ) as unknown as any[]);
 
             if (pets.length === 0) {
                 return utils.safeInteractionRespond(interaction, { content: "🐾 " + texts.list.no_pets });
@@ -161,10 +162,10 @@ export default {
         if (sub === "equip") {
             const petId = interaction.options.getInteger("pet_id", true);
 
-            const pet: any = await db.query(
+            const pet = (await db.query(
                 "SELECT * FROM rpg_character_pets WHERE id = ? AND character_id = ?",
                 [petId, character.id]
-            );
+            ) as unknown as any[]);
 
             if (!pet[0]) {
                 return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.pet_not_found });
@@ -177,7 +178,7 @@ export default {
             await db.query("UPDATE rpg_character_pets SET is_active = FALSE WHERE character_id = ?", [character.id]);
             await db.query("UPDATE rpg_character_pets SET is_active = TRUE WHERE id = ?", [petId]);
 
-            const petInfo: any = await db.query("SELECT * FROM rpg_pets WHERE id = ?", [pet[0].pet_id]);
+            const petInfo = (await db.query("SELECT * FROM rpg_pets WHERE id = ?", [pet[0].pet_id]) as unknown as RPGPet[]);
 
             return utils.safeInteractionRespond(interaction, { 
                 content: "✅ " + petInfo[0].emoji + " " + pet[0].name + texts.equip.now_active
@@ -185,10 +186,10 @@ export default {
         }
 
         if (sub === "unequip") {
-            const activePet: any = await db.query(
+            const activePet = (await db.query(
                 "SELECT * FROM rpg_character_pets WHERE character_id = ? AND is_active = TRUE",
                 [character.id]
-            );
+            ) as unknown as any[]);
 
             if (!activePet[0]) {
                 return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.no_active_pet });
@@ -202,10 +203,10 @@ export default {
         if (sub === "feed") {
             const petId = interaction.options.getInteger("pet_id", true);
 
-            const pet: any = await db.query(
+            const pet = (await db.query(
                 "SELECT * FROM rpg_character_pets WHERE id = ? AND character_id = ?",
                 [petId, character.id]
-            );
+            ) as unknown as any[]);
 
             if (!pet[0]) {
                 return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.pet_not_found });
@@ -229,7 +230,7 @@ export default {
                 [newHappiness, Date.now(), petId]
             );
 
-            const petInfo: any = await db.query("SELECT emoji FROM rpg_pets WHERE id = ?", [pet[0].pet_id]);
+            const petInfo = (await db.query("SELECT emoji FROM rpg_pets WHERE id = ?", [pet[0].pet_id]) as unknown as RPGPet[]);
 
             return utils.safeInteractionRespond(interaction, { 
                 content: "✅ " + texts.feed.you_fed + petInfo[0].emoji + " " + pet[0].name + texts.feed.happiness + pet[0].happiness + " → " + newHappiness + " (+" + happinessGain + ")" 
@@ -239,14 +240,14 @@ export default {
         if (sub === "info") {
             const petId = interaction.options.getInteger("pet_id", true);
 
-            const pet: any = await db.query(
+            const pet = (await db.query(
                 `SELECT cp.*, p.emoji, p.name as base_name, p.description, p.rarity, p.strength_bonus, p.defense_bonus, 
                 p.agility_bonus, p.intelligence_bonus, p.luck_bonus, p.special_ability 
                 FROM rpg_character_pets cp 
                 JOIN rpg_pets p ON cp.pet_id = p.id 
                 WHERE cp.id = ? AND cp.character_id = ?`,
                 [petId, character.id]
-            );
+            ) as unknown as any[]);
 
             if (!pet[0]) {
                 return utils.safeInteractionRespond(interaction, { content: "❌ Pet not found!" });
@@ -300,10 +301,10 @@ export default {
                 return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.rename.invalid_name });
             }
 
-            const pet: any = await db.query(
+            const pet = (await db.query(
                 `SELECT cp.*, p.emoji FROM rpg_character_pets cp JOIN rpg_pets p ON cp.pet_id = p.id WHERE cp.id = ? AND cp.character_id = ?`,
                 [petId, character.id]
-            );
+            ) as unknown as any[]);
 
             if (!pet[0]) {
                 return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.pet_not_found });

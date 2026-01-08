@@ -3,8 +3,7 @@ import utils from "../utils";
 import db from "../mysql/database";
 import data from "../data";
 import client from "..";
-
-// Command permission constraints: only Chief of Moderation+ can manage ranks; cannot promote above self; cannot assign own rank or higher
+import { StaffMember, GlobalWarning, GlobalBan, CountResult } from "../types/interfaces";
 
 function canManageRank(executorRank: string | null, targetRank: string | null, desiredRank: string | null): { allowed: boolean; error?: string } {
     const execIndex = utils.getStaffRankIndex(executorRank);
@@ -65,7 +64,7 @@ export default {
                 return utils.safeInteractionRespond(interaction, rank ? `${user.username} rank: ${rank}` : `${user.username} has no rank.`);
             }
             case "list": {
-                const rows: any = await db.query("SELECT * FROM staff");
+                const rows = (await db.query("SELECT * FROM staff") as unknown as StaffMember[]);
                 if (!Array.isArray(rows) || rows.length === 0) return utils.safeInteractionRespond(interaction, "No staff registered.");
                 const byRank: Record<string, string[]> = {};
                 for (const r of rows) {
@@ -94,23 +93,20 @@ export default {
                     return n > 1_000_000_000_000 ? Math.floor(n / 1000) : Math.floor(n);
                 };
 
-                // Fetch warnings (paged) and count
-                const warnCountRows: any = await db.query("SELECT COUNT(*) AS c FROM global_warnings WHERE userid = ?", [user.id]);
-                const warnCount = Array.isArray(warnCountRows) && warnCountRows.length ? (warnCountRows[0].c ?? 0) : 0;
-                const warns: any = await db.query(
+                const warnCountRows = (await db.query("SELECT COUNT(*) AS count FROM global_warnings WHERE userid = ?", [user.id]) as unknown as CountResult[]);
+                const warnCount = Array.isArray(warnCountRows) && warnCountRows.length ? (warnCountRows[0].count ?? 0) : 0;
+                const warns = (await db.query(
                     "SELECT userid, authorid, reason, createdAt FROM global_warnings WHERE userid = ? ORDER BY createdAt DESC LIMIT ? OFFSET ?",
                     [user.id, PAGE_SIZE, offset]
-                );
+                ) as unknown as GlobalWarning[]);
 
-                // Fetch blacklist current status
-                const bansRows: any = await db.query("SELECT active, times FROM global_bans WHERE id = ? LIMIT 1", [user.id]);
+                const bansRows = (await db.query("SELECT active, times FROM global_bans WHERE id = ? LIMIT 1", [user.id]) as unknown as GlobalBan[]);
                 const ban = Array.isArray(bansRows) && bansRows.length ? bansRows[0] : null;
 
-                // Fetch mute current status
-                const muteRows: any = await db.query(
+                const muteRows = (await db.query(
                     "SELECT reason, authorid, createdAt, until FROM global_mutes WHERE id = ? LIMIT 1",
                     [user.id]
-                );
+                ) as unknown as any[]);
                 const mute = Array.isArray(muteRows) && muteRows.length ? muteRows[0] : null;
 
                 const embed = new EmbedBuilder()
@@ -138,7 +134,7 @@ export default {
                 } else {
                                         totalPages = Math.max(1, Math.ceil(warnCount / PAGE_SIZE));
                     const list = Array.isArray(warns) ? warns : [];
-                    list.forEach((w: any, i: number) => {
+                    list.forEach((w, i) => {
                         const createdSec = toSeconds(w.createdAt);
                         const idx = offset + i + 1;
                         const header = `#${idx} • by <@${w.authorid || "unknown"}> • ${createdSec ? `<t:${createdSec}:R>` : ""}`;

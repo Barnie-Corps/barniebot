@@ -40,10 +40,10 @@ const manager = new ChatManager();
 const globalCommandsManager = new GlobalCommandsManager();
 // Catch unhandled errors
 process.on("uncaughtException", (err: any) => {
-    console.log(`Unknown Error: ${err.stack}`);
+    Log.error("Unhandled exception", err);
 });
 process.on("unhandledRejection", (err: any) => {
-    console.log(`Unknown Error: ${err.stack}`);
+    Log.error("Unhandled rejection", err as any);
 });
 const client = new Client({
     intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.GuildMessageTyping, GatewayIntentBits.GuildEmojisAndStickers, GatewayIntentBits.DirectMessages, GatewayIntentBits.DirectMessageTyping, GatewayIntentBits.DirectMessageReactions, GatewayIntentBits.GuildVoiceStates],

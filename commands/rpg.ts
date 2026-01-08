@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
+import type { RPGSession, RPGCharacter } from "../types/interfaces";
 
 const CLASSES = {
     warrior: {
@@ -35,16 +36,16 @@ const CLASSES = {
     }
 };
 
-async function getSession(userId: string) {
-    const session: any = await db.query(
+async function getSession(userId: string): Promise<RPGSession | null> {
+    const session = await db.query(
         "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
         [userId]
-    );
+    ) as unknown as RPGSession[];
     return session[0] || null;
 }
 
-async function getCharacter(accountId: number) {
-    const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]);
+async function getCharacter(accountId: number): Promise<RPGCharacter | null> {
+    const character = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]) as unknown as RPGCharacter[];
     return character[0] || null;
 }
 
@@ -604,7 +605,7 @@ export default {
                         [points, points, character.id]
                     );
 
-                    const statIcons: any = {
+                    const statIcons: Record<string, string> = {
                         strength: "⚔️",
                         defense: "🛡️",
                         agility: "⚡",
@@ -617,7 +618,7 @@ export default {
                         .setTitle("✨ " + texts.stats.allocated_title)
                         .setDescription(`${statIcons[stat]} **${stat.toUpperCase()}**` + texts.stats.increased_by + points + "!")
                         .addFields(
-                            { name: texts.stats.new_value, value: `${character[stat] + points}`, inline: true },
+                            { name: texts.stats.new_value, value: `${(stat === "strength" ? character.strength : stat === "defense" ? character.defense : stat === "agility" ? character.agility : stat === "intelligence" ? character.intelligence : character.luck) + points}` , inline: true },
                             { name: texts.stats.remaining_points, value: `${character.stat_points - points}`, inline: true }
                         )
                         .setTimestamp();
@@ -759,7 +760,7 @@ export default {
             }
 
             case "rest": {
-                const lastRest = character.last_action;
+                const lastRest = character.last_action ?? 0;
                 const cooldown = 300000;
                 const timeLeft = cooldown - (Date.now() - lastRest);
 
@@ -1042,7 +1043,7 @@ export default {
 
             case "adventure": {
                 const type = interaction.options.getString("type", true);
-                const lastAdventure = character.last_action;
+                const lastAdventure = character.last_action ?? 0;
                 const cooldown = 600000; // 10 minutes
                 const timeLeft = cooldown - (Date.now() - lastAdventure);
 
@@ -1100,7 +1101,7 @@ export default {
                 // Danger check
                 const dangerRoll = Math.random();
                 if (dangerRoll < adv.danger - (character.agility / 200)) {
-                    const hpLoss = Math.floor(character.max_hp * 0.2);
+                    const hpLoss = Math.floor((character.max_hp || 0) * 0.2);
                     const newHp = Math.max(1, character.hp - hpLoss);
                     
                     await db.query(
@@ -1205,7 +1206,7 @@ export default {
 
             case "work": {
                 const job = interaction.options.getString("job", true);
-                const lastWork = character.last_action;
+                const lastWork = character.last_action ?? 0;
                 const cooldown = 900000; // 15 minutes
                 const timeLeft = cooldown - (Date.now() - lastWork);
 
@@ -1254,7 +1255,7 @@ export default {
                 };
 
                 const jobData = jobs[job];
-                const playerStat = character[jobData.requiredStat];
+                const playerStat = jobData.requiredStat === "defense" ? character.defense : jobData.requiredStat === "strength" ? character.strength : jobData.requiredStat === "agility" ? character.agility : character.intelligence;
 
                 // Stat check for bonus
                 const bonus = playerStat >= jobData.statCheck ? 1.5 : 1.0;
@@ -1286,7 +1287,7 @@ export default {
 
             case "gather": {
                 const resource = interaction.options.getString("resource", true);
-                const lastGather = character.last_action;
+                const lastGather = character.last_action ?? 0;
                 const cooldown = 300000; // 5 minutes
                 const timeLeft = cooldown - (Date.now() - lastGather);
 

@@ -16,6 +16,7 @@ import * as vm from "vm";
 import { exec as execCallback } from "child_process";
 import { promisify, inspect, TextDecoder, TextEncoder } from "util";
 import * as mathjs from "mathjs";
+import type { DiscordUser, UserLanguage, AIMemory } from "./types/interfaces";
 const TRANSLATE_WORKER_TYPE = "translate";
 const RATELIMIT_WORKER_TYPE = "ratelimit";
 const TRANSLATE_WORKER_PATH = path.join(__dirname, "workers/translate.js");
@@ -159,25 +160,19 @@ const transporter = nodemailer.createTransport({
   },
 });
 const utils = {
-  createArrows: (length: number): string => {
-    let arrows = "";
-    for (let i = 0; i < length; i++) {
-      arrows += "^";
-    }
-    return arrows;
-  },
+  createArrows: (length: number): string => "^".repeat(length),
   AIFunctions: {
-    get_user_data: async (id: string): Promise<any> => {
-      const user: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [id]);
+    get_user_data: async (id: string): Promise<{ error: string } | { user: DiscordUser; language: UserLanguage | string }> => {
+      const user = await db.query("SELECT * FROM discord_users WHERE id = ?", [id]) as unknown as DiscordUser[];
       if (!user[0]) return { error: "User not found" };
-  const language: any = await db.query("SELECT * FROM languages WHERE userid = ?", [id]);
-  return { user: user[0], language: language[0] ?? "en" };
+      const language = await db.query("SELECT * FROM languages WHERE userid = ?", [id]) as unknown as UserLanguage[];
+      return { user: user[0], language: language[0] ?? "en" };
     },
-    set_user_language: async (args: { userId: string; language: string }): Promise<any> => {
+    set_user_language: async (args: { userId: string; language: string }): Promise<{ error: string } | { success: true }> => {
       if (!args.userId || !args.language) return { error: "Missing parameters" };
-      const user: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [args.userId]);
+      const user = await db.query("SELECT * FROM discord_users WHERE id = ?", [args.userId]) as unknown as DiscordUser[];
       if (!user[0]) return { error: "User not found" };
-      const language: any = await db.query("SELECT * FROM languages WHERE userid = ?", [args.userId]);
+      const language = await db.query("SELECT * FROM languages WHERE userid = ?", [args.userId]) as unknown as UserLanguage[];
       if (!language[0]) {
         await db.query("INSERT INTO languages SET ?", [{ userid: args.userId, lang: args.language }]);
       } else {
@@ -198,9 +193,9 @@ const utils = {
     retrieve_owners: (): string[] => {
       return data.bot.owners;
     },
-    fetch_user: async (args: { userId: string }): Promise<any> => {
+    fetch_user: async (args: { userId: string }): Promise<{ error: string } | { user: DiscordUser }> => {
       if (!args.userId) return { error: "Missing userId parameter" };
-      const user: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [args.userId]);
+      const user = await db.query("SELECT * FROM discord_users WHERE id = ?", [args.userId]) as unknown as DiscordUser[];
       if (!user[0]) return { error: "User not found" };
       return { user: user[0] };
     },
@@ -219,10 +214,10 @@ const utils = {
         return { error: "User not found" };
       }
     },
-    get_memories: async (args: { userId: string }): Promise<any> => {
+    get_memories: async (args: { userId: string }): Promise<{ error: string } | { memories: AIMemory[] }> => {
       if (!args.userId) return { error: "Missing userId parameter" };
-      const memories: any = await db.query("SELECT * FROM ai_memories WHERE uid = ?", [args.userId]);
-      return { memories: memories };
+      const memories = await db.query("SELECT * FROM ai_memories WHERE uid = ?", [args.userId]) as unknown as AIMemory[];
+      return { memories };
     },
     insert_memory: async (args: { userId: string; memory: string }): Promise<any> => {
       if (!args.userId || !args.memory) return { error: "Missing parameters" };

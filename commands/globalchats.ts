@@ -2,6 +2,7 @@ import { ChannelType, ChatInputCommandInteraction, PermissionFlagsBits, SlashCom
 import utils from "../utils";
 import langs from "langs";
 import db from "../mysql/database";
+import type { GlobalChat } from "../types/interfaces";
 import client from "..";
 
 export default {
@@ -50,7 +51,7 @@ export default {
                     }
                     const channel = interaction.options.getChannel("channel") as TextChannel;
                     if (channel.type !== ChannelType.GuildText) return await utils.safeInteractionRespond(interaction, texts.errors.not_valid);
-                    let chatdb: any = await db.query("SELECT * FROM globalchats WHERE guild = ?", [interaction.guildId]);
+                    let chatdb = await db.query("SELECT * FROM globalchats WHERE guild = ?", [interaction.guildId]) as unknown as GlobalChat[];
                     const wh = await channel.createWebhook({
                         name: "GlobalHook"
                     });
@@ -70,7 +71,7 @@ export default {
                         break;
                     }
                     const status = interaction.options.getBoolean("status") as boolean;
-                    let chatdb: any = await db.query("SELECT * FROM globalchats WHERE guild = ?", [interaction.guildId]);
+                    let chatdb = await db.query("SELECT * FROM globalchats WHERE guild = ?", [interaction.guildId]) as unknown as GlobalChat[];
                     if (!chatdb[0]) {
                         await utils.safeInteractionRespond(interaction, texts.errors.not_registered);
                         break;
@@ -86,7 +87,7 @@ export default {
                         break;
                     }
                     const language = (interaction.options.getString("language") as string).toLowerCase();
-                    let chatdb: any = await db.query("SELECT * FROM globalchats WHERE guild = ?", [interaction.guildId]);
+                    let chatdb = await db.query("SELECT * FROM globalchats WHERE guild = ?", [interaction.guildId]) as unknown as GlobalChat[];
                     if (!chatdb[0]) {
                         await utils.safeInteractionRespond(interaction, texts.errors.not_registered);
                         break;
@@ -105,7 +106,7 @@ export default {
                         await utils.safeInteractionRespond(interaction, texts.errors.missing_perms);
                         break;
                     }
-                    let chatdb: any = await db.query("SELECT * FROM globalchats WHERE guild = ?", [interaction.guildId]);
+                    let chatdb = await db.query("SELECT * FROM globalchats WHERE guild = ?", [interaction.guildId]) as unknown as GlobalChat[];
                     if (!chatdb[0]) {
                         await utils.safeInteractionRespond(interaction, texts.errors.not_registered);
                         break;

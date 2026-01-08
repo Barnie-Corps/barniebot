@@ -1,17 +1,18 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
+import { RPGSession, RPGCharacter, RPGAchievement, CountResult } from "../types/interfaces";
 
 async function getSession(userId: string) {
-    const session: any = await db.query(
+    const session = (await db.query(
         "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
         [userId]
-    );
+    ) as unknown as RPGSession[]);
     return session[0] || null;
 }
 
 async function getCharacter(accountId: number) {
-    const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]);
+    const character = (await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]) as unknown as RPGCharacter[]);
     return character[0] || null;
 }
 
@@ -50,7 +51,7 @@ export default {
             const category = interaction.options.getString("category");
             
             let query = "SELECT * FROM rpg_achievements WHERE hidden = FALSE";
-            const params: any[] = [];
+            const params: string[] = [];
             
             if (category) {
                 query += " AND category = ?";
@@ -59,16 +60,16 @@ export default {
             
             query += " ORDER BY category, id";
             
-            const achievements: any = await db.query(query, params);
+            const achievements = (await db.query(query, params) as unknown as RPGAchievement[]);
             
             if (achievements.length === 0) {
                 return utils.safeInteractionRespond(interaction, { content: "📜 No achievements found for this category." });
             }
 
-            const charAchievements: any = await db.query(
+            const charAchievements = (await db.query(
                 "SELECT achievement_id, progress, unlocked FROM rpg_character_achievements WHERE character_id = ?",
                 [character.id]
-            );
+            ) as unknown as any[]);
             
             const achievementMap = new Map();
             for (const ca of charAchievements) {
@@ -109,7 +110,7 @@ export default {
         }
 
         if (sub === "progress") {
-            const charAchievements: any = await db.query(
+            const charAchievements = (await db.query(
                 `SELECT ca.*, a.name, a.description, a.icon, a.category, a.requirement_value, a.reward_gold, a.reward_experience 
                 FROM rpg_character_achievements ca 
                 JOIN rpg_achievements a ON ca.achievement_id = a.id 
@@ -117,7 +118,7 @@ export default {
                 ORDER BY (ca.progress / a.requirement_value) DESC 
                 LIMIT 10`,
                 [character.id]
-            );
+            ) as unknown as any[]);
 
             if (charAchievements.length === 0) {
                 return utils.safeInteractionRespond(interaction, { content: "📊 You don't have any achievements in progress. Start exploring to unlock some!" });
@@ -141,11 +142,11 @@ export default {
                 });
             }
 
-            const totalUnlocked: any = await db.query(
+            const totalUnlocked = (await db.query(
                 "SELECT COUNT(*) as count FROM rpg_character_achievements WHERE character_id = ? AND unlocked = TRUE",
                 [character.id]
-            );
-            const totalAchievements: any = await db.query("SELECT COUNT(*) as count FROM rpg_achievements WHERE hidden = FALSE");
+            ) as unknown as CountResult[]);
+            const totalAchievements = (await db.query("SELECT COUNT(*) as count FROM rpg_achievements WHERE hidden = FALSE") as unknown as CountResult[]);
             
             embed.setFooter({ text: `Unlocked: ${totalUnlocked[0]?.count || 0}/${totalAchievements[0]?.count || 0}` });
 

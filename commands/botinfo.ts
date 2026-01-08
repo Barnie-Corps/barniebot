@@ -2,6 +2,7 @@ import { ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder, Timesta
 import * as osu from "node-os-utils";
 import utils from "../utils";
 import db from "../mysql/database";
+import type { ExecutedCommand, CountResult } from "../types/interfaces";
 import * as nodeDiskInfo from "node-disk-info";
 import os from "os";
 import fs from "fs";
@@ -17,7 +18,7 @@ export default {
         function byteToGB(b: number): number {
             return ((b / 1024) / 1024) / 1024;
         }
-        const users: any = await db.query("SELECT * FROM discord_users");
+        const users = await db.query("SELECT * FROM discord_users");
         let texts = {
             embed: {
                 title: "General Information",
@@ -80,16 +81,16 @@ export default {
         else {
             storage = `${byteToGB(nodeDiskInfo.getDiskInfoSync()[0].available).toFixed(1)} GB / ${byteToGB(nodeDiskInfo.getDiskInfoSync()[0].used + nodeDiskInfo.getDiskInfoSync()[0].available).toFixed(1)} GB`;
         }
-        const last_command_executed: any = await db.query("SELECT * FROM executed_commands WHERE is_last = TRUE");
-        const totalNormalMessages = utils.sumNumbers((await db.query("SELECT * FROM message_count") as any).map((m: any) => m.count));
-        const totalGlobalMessages = (await db.query("SELECT COUNT(*) AS c FROM global_messages") as any)[0]?.c ?? 0;
+        const last_command_executed = await db.query("SELECT * FROM executed_commands WHERE is_last = TRUE") as unknown as ExecutedCommand[];
+        const totalNormalMessages = utils.sumNumbers((await db.query("SELECT * FROM message_count") as unknown as Array<{ count: number }>).map(m => m.count));
+        const totalGlobalMessages = (await db.query("SELECT COUNT(*) AS c FROM global_messages") as unknown as Array<{ c: number }>)[0]?.c ?? 0;
         let openTickets = 0;
         try {
-            openTickets = (await db.query("SELECT COUNT(*) AS c FROM support_tickets WHERE status = 'open'") as any)[0]?.c ?? 0;
+            openTickets = (await db.query("SELECT COUNT(*) AS c FROM support_tickets WHERE status = 'open'") as unknown as Array<{ c: number }>)[0]?.c ?? 0;
         } catch {}
         let staffCount = 0;
         try {
-            staffCount = (await db.query("SELECT COUNT(*) AS c FROM staff") as any)[0]?.c ?? 0;
+            staffCount = (await db.query("SELECT COUNT(*) AS c FROM staff") as unknown as Array<{ c: number }>)[0]?.c ?? 0;
         } catch {}
         const wsPing = `${interaction.client.ws.ping} ms`;
         const t0 = Date.now();

@@ -1,17 +1,18 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
+import { RPGSession, RPGCharacter, RPGCraftingMaterial, RPGCraftingRecipe, CountResult } from "../types/interfaces";
 
 async function getSession(userId: string) {
-    const session: any = await db.query(
+    const session = (await db.query(
         "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
         [userId]
-    );
+    ) as unknown as RPGSession[]);
     return session[0] || null;
 }
 
 async function getCharacter(accountId: number) {
-    const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]);
+    const character = (await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]) as unknown as RPGCharacter[]);
     return character[0] || null;
 }
 
@@ -94,14 +95,14 @@ export default {
         const sub = interaction.options.getSubcommand();
 
         if (sub === "materials") {
-            const materials: any = await db.query(
+            const materials = (await db.query(
                 `SELECT cm.quantity, m.name, m.rarity, m.emoji, m.description 
                 FROM rpg_character_materials cm 
                 JOIN rpg_crafting_materials m ON cm.material_id = m.id 
                 WHERE cm.character_id = ? AND cm.quantity > 0 
                 ORDER BY m.rarity DESC, m.name`,
                 [character.id]
-            );
+            ) as unknown as any[]);
 
             if (materials.length === 0) {
                 return utils.safeInteractionRespond(interaction, { content: "🔧 " + texts.materials.no_materials });
@@ -139,16 +140,16 @@ export default {
             const recipesPerPage = 5;
             const offset = (page - 1) * recipesPerPage;
 
-            const recipes: any = await db.query(
+            const recipes = (await db.query(
                 `SELECT r.*, i.name as item_name, i.rarity 
                 FROM rpg_crafting_recipes r 
                 JOIN rpg_items i ON r.result_item_id = i.id 
                 ORDER BY r.required_level, i.rarity DESC 
                 LIMIT ? OFFSET ?`,
                 [recipesPerPage, offset]
-            );
+            ) as unknown as any[]);
 
-            const totalRecipes: any = await db.query("SELECT COUNT(*) as count FROM rpg_crafting_recipes");
+            const totalRecipes = (await db.query("SELECT COUNT(*) as count FROM rpg_crafting_recipes") as unknown as CountResult[]);
             const totalPages = Math.ceil(totalRecipes[0].count / recipesPerPage);
 
             if (recipes.length === 0) {
@@ -168,33 +169,33 @@ export default {
                 const materials = [];
                 
                 if (recipe.material_1_id) {
-                    const mat: any = await db.query("SELECT name, emoji FROM rpg_crafting_materials WHERE id = ?", [recipe.material_1_id]);
-                    const owned: any = await db.query(
+                    const mat = (await db.query("SELECT name, emoji FROM rpg_crafting_materials WHERE id = ?", [recipe.material_1_id]) as unknown as RPGCraftingMaterial[]);
+                    const owned = (await db.query(
                         "SELECT quantity FROM rpg_character_materials WHERE character_id = ? AND material_id = ?",
                         [character.id, recipe.material_1_id]
-                    );
+                    ) as unknown as any[]);
                     const ownedQty = owned[0]?.quantity || 0;
                     const hasEnough = ownedQty >= recipe.material_1_qty;
                     materials.push(`${hasEnough ? "✅" : "❌"} ${mat[0].emoji} ${mat[0].name} ${ownedQty}/${recipe.material_1_qty}`);
                 }
 
                 if (recipe.material_2_id) {
-                    const mat: any = await db.query("SELECT name, emoji FROM rpg_crafting_materials WHERE id = ?", [recipe.material_2_id]);
-                    const owned: any = await db.query(
+                    const mat = (await db.query("SELECT name, emoji FROM rpg_crafting_materials WHERE id = ?", [recipe.material_2_id]) as unknown as RPGCraftingMaterial[]);
+                    const owned = (await db.query(
                         "SELECT quantity FROM rpg_character_materials WHERE character_id = ? AND material_id = ?",
                         [character.id, recipe.material_2_id]
-                    );
+                    ) as unknown as any[]);
                     const ownedQty = owned[0]?.quantity || 0;
                     const hasEnough = ownedQty >= recipe.material_2_qty;
                     materials.push(`${hasEnough ? "✅" : "❌"} ${mat[0].emoji} ${mat[0].name} ${ownedQty}/${recipe.material_2_qty}`);
                 }
 
                 if (recipe.material_3_id) {
-                    const mat: any = await db.query("SELECT name, emoji FROM rpg_crafting_materials WHERE id = ?", [recipe.material_3_id]);
-                    const owned: any = await db.query(
+                    const mat = (await db.query("SELECT name, emoji FROM rpg_crafting_materials WHERE id = ?", [recipe.material_3_id]) as unknown as RPGCraftingMaterial[]);
+                    const owned = (await db.query(
                         "SELECT quantity FROM rpg_character_materials WHERE character_id = ? AND material_id = ?",
                         [character.id, recipe.material_3_id]
-                    );
+                    ) as unknown as any[]);
                     const ownedQty = owned[0]?.quantity || 0;
                     const hasEnough = ownedQty >= recipe.material_3_qty;
                     materials.push(`${hasEnough ? "✅" : "❌"} ${mat[0].emoji} ${mat[0].name} ${ownedQty}/${recipe.material_3_qty}`);
@@ -218,13 +219,13 @@ export default {
         if (sub === "create") {
             const recipeId = interaction.options.getInteger("recipe_id", true);
 
-            const recipe: any = await db.query(
+            const recipe = (await db.query(
                 `SELECT r.*, i.name as item_name, i.rarity 
                 FROM rpg_crafting_recipes r 
                 JOIN rpg_items i ON r.result_item_id = i.id 
                 WHERE r.id = ?`,
                 [recipeId]
-            );
+            ) as unknown as any[]);
 
             if (!recipe[0]) {
                 return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.recipe_not_found });
@@ -247,13 +248,13 @@ export default {
             ].filter(m => m.id !== null);
 
             for (const mat of requiredMaterials) {
-                const owned: any = await db.query(
+                const owned = (await db.query(
                     "SELECT quantity FROM rpg_character_materials WHERE character_id = ? AND material_id = ?",
                     [character.id, mat.id]
-                );
+                ) as unknown as any[]);
 
                 if (!owned[0] || owned[0].quantity < mat.qty) {
-                    const matInfo: any = await db.query("SELECT name FROM rpg_crafting_materials WHERE id = ?", [mat.id]);
+                    const matInfo = (await db.query("SELECT name FROM rpg_crafting_materials WHERE id = ?", [mat.id]) as unknown as RPGCraftingMaterial[]);
                     return utils.safeInteractionRespond(interaction, { 
                         content: `❌ You don't have enough **${matInfo[0].name}**! Need: ${mat.qty}, Have: ${owned[0]?.quantity || 0}` 
                     });

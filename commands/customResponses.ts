@@ -1,9 +1,7 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, TextChannel, } from "discord.js";
+import { ChatInputCommandInteraction, SlashCommandBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
-import data from "../data";
-import ai from "../ai";
-import * as fs from "fs";
+import { CustomResponse } from "../types/interfaces";
 
 export default {
     data: new SlashCommandBuilder()
@@ -79,11 +77,11 @@ export default {
                 break;
             }
             case "list": {
-                const responses: any = await db.query("SELECT * FROM custom_responses WHERE guild = ?", [interaction.guildId]);
+                const responses = (await db.query("SELECT * FROM custom_responses WHERE guild = ?", [interaction.guildId]) as unknown as CustomResponse[]);
                 if (responses.length === 0) {
                     await utils.safeInteractionRespond(interaction, texts.errors.no_responses);
                 } else {
-                    const responseList = responses.map((r: any, i: number) => `${i + 1}. **${r.command}** → ${r.response}`).join("\n");
+                    const responseList = responses.map((r, i) => `${i + 1}. **${r.trigger}** → ${r.response}`).join("\n");
                     await utils.safeInteractionRespond(interaction, `${texts.common.custom_responses}\n${responseList}`);
                 }
                 break;

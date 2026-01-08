@@ -1,7 +1,7 @@
 import { ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
-import data from "../data";
+import type { MessageCount } from "../types/interfaces";
 
 export default {
     data: new SlashCommandBuilder()
@@ -27,11 +27,11 @@ export default {
         if (lang !== "en") {
             texts = await utils.autoTranslate(texts, "en", lang);
         }
-        const data: any = await db.query("SELECT * FROM message_count ORDER BY count DESC LIMIT ?", [Math.max(5, Math.min(25, limit))]);
-        if (data.length === 0) return await utils.safeInteractionRespond(interaction, { content: texts.errors.no_data });
+        const rows = await db.query("SELECT * FROM message_count ORDER BY count DESC LIMIT ?", [Math.max(5, Math.min(25, limit))]) as unknown as MessageCount[];
+        if (rows.length === 0) return await utils.safeInteractionRespond(interaction, { content: texts.errors.no_data });
 
         const embed = new EmbedBuilder({
-            title: texts.embed.title.replace("Top 10", `Top ${data.length}`),
+            title: texts.embed.title.replace("Top 10", `Top ${rows.length}`),
             description: texts.embed.description,
             footer: {
                 text: texts.embed.footer,
@@ -45,8 +45,8 @@ export default {
         const nf = new Intl.NumberFormat();
 
         // Resolve users (fetch if missing) to improve display names
-        for (let i = 0; i < data.length; i++) {
-            const d = data[i];
+        for (let i = 0; i < rows.length; i++) {
+            const d = rows[i];
             let user = interaction.client.users.cache.get(d.uid);
             if (!user) {
                 try { user = await interaction.client.users.fetch(d.uid); } catch {}
