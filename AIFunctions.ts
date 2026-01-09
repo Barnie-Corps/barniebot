@@ -40,6 +40,17 @@ const functionDeclarations = {
             properties: {}
         }
     },
+    isOwner: {
+        name: "isOwner",
+        description: "Check if a user is an owner of the bot.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
+    },
     fetch_user: {
         name: "fetch_user",
         description: "Fetches user information based on their user ID. This kind of info is restricted to owners. First check if the user is an owner using the retrieve_owners and get_user_data functions.",
@@ -401,6 +412,43 @@ const functionDeclarations = {
                 command: { type: SchemaType.STRING }
             },
             required: ["command"]
+        }
+    },
+    remove_memories: {
+        name: "remove_memories",
+        description: "Removes all memories associated with the user. This can be used to clear the user's memory history and reset the context for future interactions.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
+    },
+    remove_memory: {
+        name: "remove_memory",
+        description: "Removes a specific memory associated with the user. This can be used to delete a particular memory that is no longer relevant or needed.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING },
+                memoryId: { type: SchemaType.STRING }
+            },
+            required: ["userId", "memoryId"]
+        }
+    },
+    send_email: {
+        name: "send_email",
+        description: "Sends an email to a specified recipient. This can be used to communicate important information or notifications via email. This function requires the recipient's email address, subject, and body content of the email which can be plain text or HTML. Be advised using this will not ensure the email is sent, it still requires athorization from the staff.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                to: { type: SchemaType.STRING },
+                subject: { type: SchemaType.STRING },
+                body: { type: SchemaType.STRING },
+                isHtml: { type: SchemaType.BOOLEAN }
+            },
+            required: ["to", "subject", "body", "isHtml"]
         }
     }
 } as const satisfies Record<string, FunctionDeclaration>;
