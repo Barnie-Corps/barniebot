@@ -333,7 +333,7 @@ export default {
 
           for (const msg of messages) {
             const timestamp = new Date(msg.timestamp).toLocaleString();
-            const initial = msg.username.charAt(0).toUpperCase();
+            const initial = msg.username?.charAt(0).toUpperCase();
 
             if (msg.is_staff) {
               const rankTag = utils.getRankSuffix(msg.staff_rank);
@@ -373,7 +373,7 @@ export default {
             .replace(/{createdAt}/g, new Date(ticket.created_at).toLocaleString())
             .replace(/{closedAt}/g, new Date().toLocaleString())
             .replace(/{origin}/g, ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message")
-            .replace(/{initialMessage}/g, ticket.initial_message)
+            .replace(/{initialMessage}/g, ticket.initial_message ?? "No initial message")
             .replace(/{messages}/g, messagesHtml);
 
           fs.writeFileSync(`./transcript-${ticketId}.txt`, textTranscript);
@@ -409,7 +409,7 @@ export default {
 
           // Update the original embed in ticket channel
           try {
-            const ticketChannel = await interaction.client.channels.fetch(ticket.channel_id);
+            const ticketChannel = await interaction.client.channels.fetch(ticket.channel_id!);
             if (ticketChannel && ticketChannel.isTextBased() && ticket.message_id) {
               const originalMessage = await (ticketChannel as any).messages.fetch(ticket.message_id);
               const { EmbedBuilder } = await import("discord.js");
@@ -452,7 +452,7 @@ export default {
 
           // Send message in ticket channel with delete option
           try {
-            const ticketChannel = await interaction.client.channels.fetch(ticket.channel_id);
+            const ticketChannel = await interaction.client.channels.fetch(ticket.channel_id!);
             if (ticketChannel && ticketChannel.isTextBased()) {
               const closedNoticeEmbed = new EmbedBuilder()
                 .setColor("Red")
