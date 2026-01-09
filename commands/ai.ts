@@ -346,11 +346,11 @@ export default {
 
                                 // First resample from 48kHz to 16kHz (stereo)
                                 console.log(`[Voice AI] Resampling from 48kHz to 16kHz...`);
-                                processedAudio = resampleAudio(processedAudio, 48000, 16000, 2);
+                                processedAudio = Buffer.from(resampleAudio(processedAudio, 48000, 16000, 2));
 
                                 // Then convert stereo to mono
                                 console.log(`[Voice AI] Converting stereo to mono...`);
-                                processedAudio = stereoToMono(processedAudio);
+                                processedAudio = Buffer.from(stereoToMono(processedAudio));
 
                                 console.log(`[Voice AI] Prepared buffer size: ${processedAudio.length} bytes`);
                                 console.log(`[Voice AI] Expected duration: ${processedAudio.length / 2 / 16000} seconds at 16kHz mono`);
