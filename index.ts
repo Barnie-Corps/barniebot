@@ -17,28 +17,26 @@ global.Headers = require("node-fetch").Headers;
 globalThis.fetch = require("node-fetch");
 import * as dotenv from "dotenv";
 dotenv.config();
-// Ensure REBOOTING flag exists (0 = normal start, 1 = coming back from an intentional reboot)
 if (!process.env.REBOOTING) process.env.REBOOTING = "0";
 import { EmbedBuilder, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, WebhookClient, TextChannel, Message, time, TimestampStyles, Collection, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import * as fs from "fs";
-import data from "./data"; // Data file for storing bot data
-import Log from "./Log"; // Log object for logging
-import queries from "./mysql/queries"; // This file is used to create the tables if they don't exist
-import db from "./mysql/database"; // Database connection
-import { initializeShopItems, initializeRPGData } from "./rpg_init"; // Initialize RPG shop items and data
-import utils from "./utils"; // Utils file for utility functions
-import load_slash from "./load_slash"; // Load slash commands
-import ChatManager from "./managers/ChatManager"; // Chat manager for global chat
-import GlobalCommandsManager from "./managers/GlobalCommandsManager"; // Global commands manager
-import WarningCleanup from "./WarningCleanup"; // Warning cleanup system
-import Workers from "./Workers"; // Workers for background tasks
+import data from "./data";
+import Log from "./Log";
+import queries from "./mysql/queries";
+import db from "./mysql/database";
+import { initializeShopItems, initializeRPGData } from "./rpg_init";
+import utils from "./utils";
+import load_slash from "./load_slash";
+import ChatManager from "./managers/ChatManager";
+import GlobalCommandsManager from "./managers/GlobalCommandsManager";
+import WarningCleanup from "./WarningCleanup";
+import Workers from "./Workers";
 import path from "path";
-import { inspect } from "util"; // Used for eval command
-import langs from "langs"; // Used for language codes
+import { inspect } from "util";
+import langs from "langs";
 import NVIDIAModels from "./NVIDIAModels";
 const manager = new ChatManager();
 const globalCommandsManager = new GlobalCommandsManager();
-// Catch unhandled errors
 process.on("uncaughtException", (err: any) => {
     Log.error("Unhandled exception", err);
 });
@@ -49,22 +47,17 @@ const client = new Client({
     intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.GuildMessageTyping, GatewayIntentBits.GuildEmojisAndStickers, GatewayIntentBits.DirectMessages, GatewayIntentBits.DirectMessageTyping, GatewayIntentBits.DirectMessageReactions, GatewayIntentBits.GuildVoiceStates],
     partials: [Partials.Channel, Partials.GuildMember, Partials.Message, Partials.User]
 });
-// Load commands
 (async function () {
-    // Get command file names
     const commandsDir = fs.readdirSync("./commands").filter(f => f.endsWith(".ts"));
-    // Iterate over each command file and load it
     for (const cmdFile of commandsDir) {
         try {
             const command = (await import(`./commands/${cmdFile.trim().split(".")[0]}`)).default;
             data.bot.commands.set(command.data.name, command);
         }
-        // Catch any errors that may occur while loading the command file
         catch (err: any) {
             Log.error("Command loading failed", new Error(`Failed to load command file '${cmdFile}': ${err.stack}`));
         }
     }
-    // Log the amount of commands loaded
     Log.success(`Commands loaded successfully`, {
         component: "CommandLoader",
         loadedCommands: data.bot.commands.size,
@@ -94,19 +87,17 @@ client.on("clientReady", async (): Promise<any> => {
         process.env.MEMBERS_FETCHED = "1";
     }
     client.user?.setPresence({ activities: [{ name: Number(process.env.FETCH_MEMBERS_ON_STARTUP) === 1 ? `there are ${client.users.cache.size} users around!` : "How robotically mysterious!", type: ActivityType.Watching }] });
-    await load_slash(); // Load slash commands
+    await load_slash();
     Log.info(`Cache status`, {
         component: "Bot",
         usersCacheSize: client.users.cache.size
     });
-    data.bot.owners.push(...String(process.env.OWNERS).trim().split(",")); // Load owners from .env
-    // Ensure staff table entries for owners
+    data.bot.owners.push(...String(process.env.OWNERS).trim().split(","));
     for (const ownerId of data.bot.owners) {
         try { await db.query("INSERT IGNORE INTO staff SET ?", [{ uid: ownerId, rank: "Owner" }]); } catch { }
     }
     Log.info("Owners data loaded", { component: "Initialization" });
     Log.info("Loading workers...", { component: "Initialization" });
-    // Check if the bot was safely shutted down or not
     if (Number(process.env.SAFELY_SHUTTED_DOWN) === 0 && Number(process.env.NOTIFY_STARTUP) === 1) {
         await manager.announce("Hey! I have been restarted. According to my records it was a forced restart, so I could not warn you in advance. We apologize for any inconvenience or downtime this may have caused.", "en");
     }
@@ -124,20 +115,18 @@ client.on("clientReady", async (): Promise<any> => {
             if (updated.includes("REBOOTING=1")) updated = updated.replace("REBOOTING=1", "REBOOTING=0");
             else if (!updated.includes("REBOOTING=")) updated += "\nREBOOTING=0";
             fs.writeFileSync('./.env', updated);
-        } catch { /* ignore */ }
+        } catch { }
     }
-    Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", 5); // Create 5 workers for translation tasks
+    Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", 5);
     fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
     Log.info("Workers loaded", { component: "WorkerSystem" });
 
-    // Start warning cleanup scheduler
     WarningCleanup.startWarningCleanupScheduler();
 
     Log.info("Bot is ready", { component: "System" });
 });
 
-const activeGuilds: Collection<string, number> = new Collection(); // Active guilds collection for active guilds tracking (messageCreate event)
-// Filter setup session store
+const activeGuilds: Collection<string, number> = new Collection();
 interface FilterSetupState {
     step: number;
     values: { enabled: boolean; logs_enabled: boolean; logs_channel: string; lang: string };
@@ -150,36 +139,28 @@ interface FilterSetupState {
 const filterSetupSessions = new Map<string, FilterSetupState>();
 
 client.on("messageCreate", async (message): Promise<any> => {
-    // Check if the bot is in test mode and if the user is not an owner
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(message.author.id)) return;
     if (message.author.bot) return;
     if (!message.inGuild()) return;
-    // Check if user message counter is not in the database
     const foundCount: any = await db.query("SELECT * FROM message_count WHERE uid = ?", [message.author.id]);
     if (!foundCount[0]) {
-        // If it is not in the database, add it
         await db.query("INSERT INTO message_count SET ?", [{ uid: message.author.id }]);
     }
     else {
-        // If it is in the database, increment the message count
         await db.query("UPDATE message_count SET count = ? WHERE uid = ?", [(foundCount[0].count as number) + 1, message.author.id]);
     }
-    // Check if the guild is already in the activeGuilds collection
     if (activeGuilds.has(message.guildId as string)) {
         const agValue = activeGuilds.get(message.guildId as string);
         activeGuilds.set(message.guildId as string, (agValue as number) + 1);
     }
     else {
-        // If the guild is not in the activeGuilds collection, add it
         activeGuilds.set(message.guildId as string, 1);
     }
     const prefix = "b.";
-    const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]); // Get user language
-    const Lang = foundLang[0] ? foundLang[0].lang : "en"; // If the user has a language set, use it, otherwise use English
-    // Check if the message starts with the prefix and if the user is not an owner
+    const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [message.author.id]) as unknown) as any[]);
+    const Lang = foundLang[0] ? foundLang[0].lang : "en";
     if (message.content.toLowerCase().startsWith(prefix) && !data.bot.owners.includes(message.author.id)) return;
     if (!message.content.toLowerCase().startsWith(prefix)) return;
-    // Split the message content and get the command and arguments
     const [command, ...args] = message.content.slice(prefix.length).trim().split(" ");
     switch (command) {
         case "shutdown": {
@@ -646,35 +627,37 @@ client.on("messageCreate", async (message): Promise<any> => {
 client.on("interactionCreate", async (interaction): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(interaction.user.id)) return;
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
-    const Lang = foundLang[0] ? foundLang[0].lang : "en"; // If the user has a language set, use it, otherwise use English
+    const Lang = foundLang[0] ? foundLang[0].lang : "en";
     let texts = {
-        new: "Hey! It looks like this is the first time you're using one of my commands, at least on this account. Don't forget to read my privacy policy!",
-        error: "Whoops... An unexpected error occurred. I've already reported it, but if it keeps happening you can let us know by opening a ticket with `/support`.",
-        loading: "Translating texts (this may take a moment)...",
-        not_vip: "Hmm... You can't run this command unless you're a VIP.",
-        expired_vip: "Wow! It seems your VIP subscription has ended. I've revoked your VIP access.",
-        unread_notifications: "📬 **Hey!** You've got unread notifications waiting for you! Check them out with "
-    } // Texts for the interactionCreate event
+        new: "🆕 **Welcome!** It looks like this is your first time using BarnieBot. Please take a moment to review our privacy policy here: ",
+        error: "❌ **An error occurred** while processing your request. Please try again later. If the issue persists, contact support. -> ",
+        loading: "⏳ **Loading...** Please wait while we translate texts.",
+        not_vip: "⚠️ **VIP Access Required**: This feature is exclusive to VIP members. Consider upgrading to VIP for access.",
+        expired_vip: "⏰ **VIP Expired**: Your VIP membership has expired. Renew your VIP status to continue enjoying exclusive benefits.",
+        unread_notifications: "📬 **Hey!** You've got unread notifications waiting for you! Check them out with ",
+        only_staff_email_send: "⚠️ **Access Denied**: Only staff members can authorize email sending.",
+        email_send_cancelled: "❌ **Email Sending Cancelled**: Your email sending request has been cancelled.",
+        email_send_confirmed: "✅ **Email Sent**: Your email has been successfully authorized and sent.",
+    }
     if (Lang !== "en") {
-        texts = await utils.autoTranslate(texts, "en", Lang); // Translate the texts to the user's language if it is not English
+        texts = await utils.autoTranslate(texts, "en", Lang);
     }
     if (interaction.isCommand()) {
         const cmd = data.bot.commands.get(interaction.commandName as string);
         if (!cmd) {
-            // If the command is not found, reply with an error message
             return await interaction.reply({ content: "```\n" + `/${interaction.commandName}\n ${utils.createArrows(`${interaction.command?.name}`.length)}\n\nERR: Unknown slash command` + "\n```", ephemeral: true });
         }
         try {
-            await interaction.reply({ content: data.bot.loadingEmoji.mention, flags: cmd.ephemeral ? MessageFlags.Ephemeral : undefined }); // Reply with a loading message
+            await interaction.reply({ content: data.bot.loadingEmoji.mention, flags: cmd.ephemeral ? MessageFlags.Ephemeral : undefined });
             await cmd.execute(interaction, Lang);
-            await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE"); // Update the last command executed
-            await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]); // Insert the executed command into the executed_commands table
-            const foundU: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [interaction.user.id]); // Check if the user exists in the database
-            const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [interaction.user.id]); // Check if the user is VIP
+            await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE");
+            await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]);
+            const foundU: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [interaction.user.id]);
+            const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [interaction.user.id]);
             if (foundVip[0] && foundVip[0].end_date <= Date.now()) {
                 await db.query("DELETE FROM vip_users WHERE id = ?", [interaction.user.id]);
                 await interaction.followUp({ content: texts.expired_vip, ephemeral: true });
-            } // If the user is VIP and the VIP time has expired, remove the VIP from the user
+            }
 
             const unreadNotifications = await utils.getUnreadNotifications(interaction.user.id);
             if (unreadNotifications.length > 0 && interaction.commandName !== "notifications") {
@@ -683,16 +666,14 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
 
             if (foundU[0]) {
                 await db.query("UPDATE discord_users SET command_executions = command_executions + 1, pfp = ?, username = ? WHERE id = ?", [interaction.user.displayAvatarURL({ size: 1024 }), interaction.user.username, interaction.user.id]);
-            } // If the user exists in the database, update the user's data
+            }
             else {
-                // If the user does not exist in the database, insert the user into the database
                 await db.query("INSERT INTO discord_users SET ?", { id: interaction.user.id, pfp: interaction.user.displayAvatarURL({ size: 1024 }), username: interaction.user.username });
                 const msg = await interaction.followUp({ content: `<@${interaction.user.id}>, ${texts.new}: [privacy.txt](https://github.com/Barnie-Corps/barniebot/blob/master/privacy.txt)`, ephemeral: true });
                 await msg.removeAttachments();
             }
         }
         catch (err: any) {
-            // If an error occurs while executing the command, reply with an error message
             const errorId = `error_${interaction.commandName}_${Date.now()}`;
             const logDir = path.join(process.cwd(), "logs");
             try {
@@ -712,28 +693,26 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 ].join("\n");
                 fs.writeFileSync(logPath, logContents);
 
-                const enhancedMsg = `⚠️ **Unexpected Error**\nYour request \`/${interaction.commandName}\` failed internally.\nReference: \
+                const errMessage = `⚠️ **Unexpected Error**\nYour request \`/${interaction.commandName}\` failed internally.\nReference: \
 \`${errorId}\`\nA detailed log has been saved and attached. If this keeps happening, open \`/support\` and provide the reference ID.`;
 
                 if (interaction.deferred || interaction.replied) {
                     try {
-                        await interaction.editReply({ content: enhancedMsg, files: [logPath] });
+                        await interaction.editReply({ content: errMessage, files: [logPath] });
                     } catch (sendErr: any) {
-                        // Fallback: attempt followUp (may be ephemeral)
                         try {
-                            await interaction.followUp({ content: enhancedMsg, files: [logPath], ephemeral: true });
+                            await interaction.followUp({ content: errMessage, files: [logPath], ephemeral: true });
                         } catch (followErr: any) {
-                            // Final fallback: send to channel without file
                             await (interaction.channel as TextChannel)?.send(`<@${interaction.user.id}> ${texts.error} (Ref: ${errorId})`);
                             Log.warn("Failed to attach error log to interaction", { component: "ErrorHandler", reason: followErr?.message });
                         }
                     }
                 } else {
                     try {
-                        await interaction.reply({ content: enhancedMsg, files: [logPath], ephemeral: true });
+                        await interaction.reply({ content: errMessage, files: [logPath], ephemeral: true });
                     } catch (replyErr: any) {
                         try {
-                            await interaction.followUp({ content: enhancedMsg, files: [logPath], ephemeral: true });
+                            await interaction.followUp({ content: errMessage, files: [logPath], ephemeral: true });
                         } catch (followErr: any) {
                             await (interaction.channel as TextChannel)?.send(`<@${interaction.user.id}> ${texts.error} (Ref: ${errorId})`);
                             Log.warn("Failed to send error reply with log file", { component: "ErrorHandler", reason: followErr?.message });
@@ -742,7 +721,6 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 }
             } catch (fileErr: any) {
                 Log.error("Failed to persist error log", new Error(fileErr?.message || String(fileErr)));
-                // Attempt minimal fallback message
                 try {
                     if (interaction.deferred || interaction.replied) await interaction.editReply(`${texts.error} (Failed to write log file)`);
                     else await interaction.reply({ content: `${texts.error} (Failed to write log file)`, ephemeral: true });
@@ -753,7 +731,6 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
         }
     }
     else if (interaction.isButton()) {
-        // If the interaction is a button interaction, split the customId and get the event and arguments
         const [event, ...args] = interaction.customId.trim().split("-");
         switch (event) {
             case "cancel_setup": {
@@ -1363,6 +1340,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 }
                 break;
             }
+            case "": {}
         }
         return;
     }
@@ -1419,11 +1397,9 @@ client.on("messageCreate", async (message): Promise<any> => {
     const { author, channel, guild, content } = message;
     if (author.bot) return;
 
-    // Check for global commands first
     const isGlobalCommand = await globalCommandsManager.processMessage(message, manager);
-    if (isGlobalCommand) return; // If it's a global command, don't process as regular message
+    if (isGlobalCommand) return;
 
-    // Safety check removed per request (was previously blocking unsafe messages)
     await manager.processUser(author);
     await manager.processMessage(message);
 });
@@ -1542,44 +1518,31 @@ manager.on("limit-exceed", async u => {
     });
 });
 
-// Support ticket message relay system
 client.on("messageCreate", async (message): Promise<any> => {
     if (message.author.bot) return;
-
-    // Check if message is from a ticket channel
     if (message.guild && message.guild.id === data.bot.home_guild) {
         const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE channel_id = ? AND status = 'open'", [message.channelId]);
         if (ticketData[0]) {
             const ticket = ticketData[0];
             const staffRank = await utils.getUserStaffRank(message.author.id);
-
             if (staffRank) {
-                // Staff message -> Send to user
                 const user = await client.users.fetch(ticket.user_id);
                 const rankTag = utils.getRankSuffix(staffRank);
                 const formattedMessage = `[${rankTag}] ${message.author.username}: ${message.content}`;
-
                 try {
                     await user.send(formattedMessage);
-
-                    // Track first response time if not already tracked
                     if (!ticket.first_response_at) {
                         const responseTime = Date.now();
                         await db.query(
                             "UPDATE support_tickets SET first_response_at = ?, first_response_by = ? WHERE id = ?",
                             [responseTime, message.author.id, ticket.id]
                         );
-
-                        // Calculate and display response time
                         const minutesToRespond = Math.floor((responseTime - ticket.created_at) / 60000);
                         const timeText = minutesToRespond < 60
                             ? `${minutesToRespond} minute(s)`
                             : `${Math.floor(minutesToRespond / 60)} hour(s) ${minutesToRespond % 60} minute(s)`;
-
                         await message.channel.send(`✅ First response logged: ${timeText} response time by ${message.author.tag}.`);
                     }
-
-                    // Save to transcript
                     await db.query("INSERT INTO support_messages SET ?", [{
                         ticket_id: ticket.id,
                         user_id: message.author.id,
@@ -1595,21 +1558,15 @@ client.on("messageCreate", async (message): Promise<any> => {
             }
         }
     }
-
-    // Check if message is from a user with an open ticket in DMs
     if (!message.guild) {
         const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE user_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 1", [message.author.id]);
         if (ticketData[0]) {
             const ticket = ticketData[0];
             const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel;
-
             if (ticketChannel) {
                 const formattedMessage = `\`${message.author.username}\`: ${message.content}`;
-
                 try {
                     await ticketChannel.send(formattedMessage);
-
-                    // Save to transcript
                     await db.query("INSERT INTO support_messages SET ?", [{
                         ticket_id: ticket.id,
                         user_id: message.author.id,
