@@ -172,6 +172,13 @@ export interface RPGAchievement {
     description: string;
     emoji: string;
     hidden: boolean;
+    category: string;
+    requirement_type: string;
+    requirement_value: number;
+    reward_gold: number;
+    reward_experience: number;
+    reward_item_id?: number | null;
+    icon: string;
 }
 
 export interface RPGPet {
@@ -260,6 +267,11 @@ export interface SupportTicket {
     status: "open" | "closed" | "resolved";
     title: string;
     created_at: number;
+    guild_id?: string | null;
+    guild_name?: string | null;
+    initial_message?: string;
+    channel_id?: string | null;
+    message_id?: string | null;
 }
 
 export interface SupportMessage {
@@ -268,6 +280,10 @@ export interface SupportMessage {
     user_id: string;
     message: string;
     timestamp: number;
+    is_staff?: boolean;
+    staff_rank?: string | null;
+    username?: string;
+    content?: string;
 }
 
 export interface StaffNote {
@@ -325,6 +341,7 @@ export interface MessageCount {
     id: number;
     user_id: string;
     count: number;
+    uid?: string;
 }
 
 export interface CountResult {
@@ -339,4 +356,5 @@ export interface ExecutedCommand {
     uid: string;
     command: string;
     is_last: boolean;
+    at?: number;
 }

@@ -18,7 +18,7 @@ export default {
         function byteToGB(b: number): number {
             return ((b / 1024) / 1024) / 1024;
         }
-        const users = await db.query("SELECT * FROM discord_users");
+        const users = (await db.query("SELECT COUNT(*) AS count FROM discord_users") as unknown as Array<{ count: number }>);
         let texts = {
             embed: {
                 title: "General Information",
@@ -81,7 +81,7 @@ export default {
         else {
             storage = `${byteToGB(nodeDiskInfo.getDiskInfoSync()[0].available).toFixed(1)} GB / ${byteToGB(nodeDiskInfo.getDiskInfoSync()[0].used + nodeDiskInfo.getDiskInfoSync()[0].available).toFixed(1)} GB`;
         }
-        const last_command_executed = await db.query("SELECT * FROM executed_commands WHERE is_last = TRUE") as unknown as ExecutedCommand[];
+        const last_command_executed = (await db.query("SELECT * FROM executed_commands WHERE is_last = TRUE") as unknown as ExecutedCommand[]);
         const totalNormalMessages = utils.sumNumbers((await db.query("SELECT * FROM message_count") as unknown as Array<{ count: number }>).map(m => m.count));
         const totalGlobalMessages = (await db.query("SELECT COUNT(*) AS c FROM global_messages") as unknown as Array<{ c: number }>)[0]?.c ?? 0;
         let openTickets = 0;
@@ -110,7 +110,8 @@ export default {
                 return "dev";
             }
         })();
-        const lastU = await interaction.client.users.fetch(last_command_executed[0].uid);
+        const lastCommand = last_command_executed[0];
+        const lastU = lastCommand ? await interaction.client.users.fetch(lastCommand.uid) : null;
         const embed = new EmbedBuilder()
             .setAuthor({ iconURL: interaction.user.displayAvatarURL(), name: interaction.user.tag })
             .setTitle(texts.embed.title)
@@ -123,7 +124,7 @@ export default {
                 },
                 {
                     name: texts.fields.database.title,
-                    value: `${texts.fields.database.users}: ${users.length}\n${texts.fields.database.last_command}: ${last_command_executed[0].command} - ${lastU?.username} (${time(last_command_executed[0].at, TimestampStyles.RelativeTime)})\n${texts.fields.database.tickets_open}: ${openTickets}\n${texts.fields.database.staff_count}: ${staffCount}`,
+                    value: `${texts.fields.database.users}: ${users[0]?.count ?? 0}\n${texts.fields.database.last_command}: ${lastCommand?.command ?? "N/A"} - ${lastU?.username ?? "Unknown"} (${lastCommand?.at ? time(lastCommand.at, TimestampStyles.RelativeTime) : "N/A"})\n${texts.fields.database.tickets_open}: ${openTickets}\n${texts.fields.database.staff_count}: ${staffCount}`,
                     inline: true
                 },
                 {
