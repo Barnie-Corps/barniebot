@@ -60,11 +60,11 @@ Workers.bulkCreateWorkers(TRANSLATE_WORKER_PATH, TRANSLATE_WORKER_TYPE, TRANSLAT
 void (async () => {
   try {
     await Workers.prewarmType(TRANSLATE_WORKER_TYPE, TRANSLATE_WORKER_POOL_SIZE, 1500);
-  } catch {}
+  } catch { }
 })();
 // Ensure at least one ratelimit worker exists and is prewarmed at startup to avoid cold starts
 Workers.bulkCreateWorkers(RATELIMIT_WORKER_PATH, RATELIMIT_WORKER_TYPE, 1);
-void (async () => { try { await Workers.prewarmType(RATELIMIT_WORKER_TYPE, 1, 1000); } catch {} })();
+void (async () => { try { await Workers.prewarmType(RATELIMIT_WORKER_TYPE, 1, 1000); } catch { } })();
 
 // Small helper to process ratelimits via worker
 async function processRateLimitsWorker(users: Array<{ uid: string; time_left: number }>, limits: Array<{ uid: string; time_left: number; username: string }>, decrementMs = 1000) {
@@ -193,6 +193,9 @@ const utils = {
     retrieve_owners: (): string[] => {
       return data.bot.owners;
     },
+    isOwner: (userId: string): boolean => {
+      return isOwner(userId);
+    },
     fetch_user: async (args: { userId: string }): Promise<{ error: string } | { user: DiscordUser }> => {
       if (!args.userId) return { error: "Missing userId parameter" };
       const user = await db.query("SELECT * FROM discord_users WHERE id = ?", [args.userId]) as unknown as DiscordUser[];
@@ -222,6 +225,16 @@ const utils = {
     insert_memory: async (args: { userId: string; memory: string }): Promise<any> => {
       if (!args.userId || !args.memory) return { error: "Missing parameters" };
       await db.query("INSERT INTO ai_memories SET ?", [{ uid: args.userId, memory: args.memory }]);
+      return { success: true };
+    },
+    remove_memory: async (args: { memoryId: number }): Promise<any> => {
+      if (!args.memoryId) return { error: "Missing memoryId parameter" };
+      await db.query("DELETE FROM ai_memories WHERE id = ?", [args.memoryId]);
+      return { success: true };
+    },
+    remove_memories: async (args: { userId: string }): Promise<any> => {
+      if (!args.userId) return { error: "Missing userId parameter" };
+      await db.query("DELETE FROM ai_memories WHERE uid = ?", [args.userId]);
       return { success: true };
     },
     fetch_ai_rules: async (): Promise<any> => {
@@ -615,7 +628,7 @@ const utils = {
       sandbox.__filename = undefined;
       try {
         const scriptSource = `(async () => {\n${args.code}\n})()`;
-  const script = new vm.Script(scriptSource, { filename: "ai-workspace.js" });
+        const script = new vm.Script(scriptSource, { filename: "ai-workspace.js" });
         const context = vm.createContext(sandbox, { name: "ai-sandbox" });
         const timeoutMs = 5000;
         const resultPromise = script.runInContext(context, { timeout: 1000 });
@@ -827,7 +840,7 @@ const utils = {
     // Consider .env owners as Owners even if not in DB
     try {
       if (data.bot.owners.includes(userId)) return "Owner";
-    } catch {}
+    } catch { }
     return null;
   },
   setUserStaffRank: async (userId: string, rank: string | null): Promise<void> => {
@@ -1063,7 +1076,7 @@ const utils = {
       return await interaction.reply(payload);
     } catch (err: any) {
       if (err?.code === 10008) {
-        try { return await interaction.followUp(payload); } catch {}
+        try { return await interaction.followUp(payload); } catch { }
       }
       throw err;
     }
@@ -1073,7 +1086,7 @@ const utils = {
       return await i.update(payload);
     } catch (err: any) {
       if (err?.code === 10008) {
-        try { return await i.followUp(payload); } catch {}
+        try { return await i.followUp(payload); } catch { }
       }
       throw err;
     }
