@@ -47,9 +47,9 @@ export default {
         // Resolve users (fetch if missing) to improve display names
         for (let i = 0; i < rows.length; i++) {
             const d = rows[i];
-            let user = interaction.client.users.cache.get(d.uid);
+            let user = interaction.client.users.cache.get(d.uid!);
             if (!user) {
-                try { user = await interaction.client.users.fetch(d.uid); } catch {}
+                try { user = await interaction.client.users.fetch(d.uid!); } catch {}
             }
             const place = i < 3 ? medals[i] : `#${i + 1}`;
             const display = user ? `${user.displayName} (@${user.username})` : `Unknown User`;
