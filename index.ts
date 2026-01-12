@@ -28,6 +28,7 @@ import { initializeShopItems, initializeRPGData } from "./rpg_init";
 import utils from "./utils";
 import load_slash from "./load_slash";
 import ChatManager from "./managers/ChatManager";
+import StaffRanksManager from "./managers/StaffRanksManager";
 import GlobalCommandsManager from "./managers/GlobalCommandsManager";
 import WarningCleanup from "./WarningCleanup";
 import Workers from "./Workers";
@@ -71,6 +72,7 @@ client.on("clientReady", async (): Promise<any> => {
         username: client.user?.tag
     });
     queries();
+    await StaffRanksManager.initialize();
     initializeShopItems();
     initializeRPGData();
     const staffMembers: any = await db.query("SELECT * FROM staff");
@@ -1340,7 +1342,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 }
                 break;
             }
-            case "": {}
+            case "": { }
         }
         return;
     }

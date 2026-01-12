@@ -190,7 +190,7 @@ export default {
             .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true))
             .addIntegerOption(o => o.setName("item_id").setDescription("Item ID").setRequired(true))
             .addIntegerOption(o => o.setName("quantity").setDescription("Quantity (default: 1)").setRequired(false)))
-        ,
+    ,
     category: "Bot Staff",
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         const sub = interaction.options.getSubcommand();
@@ -559,7 +559,7 @@ export default {
 
                         // Announce to staff
                         const { manager } = await import("..");
-                        await manager.announce(`✅ **Appeal Approved**: Warning #${warningId} for ${user?.username || "Unknown"} has been removed by ${executor.username}.`, "en");
+                        await manager.Log(`✅ **Appeal Approved**: Warning #${warningId} for ${user?.username || "Unknown"} has been removed by ${executor.username}.`, "en");
 
                         await logStaffAction(executor.id, "APPROVE_APPEAL", warning.userid, `Approved appeal for warning #${warningId}`, { warningId, warning: warning.reason });
 
@@ -589,7 +589,7 @@ export default {
 
                         // Announce to staff
                         const { manager } = await import("..");
-                        await manager.announce(`❌ **Appeal Denied**: Warning #${warningId} for ${user?.username || "Unknown"} remains active (reviewed by ${executor.username}).`, "en");
+                        await manager.Log(`❌ **Appeal Denied**: Warning #${warningId} for ${user?.username || "Unknown"} remains active (reviewed by ${executor.username}).`, "en");
 
                         await logStaffAction(executor.id, "DENY_APPEAL", warning.userid, `Denied appeal for warning #${warningId}`, { warningId, warning: warning.reason });
 

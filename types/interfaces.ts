@@ -23,6 +23,8 @@ export interface DataType {
         home_guild: string;
         support_category: string;
         transcripts_channel: string;
+        staff_ranks: StaffRank[];
+        default_staff_ranks: string[];
     }
 }
 export interface BotEmoji {
@@ -328,6 +330,15 @@ export interface RPGAccountStatus {
 export interface StaffMember {
     uid: string;
     rank: string;
+    hierarchy_position: number;
+}
+
+export interface StaffRank {
+    id: number;
+    name: string;
+    hierarchy_position: number;
+    permissions: string[];
+    created_at: number;
 }
 
 export interface AIMemory {

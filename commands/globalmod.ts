@@ -90,8 +90,7 @@ export default {
     .addSubcommand(s => s.setName("warn").setDescription("Warn a user globally")
       .addUserOption(o => o.setName("user").setDescription("User").setRequired(true))
       .addStringOption(o => o.setName("reason").setDescription("Reason").setRequired(true))
-      .addIntegerOption(o => o.setName("points").setDescription("Warning points (1-5, default: 1)").setMinValue(1).setMaxValue(5).setRequired(false))
-      .addStringOption(o => o.setName("category").setDescription("Warning category").setRequired(false)
+      .addStringOption(o => o.setName("category").setDescription("Warning category").setRequired(true)
         .addChoices(
           { name: "Spam", value: "spam" },
           { name: "Harassment", value: "harassment" },
@@ -104,6 +103,7 @@ export default {
           { name: "Disrespect", value: "disrespect" },
           { name: "General", value: "general" }
         ))
+      .addIntegerOption(o => o.setName("points").setDescription("Warning points (1-5, default: 1)").setMinValue(1).setMaxValue(5).setRequired(false))
       .addIntegerOption(o => o.setName("expiry_days").setDescription("Days until expiry (30/60/90, default: 30)").setRequired(false)
         .addChoices(
           { name: "30 days", value: 30 },
@@ -158,10 +158,8 @@ export default {
         const perm = ensureAnyStaff(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
-        // Calculate expiry timestamp
         const expiresAt = Date.now() + (expiryDays * 24 * 60 * 60 * 1000);
 
-        // Insert warning with enhanced data
         await db.query("INSERT INTO global_warnings SET ?", [{
           userid: user.id,
           reason,
@@ -174,13 +172,13 @@ export default {
           appealed: false
         }]);
 
-        const warningResult = (await db.query("SELECT LAST_INSERT_ID() as id") as unknown as LastInsertIdResult[]);
-        const warningId = warningResult[0].id;
+        const warningId = await (async () => {
+          const result = await db.query("SELECT id WHERE userid = ? ORDER BY createdAt DESC LIMIT 1", [user.id]) as unknown as LastInsertIdResult[];
+          return result[0]?.id || 0;
+        })();
 
-        // Check for auto-escalation
         const pointCheck = await checkUserPoints(user.id, user.username, executor.id, executor.username);
 
-        // Category emoji mapping
         const categoryEmojis: Record<string, string> = {
           spam: "📧",
           harassment: "😡",
@@ -209,7 +207,19 @@ export default {
           responseMessage += `\n\n🚨 **AUTO-ESCALATION TRIGGERED**: User ${pointCheck.action === "ban" ? "blacklisted" : "muted"} due to ${pointCheck.totalPoints} points!`;
         }
 
-        await manager.announce(responseMessage, "en");
+        await manager.Log(responseMessage, {
+          warningId,
+          userid: user.id,
+          reason,
+          points,
+          category,
+          expiresAt,
+          executorId: executor.id,
+          executorUsername: executor.username,
+          totalPoints: pointCheck.totalPoints,
+          escalated: pointCheck.escalated,
+          escalationAction: pointCheck.action,
+        });
 
         // DM the user
         try {
@@ -500,7 +510,7 @@ export default {
         });
         if (allUsers.size === 0) return utils.safeInteractionRespond(interaction, `No users found matching '${username}'.`);
         const matches = Array.from(allUsers.values()).slice(0, 100);
-        const userStatusCache: Array<{user: any; rank: string; blacklisted: boolean; muted: boolean; points: number}> = [];
+        const userStatusCache: Array<{ user: any; rank: string; blacklisted: boolean; muted: boolean; points: number }> = [];
         for (const u of matches) {
           const rank = await utils.getUserStaffRank(u.id);
           const blacklisted = await utils.isUserBlacklisted(u.id);
@@ -557,7 +567,7 @@ export default {
           if (i.customId === "search_prev" && page > 0) page--; else if (i.customId === "search_next" && page + 1 < totalPages) page++; else if (i.customId === "search_stop") { collector.stop("stop"); return utils.safeComponentUpdate(i, { embeds: [buildEmbed()], components: [] }); }
           await utils.safeComponentUpdate(i, { embeds: [buildEmbed()], components: [makeRow()] });
         });
-        collector.on("end", async (_: any, r: any) => { if (r !== "stop") try { await (msg as any).edit({ embeds: [buildEmbed()], components: [] }); } catch {} });
+        collector.on("end", async (_: any, r: any) => { if (r !== "stop") try { await (msg as any).edit({ embeds: [buildEmbed()], components: [] }); } catch { } });
         return;
       }
     }

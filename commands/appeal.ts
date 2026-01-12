@@ -15,7 +15,6 @@ export default {
     const appealReason = interaction.options.getString("reason", true);
     const user = interaction.user;
 
-    // Check if warning exists and belongs to the user
     const warningData: any = await db.query("SELECT * FROM global_warnings WHERE id = ? AND userid = ?", [warningId, user.id]);
 
     if (!warningData[0]) {
@@ -24,7 +23,6 @@ export default {
 
     const warning = warningData[0];
 
-    // Check if already appealed
     if (warning.appealed) {
       if (warning.appeal_status === "pending") {
         return utils.safeInteractionRespond(interaction, `Warning #${warningId} has already been appealed and is pending review.`);
@@ -35,23 +33,19 @@ export default {
       }
     }
 
-    // Check if warning is expired
     if (warning.expires_at <= Date.now()) {
       return utils.safeInteractionRespond(interaction, `Warning #${warningId} has already expired and doesn't need to be appealed.`);
     }
 
-    // Check if warning is inactive
     if (!warning.active) {
       return utils.safeInteractionRespond(interaction, `Warning #${warningId} is already inactive.`);
     }
 
-    // Update warning with appeal
     await db.query(
       "UPDATE global_warnings SET appealed = TRUE, appeal_status = 'pending', appeal_reason = ? WHERE id = ?",
       [appealReason, warningId]
     );
 
-    // Notify staff via global chat
     const categoryEmojis: Record<string, string> = {
       spam: "📧",
       harassment: "😡",
@@ -77,9 +71,8 @@ export default {
     staffNotification += `**Appeal Reason:**\n${appealReason}\n\n`;
     staffNotification += `Staff can review this appeal using \`/stafftools reviewappeals\``;
 
-    await manager.announce(staffNotification, "en");
+    await manager.Log(staffNotification);
 
-    // Send confirmation to user
     const confirmEmbed = new EmbedBuilder()
       .setColor("Blue")
       .setTitle("📋 Appeal Submitted")
