@@ -1340,7 +1340,6 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 }
                 break;
             }
-            case "": {}
         }
         return;
     }

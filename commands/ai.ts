@@ -127,12 +127,13 @@ export default {
                 await reply(`${texts.common.started_chat} \`stop ai, ai stop, stop chat, end ai\`\n${texts.common.can_take_time}`);
                 collector?.on("collect", async (message: Message): Promise<any> => {
                     if (isWaitingForResponse) return;
-                    await (interaction.channel as TextChannel).sendTyping?.();
                     if (["stop ai", "ai stop", "stop chat", "end ai"].some(stop => message.content.toLowerCase().includes(stop))) {
                         await reply(texts.common.stopped_ai);
+                        await message.react("🛑");
                         collector?.stop();
                         return;
                     }
+                    await (interaction.channel as TextChannel).sendTyping?.();
 
                     let imageDescription = "";
                     if (message.attachments.size > 0) {
@@ -155,7 +156,7 @@ export default {
                     const safety = await NVIDIAModels.GetConversationSafety([
                         { role: "user", content: userContent }
                     ]);
-                    if (!safety.safe) {
+                    if (!safety.safe && !(await utils.getUserStaffRank(interaction.user.id))) {
                         if (lang !== "en") {
                             safety.reason = (await utils.translate(safety.reason || "", "en", lang)).text;
                         }
