@@ -1342,7 +1342,10 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 }
                 break;
             }
+<<<<<<< HEAD
             case "": { }
+=======
+>>>>>>> cb1a7a2a7e44a2e4048537aad00d12d9e531c07b
         }
         return;
     }

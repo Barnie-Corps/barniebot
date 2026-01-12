@@ -228,9 +228,9 @@ const utils = {
       await db.query("INSERT INTO ai_memories SET ?", [{ uid: args.userId, memory: args.memory }]);
       return { success: true };
     },
-    remove_memory: async (args: { memoryId: number }): Promise<any> => {
-      if (!args.memoryId) return { error: "Missing memoryId parameter" };
-      await db.query("DELETE FROM ai_memories WHERE id = ?", [args.memoryId]);
+    remove_memory: async (args: { userId: string; memoryId: number }): Promise<any> => {
+      if (!args.userId || !args.memoryId) return { error: "Missing parameters" };
+      await db.query("DELETE FROM ai_memories WHERE id = ? AND uid = ?", [args.memoryId, args.userId]);
       return { success: true };
     },
     remove_memories: async (args: { userId: string }): Promise<any> => {
@@ -632,7 +632,7 @@ const utils = {
         const script = new vm.Script(scriptSource, { filename: "ai-workspace.js" });
         const context = vm.createContext(sandbox, { name: "ai-sandbox" });
         const timeoutMs = 5000;
-        const resultPromise = script.runInContext(context, { timeout: 1000 });
+        const resultPromise = script.runInContext(context, { timeout: timeoutMs });
         const executionResult = await Promise.race([
           resultPromise,
           new Promise((_, reject) => setTimeout(() => reject(new Error("Execution timed out")), timeoutMs))
