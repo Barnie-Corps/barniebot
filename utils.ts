@@ -2,6 +2,7 @@ import * as crypto from "crypto";
 import * as async from "async";
 import Workers from "./Workers";
 import type { WorkerHandle } from "./managers/WorkerManager";
+import StaffRanksManager from "./managers/StaffRanksManager";
 import path from "path";
 import db from "./mysql/database";
 import { ChatSession } from "@google/generative-ai";
@@ -793,40 +794,33 @@ const utils = {
   processRateLimitsWorker,
   // --- Staff utilities ---
   getStaffRanks: (): Array<string> => [
-    "Support",
-    "Moderator",
-    "Senior Moderator",
-    "Chief of Moderation",
-    "Probationary Administrator",
-    "Administrator",
-    "Chief of Staff",
-    "Owner"
+    ...data.bot.staff_ranks.map(r => r.name)
   ],
   getStaffRankIndex: (rank?: string | null): number => {
-    const ordered = utils.getStaffRanks();
-    if (!rank) return -1;
-    return ordered.findIndex(r => r.toLowerCase() === String(rank).toLowerCase());
+    return StaffRanksManager.getRankHierarchyByName(rank ?? null);
   },
   getRankSuffix: (rank?: string | null): string => {
     if (!rank) return "";
     const map: Record<string, string> = {
+        "Trial Support": "Trial SUPPORT",
       "Support": "SUPPORT",
+        "Intern": "INTERN",
+        "Trial Moderator": "Trial MOD",
       "Moderator": "MOD",
       "Senior Moderator": "SR MOD",
       "Chief of Moderation": "CoM",
       "Probationary Administrator": "pADMIN",
       "Administrator": "ADMIN",
+        "Head Administrator": "Head ADMIN",
       "Chief of Staff": "CoS",
+        "Co-Owner": "Co-OWNER",
       "Owner": "OWNER"
     };
     return map[rank] ?? rank.toUpperCase();
   },
   sanitizeStaffImpersonation: (name: string): string => {
-    // Remove leading staff-like bracketed tags if user is not actually staff.
-    // Patterns we consider impersonation tokens (case-insensitive): SUPPORT, MOD, SR MOD, CoM, pADMIN, ADMIN, CoS, OWNER
-    const pattern = /^\[(SUPPORT|MOD|SR MOD|COM|PADMIN|ADMIN|COS|OWNER)\]\s*/i;
+    const pattern = /^\[(TRIAL\s+SUPPORT|SUPPORT|INTERN|TRIAL\s+MOD|MOD|SR\s+MOD|COM|PADMIN|HEAD\s+ADMIN|ADMIN|COS|CO-OWNER|OWNER)\]\s*/i;
     let sanitized = name;
-    // Strip multiple chained tags if present
     let guard = 0;
     while (pattern.test(sanitized) && guard < 5) {
       sanitized = sanitized.replace(pattern, "");
@@ -835,12 +829,13 @@ const utils = {
     return sanitized.trim();
   },
   getUserStaffRank: async (userId: string): Promise<string | null> => {
-    const res: any = await db.query("SELECT rank FROM staff WHERE uid = ?", [userId]);
-    if (Array.isArray(res) && res[0]?.rank) return String(res[0].rank);
-    // Consider .env owners as Owners even if not in DB
-    try {
-      if (data.bot.owners.includes(userId)) return "Owner";
-    } catch { }
+    if (data.bot.owners.includes(userId)) return "Owner";
+    const res: any = await db.query("SELECT hierarchy_position FROM staff WHERE uid = ?", [userId]);
+    if (Array.isArray(res) && res[0]?.hierarchy_position !== undefined) {
+      const hierarchy = Number(res[0].hierarchy_position);
+      const rankData = StaffRanksManager.getRankByHierarchy(hierarchy);
+      return rankData ? rankData.name : null;
+    }
     return null;
   },
   setUserStaffRank: async (userId: string, rank: string | null): Promise<void> => {
@@ -848,9 +843,12 @@ const utils = {
       await db.query("DELETE FROM staff WHERE uid = ?", [userId]);
       return;
     }
+    const hierarchy = StaffRanksManager.getRankHierarchyByName(rank);
+    const rankData = StaffRanksManager.getRankByName(rank);
+    const rankName = rankData ? rankData.name : rank;
     const existing: any = await db.query("SELECT * FROM staff WHERE uid = ?", [userId]);
-    if (existing?.length) await db.query("UPDATE staff SET ? WHERE uid = ?", [{ rank: utils.getStaffRanks()[utils.getStaffRankIndex(rank)] }, userId]);
-    else await db.query("INSERT INTO staff SET ?", [{ uid: userId, rank: utils.getStaffRanks()[utils.getStaffRankIndex(rank)] }]);
+    if (existing?.length) await db.query("UPDATE staff SET ? WHERE uid = ?", [{ rank: rankName, hierarchy_position: hierarchy }, userId]);
+    else await db.query("INSERT INTO staff SET ?", [{ uid: userId, rank: rankName, hierarchy_position: hierarchy }]);
   },
   // Blacklist / mute helpers for global chat
   isUserBlacklisted: async (userId: string): Promise<boolean> => {
@@ -874,6 +872,18 @@ const utils = {
    * Parallel translation for nested objects with breadth-first batching.
    * Avoids deep recursion blocking and maximizes concurrency across available workers.
    */
+    hasPermission: (rank: string | null, permission: string): boolean => {
+      return StaffRanksManager.hasPermission(rank, permission);
+    },
+    hasMinimumRank: (userRank: string | null, minimumRank: string): boolean => {
+      return StaffRanksManager.hasMinimumRank(userRank, minimumRank);
+    },
+    getStaffRankByHierarchy: (hierarchy: number) => {
+      return StaffRanksManager.getRankByHierarchy(hierarchy);
+    },
+    getStaffRankByName: (name: string) => {
+      return StaffRanksManager.getRankByName(name);
+    },
   autoTranslateParallel: async (obj: any, language: string, target: string): Promise<typeof obj> => {
     if (typeof obj !== "object" || Array.isArray(obj)) throw new TypeError(`autoTranslateParallel expects an object, got ${Array.isArray(obj) ? "Array" : typeof obj}`);
     if (typeof language !== "string") throw new TypeError(`autoTranslateParallel expects language as string, got ${typeof language}`);
@@ -1073,6 +1083,7 @@ const utils = {
   safeInteractionRespond: async (interaction: any, payload: any) => {
     try {
       if (interaction.replied || interaction.deferred) return await interaction.editReply(payload);
+      if (typeof payload === "object" && !payload.content) payload.content = "";
       return await interaction.reply(payload);
     } catch (err: any) {
       if (err?.code === 10008) {

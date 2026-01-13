@@ -1,4 +1,4 @@
-import { Attachment, Collection, Guild, JSONEncodable, Message, User, WebhookClient } from "discord.js";
+import { Attachment, Collection, Guild, JSONEncodable, Message, TextChannel, User, WebhookClient } from "discord.js";
 import client from "..";
 import db from "../mysql/database";
 import EventEmitter from "events";
@@ -105,32 +105,42 @@ export default class ChatManager extends EventEmitter {
             return Log.info("Ignoring muted user message.", { userId: message.author.id });
         }
         if (this.isRatelimited(message.author.id)) return Log.info(`Ignoring user ${message.author.username} as they're ratelimited.`, { userId: message.author.id, username: message.author.username });
-        
+
         const guilds = await this.getActiveGuilds();
         const priority = guilds.length > 50 ? 1 : 0;
-        
+
         this.messageQueue.push({
             message,
             priority,
             timestamp: Date.now()
         });
-        
-        message.react(data.bot.loadingEmoji.id).catch(() => {});
+
+        message.react(data.bot.loadingEmoji.id).catch(() => { });
     }
-    
+
+    public async Log(message: string, metadata?: any): Promise<void> {
+        const LogChannel = client.channels.cache.get(data.bot.log_channel) as TextChannel | null;
+        if (!LogChannel || !LogChannel.isTextBased()) return;
+        const path = metadata && typeof metadata === "object" ? Object.entries(metadata).map(([k, v]) => `${k}=${v}`).join(" ") : "";
+        if (path) message += `\n\`\`\`yaml\n${path}\n\`\`\``;
+        LogChannel.send({ content: message }).catch(() => {
+            Log.warn("Failed to send log message to log channel.", metadata);
+        });
+    }
+
     private async processMessageQueue(): Promise<void> {
         if (this.isProcessingQueue || this.messageQueue.length === 0) return;
         this.isProcessingQueue = true;
-        
+
         this.messageQueue.sort((a, b) => b.priority - a.priority || a.timestamp - b.timestamp);
-        
+
         const batch = this.messageQueue.splice(0, 5);
-        
+
         await Promise.allSettled(batch.map(item => this.dispatchMessage(item.message)));
-        
+
         this.isProcessingQueue = false;
     }
-    
+
     private async dispatchMessage(message: Message<true>): Promise<any> {
         const start = Date.now();
         const [guilds, userLanguage, baseContent] = await Promise.all([
@@ -142,26 +152,26 @@ export default class ChatManager extends EventEmitter {
         const languageName = this.resolveLanguageName(userLanguage);
         const hasTextContent = baseContent.trim().length > 0;
         let sanitizedDefaultContent = this.sanitizeContent(baseContent);
-        
+
         // Handle attachments: append URLs to content for webhook compatibility
         const hasAttachments = message.attachments.size > 0;
         const attachmentUrls = hasAttachments ? message.attachments.map(att => att.url).join('\n') : '';
-        
+
         if (hasAttachments) {
             // Append attachment URLs to content (webhooks will auto-embed them)
-            sanitizedDefaultContent = sanitizedDefaultContent.trim() 
-                ? `${sanitizedDefaultContent}\n${attachmentUrls}` 
+            sanitizedDefaultContent = sanitizedDefaultContent.trim()
+                ? `${sanitizedDefaultContent}\n${attachmentUrls}`
                 : attachmentUrls;
         }
-        
+
         // Fallback for truly empty messages
         if (!sanitizedDefaultContent || !sanitizedDefaultContent.trim().length) {
             sanitizedDefaultContent = "*Empty message*";
         }
-    const rank = await this.getUserStaffRankCached(message.author.id);
-    const suffix = utils.getRankSuffix(rank);
-    const baseName = message.member?.nickname ?? message.author.displayName;
-    const senderUsername = suffix ? `[${suffix}] ${baseName}` : utils.sanitizeStaffImpersonation(baseName);
+        const rank = await this.getUserStaffRankCached(message.author.id);
+        const suffix = utils.getRankSuffix(rank);
+        const baseName = message.member?.nickname ?? message.author.displayName;
+        const senderUsername = suffix ? `[${suffix}] ${baseName}` : utils.sanitizeStaffImpersonation(baseName);
         const senderAvatarURL = message.author.displayAvatarURL();
         const getTranslatedContent = this.createTranslationResolver(
             baseContent,
@@ -187,54 +197,54 @@ export default class ChatManager extends EventEmitter {
         for (let i = 0; i < filtered.length; i += BATCH_SIZE) {
             batches.push(filtered.slice(i, i + BATCH_SIZE));
         }
-        
+
         for (const batch of batches) {
             const batchTasks = batch.map(async (graw: any) => {
-            const guild = client.guilds.cache.get(graw.guild) as Guild | undefined;
-            if (!guild) {
-                Promise.resolve(db.query("DELETE FROM globalchats WHERE guild = ?", [graw.guild])).catch(() => {});
-                this.invalidateGuildCache();
-                return;
-            }
-            const targetLanguage = typeof graw.language === "string" ? graw.language : String(graw.language ?? "");
-            const shouldTranslate = Boolean(graw.autotranslate) && targetLanguage && targetLanguage.toLowerCase() !== normalizedUserLanguage;
-            const webhook = this.getWebhook(graw);
-            const contentToSend = shouldTranslate ? await getTranslatedContent(targetLanguage) : sanitizedDefaultContent;
-            try {
-                await webhook.send({
-                    username: senderUsername,
-                    avatarURL: senderAvatarURL,
-                    content: contentToSend,
-                    allowedMentions: { parse: [] }
-                });
-            }
-            catch (error: any) {
-                failed = true;
-                this.webhookCache.delete(graw.webhook_id);
-            }
+                const guild = client.guilds.cache.get(graw.guild) as Guild | undefined;
+                if (!guild) {
+                    Promise.resolve(db.query("DELETE FROM globalchats WHERE guild = ?", [graw.guild])).catch(() => { });
+                    this.invalidateGuildCache();
+                    return;
+                }
+                const targetLanguage = typeof graw.language === "string" ? graw.language : String(graw.language ?? "");
+                const shouldTranslate = Boolean(graw.autotranslate) && targetLanguage && targetLanguage.toLowerCase() !== normalizedUserLanguage;
+                const webhook = this.getWebhook(graw);
+                const contentToSend = shouldTranslate ? await getTranslatedContent(targetLanguage) : sanitizedDefaultContent;
+                try {
+                    await webhook.send({
+                        username: senderUsername,
+                        avatarURL: senderAvatarURL,
+                        content: contentToSend,
+                        allowedMentions: { parse: [] }
+                    });
+                }
+                catch (error: any) {
+                    failed = true;
+                    this.webhookCache.delete(graw.webhook_id);
+                }
             });
             await Promise.allSettled(batchTasks);
         }
         const dispatchEnd = Date.now();
         const content = utils.encryptWithAES(data.bot.encryption_key, message.content);
-        Promise.resolve(db.query("INSERT INTO global_messages SET ?", [{ uid: message.author.id, content: content || "[EMPTY MESSAGE]", language: userLanguage }])).catch(() => {});
+        Promise.resolve(db.query("INSERT INTO global_messages SET ?", [{ uid: message.author.id, content: content || "[EMPTY MESSAGE]", language: userLanguage }])).catch(() => { });
         await message.reactions.removeAll().catch(() => null);
         if (failed) {
-            message.react("800125816633557043").catch(() => {});
-            message.react("869607044892741743").catch(() => {});
+            message.react("800125816633557043").catch(() => { });
+            message.react("869607044892741743").catch(() => { });
         }
         const dispatchTime = dispatchEnd - start;
-        if (dispatchTime >= 900) Log.info(`Slow dispatch of message with ID ${message.id} from author ${message.author.username}`, { 
-            messageId: message.id, 
-            authorId: message.author.id, 
+        if (dispatchTime >= 900) Log.info(`Slow dispatch of message with ID ${message.id} from author ${message.author.username}`, {
+            messageId: message.id,
+            authorId: message.author.id,
             username: message.author.username,
             dispatchTime: dispatchTime,
             totalDuration: Date.now() - start,
             slow: true
         });
-        else Log.info(`Message dispatch completed`, { 
-            messageId: message.id, 
-            authorId: message.author.id, 
+        else Log.info(`Message dispatch completed`, {
+            messageId: message.id,
+            authorId: message.author.id,
             username: message.author.username,
             dispatchTime: dispatchTime,
             totalDuration: Date.now() - start
@@ -243,27 +253,27 @@ export default class ChatManager extends EventEmitter {
     public async announce(message: string, language: string, attachments?: Collection<string, Attachment>): Promise<void> {
         const guilds = await this.getActiveGuilds();
         if (guilds.length === 0) return;
-        
+
         // Handle attachments by appending URLs to content
         const hasAttachments = attachments && attachments.size > 0;
         const attachmentUrls = hasAttachments ? attachments.map(att => att.url).join('\n') : '';
-        
+
         const normalizedLanguage = (language ?? "en").toLowerCase();
         const sourceLanguageName = langs.where("1", language)?.name ?? language;
         let sanitizedDefaultContent = message.trim();
-        
+
         // Append attachment URLs to content
         if (hasAttachments) {
-            sanitizedDefaultContent = sanitizedDefaultContent 
-                ? `${sanitizedDefaultContent}\n${attachmentUrls}` 
+            sanitizedDefaultContent = sanitizedDefaultContent
+                ? `${sanitizedDefaultContent}\n${attachmentUrls}`
                 : attachmentUrls;
         }
-        
+
         // Fallback for truly empty messages
         if (!sanitizedDefaultContent || !sanitizedDefaultContent.trim().length) {
             sanitizedDefaultContent = "*Empty message*";
         }
-        
+
         const hasTextContent = message.trim().length > 0;
         const getTranslatedContent = this.createTranslationResolver(
             message,
@@ -286,7 +296,7 @@ export default class ChatManager extends EventEmitter {
         const tasks = guilds.map(async (graw: any) => {
             const guild = client.guilds.cache.get(graw.guild) as Guild | undefined;
             if (!guild) {
-                Promise.resolve(db.query("DELETE FROM globalchats WHERE guild = ?", [graw.guild])).catch(() => {});
+                Promise.resolve(db.query("DELETE FROM globalchats WHERE guild = ?", [graw.guild])).catch(() => { });
                 this.invalidateGuildCache();
                 return;
             }
@@ -384,9 +394,9 @@ export default class ChatManager extends EventEmitter {
     private async getActiveGuilds(): Promise<any[]> {
         const now = Date.now();
         if (this.guildCache && this.guildCache.expires > now) return this.guildCache.data;
-    const guildsRaw: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
-    const guilds: any[] = Array.isArray(guildsRaw) ? [...guildsRaw] : [];
-    const sorted = guilds.sort((g1: any, g2: any) => {
+        const guildsRaw: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
+        const guilds: any[] = Array.isArray(guildsRaw) ? [...guildsRaw] : [];
+        const sorted = guilds.sort((g1: any, g2: any) => {
             if (Number(g1.autotranslate) === 1 && Number(g2.autotranslate) !== 1) return 1;
             if (Number(g2.autotranslate) === 1 && Number(g1.autotranslate) !== 1) return -1;
             return 0;
@@ -482,8 +492,8 @@ export default class ChatManager extends EventEmitter {
     private getWebhook(graw: any): WebhookClient {
         const cached = this.webhookCache.get(graw.webhook_id);
         if (cached) return cached;
-        const webhook = new WebhookClient({ 
-            id: graw.webhook_id, 
+        const webhook = new WebhookClient({
+            id: graw.webhook_id,
             token: graw.webhook_token
         });
         this.webhookCache.set(graw.webhook_id, webhook);
@@ -533,7 +543,7 @@ export default class ChatManager extends EventEmitter {
         const mute = res[0];
         const until = Number(mute.until) || 0;
         if (until > 0 && now >= until) {
-            Promise.resolve(db.query("DELETE FROM global_mutes WHERE id = ?", [userId])).catch(() => {});
+            Promise.resolve(db.query("DELETE FROM global_mutes WHERE id = ?", [userId])).catch(() => { });
             MUTE_CACHE.set(userId, { value: false, until: 0, expires: now + MODERATION_CACHE_TTL });
             return false;
         }

@@ -26,7 +26,7 @@ export default {
                 already_logged: "This account is already logged in on another Discord account",
                 frozen: "Your account has been frozen",
                 banned: "Your account has been banned",
-                no_character: "You need to create a character first! Use `/rpg create` to start your adventure"
+                no_character: "You need to create a character first! To start your adventure, use "
             },
             success: {
                 logged_in: "Welcome back! You have successfully logged in ",
@@ -135,7 +135,7 @@ export default {
                 .setTitle(texts.titles.login_success)
                 .setDescription(texts.success.logged_in + username)
                 .addFields(
-                    { name: "⚠️ No Character", value: "You don't have a character yet! Use `/rpg create` to begin your adventure.", inline: false }
+                    { name: "⚠️ No Character", value: `${texts.errors.no_character} \`/rpg create\``, inline: false }
                 )
                 .setFooter({ text: texts.success.session_info + new Date().toLocaleString() })
                 .setTimestamp();

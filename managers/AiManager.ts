@@ -4,7 +4,7 @@ import utils from "../utils";
 import { ChatSession, GoogleGenerativeAI } from "@google/generative-ai";
 import Log from "../Log";
 import AIFunctions from "../AIFunctions";
-import { Message } from "discord.js";
+import { Message, ActionRowBuilder, ButtonBuilder } from "discord.js";
 import * as fs from "fs";
 import path from "path";
 import data from "../data";
@@ -198,6 +198,30 @@ class AiManager extends EventEmitter {
                 await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} ${data.bot.loadingEmoji.mention}`);
                 return this.ExecuteFunction(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
             }
+        }
+        if (name === "send_email") {
+            const emailArgs = args as { to: string; subject: string; body: string };
+            const confirmRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+                new ButtonBuilder().setCustomId(`confirm_email_${Date.now()}`).setLabel("Confirm Send").setStyle(3),
+                new ButtonBuilder().setCustomId(`cancel_email_${Date.now()}`).setLabel("Cancel").setStyle(4)
+            )
+            await message.edit(`The AI requested to send an email, this action is not fully supported yet. ${data.bot.loadingEmoji.mention}`);
+            const rsp = await chat.sendMessage([
+                {
+                    functionResponse: {
+                        name,
+                        response: {
+                            result: { error: "Email support is not fully implemented yet" }
+                        }
+                    }
+                }
+            ]);
+            await message.edit({
+                content: `The AI is attempting to send an email with the following details:\n**To:** ${emailArgs.to}\n**Subject:** ${emailArgs.subject}\n**Body:**\n${emailArgs.body}\n\nPlease confirm to send the email or cancel to abort.`,
+                components: [confirmRow],
+                attachments: []
+            });
+            return;
         }
         let preparedArgs: any = args;
         if (["current_guild_info", "on_guild"].includes(name)) {

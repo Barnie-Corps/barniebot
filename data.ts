@@ -31,7 +31,23 @@ const data: DataType = {
         log_channel: "795453591212261461",
         home_guild: "772817759612174337",
         support_category: "1438707166159568991",
-        transcripts_channel: "1438709707874373632"
+        transcripts_channel: "1438709707874373632",
+        staff_ranks: [],
+        default_staff_ranks: [
+            "Trial Support",
+            "Support",
+            "Intern",
+            "Trial Moderator",
+            "Moderator",
+            "Senior Moderator",
+            "Chief of Moderation",
+            "Probationary Administrator",
+            "Administrator",
+            "Head Administrator",
+            "Chief of Staff",
+            "Co-Owner",
+            "Owner"
+        ]
     }
 }
 export default data;
