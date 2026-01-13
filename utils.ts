@@ -492,7 +492,7 @@ const utils = {
       if (args.numResults) url.searchParams.set("num", String(Math.min(Math.max(args.numResults, 1), 10)));
       const response = await fetch(url.toString());
       if (!response.ok) return { error: `Search request failed: ${response.status}` };
-      const data = await response.json();
+      const data = await response.json() as any;
       if (!Array.isArray(data.items)) return { results: [] };
       return {
         results: data.items.map((item: any) => ({

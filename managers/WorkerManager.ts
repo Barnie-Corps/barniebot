@@ -1,4 +1,4 @@
-import { Worker } from "worker_threads";
+import { Worker, WorkerOptions } from "worker_threads";
 import Log from "../Log";
 import EventEmitter from "events";
 import { Collection } from "../classes/Collection";
