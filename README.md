@@ -6,7 +6,7 @@ A powerful TypeScript Discord bot that bridges communities through global chat, 
 
 **Global Chat Network** – Connect multiple Discord servers with encrypted cross-guild messaging, automatic translation (20+ languages), staff rank suffixes, anti-impersonation protection, and global custom commands (`b.rules`, `b.help`).
 
-**AI Powered** – Google Gemini and NVIDIA AI models integration for conversational chat (`/ai chat`), quick and reasoning questions (`/ai ask`), and voice conversations with speech-to-text.
+**AI Powered** – NVIDIA AI models integration for conversational chat (`/ai chat`), quick and reasoning questions (`/ai ask`), and voice conversations with speech-to-text.
 
 **RPG System** – Complete character progression with account registration, 5 unique classes (Warrior, Mage, Rogue, Paladin, Archer), stat management, equipment system (7 slots), inventory management, shop with database-driven items, player-to-player trading, turn-based combat with difficulty scaling, quest system, and leaderboards. Includes single-session login enforcement, account status management (freeze/ban), and comprehensive admin tools.
 
@@ -41,7 +41,7 @@ A powerful TypeScript Discord bot that bridges communities through global chat, 
 - **Runtime**: Node.js 18+ with TypeScript
 - **Discord**: Discord.js v14 (Gateway + Interactions)
 - **Database**: MySQL 5.7+ with auto-migration
-- **AI**: Google Gemini API (chat + safety checks), NVIDIA models for reasoning
+- **AI**: NVIDIA AI models for chat, function calling, reasoning and voice.
 - **Workers**: Node.js worker threads for translation and rate limiting
 - **Security**: AES-256-CBC encryption, parameterized queries, staff impersonation stripping
 - **Mail**: Gmail SMTP for notifications
