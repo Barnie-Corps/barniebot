@@ -5,11 +5,10 @@ import type { WorkerHandle } from "./managers/WorkerManager";
 import StaffRanksManager from "./managers/StaffRanksManager";
 import path from "path";
 import db from "./mysql/database";
-import { ChatSession } from "@google/generative-ai";
+import type { NIMChatSession } from "./managers/NVIDIAModelsManager";
 import * as nodemailer from "nodemailer";
 import * as os from "os";
 import Log from "./Log";
-import AIFunctions from "./AIFunctions";
 import data from "./data";
 import client from ".";
 import { promises as fs } from "fs";
@@ -492,7 +491,7 @@ const utils = {
       if (args.numResults) url.searchParams.set("num", String(Math.min(Math.max(args.numResults, 1), 10)));
       const response = await fetch(url.toString());
       if (!response.ok) return { error: `Search request failed: ${response.status}` };
-      const data = await response.json();
+      const data = await response.json() as any;
       if (!Array.isArray(data.items)) return { results: [] };
       return {
         results: data.items.map((item: any) => ({
@@ -1029,7 +1028,7 @@ const utils = {
     if (!foundVip[0]) return false;
     else return true;
   },
-  getAiResponse: async (prompt: string, chat: ChatSession) => {
+  getAiResponse: async (prompt: string, chat: NIMChatSession) => {
     let result;
     try {
       result = await chat.sendMessage(prompt);

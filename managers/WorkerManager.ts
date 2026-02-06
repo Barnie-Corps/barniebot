@@ -1,4 +1,4 @@
-import { Worker } from "worker_threads";
+import { Worker, WorkerOptions } from "worker_threads";
 import Log from "../Log";
 import EventEmitter from "events";
 import { Collection } from "../classes/Collection";
@@ -9,7 +9,6 @@ type WorkerWaiter = {
     reject: (error: Error) => void;
     timeoutHandle?: NodeJS.Timeout;
 };
-
 export default class WorkerManager extends EventEmitter {
     private Cache: Collection<string, WorkerHandle> = new Collection();
     private RunningCache: Collection<string, WorkerHandle> = new Collection();
@@ -18,7 +17,6 @@ export default class WorkerManager extends EventEmitter {
     private reservations: Set<string> = new Set();
     private byType: Map<string, Set<string>> = new Map();
     private availableByType: Map<string, Set<string>> = new Map();
-    // Lightweight health/latency metrics per worker
     private metrics: Map<string, { lastPingMs?: number; avgPingMs?: number; failures: number; lastActiveAt?: number }> = new Map();
     constructor(public IDLength: number = 20, private cachePublic: boolean = false, public readonly typeLimit = 10, private keepAliveIntervalMs = 30000) {
         super();
@@ -272,9 +270,6 @@ export default class WorkerManager extends EventEmitter {
         return this.cachePublic ? this.Cache : null;
     };
 
-    /**
-     * Returns a summary of workers and latency metrics for diagnostics.
-     */
     public getWorkerStats(): {
         total: number;
         byType: Record<string, { total: number; available: number; running: number; avgPingMs?: number; lastPingMs?: number }>;

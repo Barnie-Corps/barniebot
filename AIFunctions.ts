@@ -1,4 +1,21 @@
-import { FunctionDeclarationsTool, FunctionDeclaration, SchemaType } from "@google/generative-ai";
+export enum SchemaType {
+    OBJECT = "object",
+    STRING = "string",
+    NUMBER = "number",
+    INTEGER = "integer",
+    BOOLEAN = "boolean",
+    ARRAY = "array"
+}
+
+export type FunctionDeclaration = {
+    name: string;
+    description: string;
+    parameters: {
+        type: SchemaType;
+        properties: Record<string, any>;
+        required?: string[];
+    };
+};
 
 const functionDeclarations = {
     get_user_data: {
@@ -453,10 +470,16 @@ const functionDeclarations = {
     }
 } as const satisfies Record<string, FunctionDeclaration>;
 
-const AIFunctions: FunctionDeclarationsTool[] = [
-    {
-        functionDeclarations: Object.values(functionDeclarations),
-    }
-];
+export const AIFunctionDeclarations = Object.values(functionDeclarations);
+
+export type OpenAIToolDefinition = {
+    type: "function";
+    function: FunctionDeclaration;
+};
+
+const AIFunctions: OpenAIToolDefinition[] = AIFunctionDeclarations.map(fn => ({
+    type: "function",
+    function: fn
+}));
 
 export default AIFunctions;
