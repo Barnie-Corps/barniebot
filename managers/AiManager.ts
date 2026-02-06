@@ -302,7 +302,7 @@ class AiManager extends EventEmitter {
                 await message.edit(reply.length ? reply : " ");
             }
         }
-        return reply; // Return the reply text so voice mode can use it for TTS
+        return reply;
     }
     private async GetChat(id: string, text: string): Promise<NIMChatSession> {
         let chat = this.chats.get(id);
@@ -312,7 +312,7 @@ class AiManager extends EventEmitter {
                 maxTokens: 800,
                 temperature: 0.7,
                 topP: 0.8,
-                systemInstruction: "At the start of the conversation, call the tools get_user_data, get_memories, fetch_ai_rules in that order before replying. Do not include <think> tags in responses."
+                systemInstruction: "Before responding to any user message at the start of the conversation, call the tools get_user_data, get_memories, and fetch_ai_rules in that order. Do not include <think> tags in responses."
             });
             this.chats.set(id, chat);
         }
@@ -326,7 +326,7 @@ class AiManager extends EventEmitter {
                 maxTokens: 256,
                 temperature: 0.7,
                 topP: 0.8,
-                systemInstruction: "You are the assistant's voice mode. Respond concisely (ideally 1–2 short sentences or tight bullets). Use the user's language. Avoid long explanations, code blocks, and heavy markdown unless explicitly requested. If a tool is needed, call it. At the start of the conversation, call the tools get_user_data, get_memories, fetch_ai_rules in that order before replying. Do not include <think> tags in responses."
+                systemInstruction: "You are the assistant's voice mode. Respond concisely (ideally 1–2 short sentences or tight bullets). Use the user's language. Avoid long explanations, code blocks, and heavy markdown unless explicitly requested. Before responding to any user message, call the tools get_user_data, get_memories, and fetch_ai_rules in that order. Do not include <think> tags in responses."
             });
             this.voiceChats.set(id, chat);
         }

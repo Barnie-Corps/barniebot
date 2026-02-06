@@ -34,7 +34,7 @@ class NIMChatSessionImpl implements NIMChatSession {
         private openai: OpenAi,
         private model: string,
         private tools: NIMToolDefinition[] | undefined,
-        private config: { max_tokens?: number; temperature?: number; top_p?: number },
+        private config: { max_tokens?: number; temperature?: number; top_p?: number; chat_template_kwargs?: any },
         systemInstruction?: string
     ) {
         if (systemInstruction) {
@@ -75,7 +75,8 @@ class NIMChatSessionImpl implements NIMChatSession {
             max_tokens: this.config.max_tokens,
             temperature: this.config.temperature,
             top_p: this.config.top_p,
-            stream: false
+            stream: false,
+            ...(this.config.chat_template_kwargs && { chat_template_kwargs: this.config.chat_template_kwargs })
         });
         const message = response.choices[0]?.message as any;
         if (message) {
@@ -133,8 +134,9 @@ export default class NVIDIAModelsManager {
             }
             const response = await this.openai.chat.completions.create({
                 model: this.GetTaskBasedModel(task).name,
-                messages: this.GetTaskBasedModel(task).hasThinkMode ? [{ role: "system", content: think ? "/think" : "/no_think" }, ...messages] : messages,
+                messages: messages,
                 stream: false,
+                ...(this.GetTaskBasedModel(task).hasThinkMode && { chat_template_kwargs: { thinking: think ?? false } }),
                 ...this.GetCustomTaskConfig(task)
             }, { signal: controller.signal as any });
             clearTimeout(timer);
@@ -146,7 +148,7 @@ export default class NVIDIAModelsManager {
         }
     }
     public CreateChatSession = (options: { tools?: NIMToolDefinition[]; systemInstruction?: string; maxTokens?: number; temperature?: number; topP?: number; model?: string } = {}): NIMChatSession => {
-        const model = options.model ?? "minimaxai/minimax-m2";
+        const model = options.model ?? "deepseek-ai/deepseek-v3.1-terminus";
         return new NIMChatSessionImpl(
             this.openai,
             model,
@@ -154,13 +156,14 @@ export default class NVIDIAModelsManager {
             {
                 max_tokens: options.maxTokens ?? 800,
                 temperature: options.temperature ?? 0.7,
-                top_p: options.topP ?? 0.8
+                top_p: options.topP ?? 0.8,
+                chat_template_kwargs: { thinking: false },
             },
             options.systemInstruction
         );
     }
     private GetTaskBasedModel = (task: string): { name: string, hasReasoning: boolean, hasThinkMode: boolean } => {
-        const base = { name: "minimaxai/minimax-m2", hasReasoning: false, hasThinkMode: false };
+        const base = { name: "deepseek-ai/deepseek-v3.1-terminus", hasReasoning: false, hasThinkMode: true };
         const taskModels: { [key: string]: { name: string, hasReasoning: boolean, hasThinkMode: boolean } } = {
             "chat": base,
             "reasoning": base,
