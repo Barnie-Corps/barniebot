@@ -70,7 +70,7 @@
     "es6-promise": "^4.2.8",
     "es6-promisify": "^5.0.0",
     "escape-string-regexp": "^4.0.0",
-    "eslint": "^7.32.0",
+    "eslint": "^9.26.0",
     "eslint-scope": "^5.1.1",
     "eslint-utils": "^2.1.0",
     "eslint-visitor-keys": "^2.1.0",
