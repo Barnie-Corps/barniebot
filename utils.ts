@@ -134,8 +134,8 @@ const collectSearchMatches = async (filePath: string, query: string, maxMatches:
   }
   return matches;
 };
-const isOwner = (userId: string | undefined | null): boolean => {
-  if (!userId) return false;
+const isOwner = (userId: string | undefined | null): boolean | string => {
+  if (!userId) return "no valid userId provided";
   return data.bot.owners.includes(userId);
 };
 const formatLogValue = (value: any): string => {
@@ -193,7 +193,7 @@ const utils = {
     retrieve_owners: (): string[] => {
       return data.bot.owners;
     },
-    isOwner: (userId: string): boolean => {
+    isOwner: (userId: string): boolean | string => {
       return isOwner(userId);
     },
     fetch_user: async (args: { userId: string }): Promise<{ error: string } | { user: DiscordUser }> => {
