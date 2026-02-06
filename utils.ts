@@ -50,6 +50,10 @@ const AI_WORKSPACE_ROOT = path.join(__dirname, "ai_workspace");
 const MAX_WORKSPACE_SCAN_RESULTS = 50;
 const MAX_FILE_SIZE_FOR_SEARCH = 1024 * 1024;
 const MAX_ATTACHMENT_SIZE = 8 * 1024 * 1024; // 8MB, safe default for Discord without Nitro
+const PROJECT_ROOT = process.cwd();
+const LOGS_ROOT = path.join(PROJECT_ROOT, "logs");
+const MAX_PROJECT_SCAN_RESULTS = 200;
+const MAX_LOG_READ_LINES = 500;
 const execPromise = promisify(execCallback);
 const ALLOWED_SANDBOX_MODULES = new Map<string, unknown>([
   ["mathjs", mathjs]
@@ -86,6 +90,20 @@ const resolveWorkspacePath = (targetPath = ".") => {
   const resolved = path.resolve(AI_WORKSPACE_ROOT, targetPath);
   if (!resolved.startsWith(AI_WORKSPACE_ROOT)) {
     throw new Error("Path escapes ai_workspace");
+  }
+  return resolved;
+};
+const resolveProjectPath = (targetPath = ".") => {
+  const resolved = path.resolve(PROJECT_ROOT, targetPath);
+  if (!resolved.startsWith(PROJECT_ROOT)) {
+    throw new Error("Path escapes project root");
+  }
+  return resolved;
+};
+const resolveLogsPath = (targetPath = ".") => {
+  const resolved = path.resolve(LOGS_ROOT, targetPath);
+  if (!resolved.startsWith(LOGS_ROOT)) {
+    throw new Error("Path escapes logs directory");
   }
   return resolved;
 };
@@ -134,6 +152,22 @@ const collectSearchMatches = async (filePath: string, query: string, maxMatches:
   }
   return matches;
 };
+const collectProjectSearchMatches = async (filePath: string, query: string, maxMatches: number) => {
+  const content = await fs.readFile(filePath, "utf8");
+  const lines = content.split(/\r?\n/);
+  const matches: { path: string; line: number; snippet: string }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].toLowerCase().includes(query.toLowerCase())) {
+      matches.push({
+        path: path.relative(PROJECT_ROOT, filePath).replace(/\\/g, "/"),
+        line: i + 1,
+        snippet: lines[i].trim().slice(0, 200)
+      });
+      if (matches.length >= maxMatches) break;
+    }
+  }
+  return matches;
+};
 const isOwner = (userId: string | undefined | null): boolean | string => {
   if (!userId) return "no valid userId provided";
   return data.bot.owners.includes(userId);
@@ -150,6 +184,88 @@ const truncate = (value: string, limit = 4000): string => {
   if (value.length <= limit) return value;
   return `${value.slice(0, limit)}…(truncated)`;
 };
+const parseToolCalls = (content: string): { cleanedText: string; toolCalls: Array<{ name: string; args: any }> } => {
+  const toolCalls: Array<{ name: string; args: any }> = [];
+  const beginTokens = ["<|tool_call_begin|>", "|tool_call_begin|"];
+  const sepTokens = ["<|tool_sep|>", "|tool_sep|"];
+  const endTokens = ["<|tool_call_end|>", "|tool_call_end|"];
+  const callsBeginTokens = ["<|tool_calls_begin|>", "|tool_calls_begin|"];
+  const callsEndTokens = ["<|tool_calls_end|>", "|tool_calls_end|"];
+  const ranges: Array<{ start: number; end: number }> = [];
+  let cursor = 0;
+  while (true) {
+    const beginIdx = beginTokens.reduce((best, token) => {
+      const idx = content.indexOf(token, cursor);
+      if (idx === -1) return best;
+      return best === -1 || idx < best ? idx : best;
+    }, -1 as number);
+    if (beginIdx === -1) break;
+    const matchedBeginToken = beginTokens.find(token => content.startsWith(token, beginIdx)) ?? beginTokens[0];
+    const nameStart = beginIdx + matchedBeginToken.length;
+    const sepIdx = sepTokens.reduce((best, token) => {
+      const idx = content.indexOf(token, nameStart);
+      if (idx === -1) return best;
+      return best === -1 || idx < best ? idx : best;
+    }, -1 as number);
+    if (sepIdx === -1) break;
+    const name = content.slice(nameStart, sepIdx).trim();
+    const matchedSepToken = sepTokens.find(token => content.startsWith(token, sepIdx)) ?? sepTokens[0];
+    const argsStart = sepIdx + matchedSepToken.length;
+    let endIdx = endTokens.reduce((best, token) => {
+      const idx = content.indexOf(token, argsStart);
+      if (idx === -1) return best;
+      return best === -1 || idx < best ? idx : best;
+    }, -1 as number);
+    if (endIdx === -1) {
+      const nextBegin = beginTokens.reduce((best, token) => {
+        const idx = content.indexOf(token, argsStart);
+        if (idx === -1) return best;
+        return best === -1 || idx < best ? idx : best;
+      }, -1 as number);
+      const nextCallsEnd = callsEndTokens.reduce((best, token) => {
+        const idx = content.indexOf(token, argsStart);
+        if (idx === -1) return best;
+        return best === -1 || idx < best ? idx : best;
+      }, -1 as number);
+      const candidates = [nextBegin, nextCallsEnd, content.length].filter(v => v !== -1) as number[];
+      endIdx = Math.min(...candidates);
+    }
+    const rawArgs = content.slice(argsStart, endIdx).trim();
+    let parsedArgs: any = {};
+    try {
+      const firstBrace = rawArgs.indexOf("{");
+      const lastBrace = rawArgs.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        parsedArgs = JSON.parse(rawArgs.slice(firstBrace, lastBrace + 1));
+      } else {
+        parsedArgs = JSON.parse(rawArgs);
+      }
+    } catch {
+      parsedArgs = {};
+    }
+    toolCalls.push({ name, args: parsedArgs });
+    const matchedEndToken = endTokens.find(token => content.startsWith(token, endIdx)) ?? endTokens[0];
+    const rangeEnd = endIdx === -1 ? content.length : endIdx + (content.slice(endIdx, endIdx + matchedEndToken.length) === matchedEndToken ? matchedEndToken.length : 0);
+    ranges.push({ start: beginIdx, end: rangeEnd });
+    cursor = rangeEnd;
+  }
+  const removalRanges = ranges.sort((a, b) => a.start - b.start);
+  let cleaned = "";
+  let lastIndex = 0;
+  for (const range of removalRanges) {
+    if (range.start > lastIndex) cleaned += content.slice(lastIndex, range.start);
+    lastIndex = Math.max(lastIndex, range.end);
+  }
+  if (lastIndex < content.length) cleaned += content.slice(lastIndex);
+  for (const token of callsBeginTokens) {
+    cleaned = cleaned.replace(new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), "");
+  }
+  for (const token of callsEndTokens) {
+    cleaned = cleaned.replace(new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), "");
+  }
+  cleaned = cleaned.trim();
+  return { cleanedText: cleaned, toolCalls };
+};
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
   port: 465,
@@ -161,6 +277,7 @@ const transporter = nodemailer.createTransport({
 });
 const utils = {
   createArrows: (length: number): string => "^".repeat(length),
+  parseToolCalls,
   AIFunctions: {
     get_user_data: async (id: string): Promise<{ error: string } | { user: DiscordUser; language: UserLanguage | string }> => {
       const user = await db.query("SELECT * FROM discord_users WHERE id = ?", [id]) as unknown as DiscordUser[];
@@ -1176,7 +1293,7 @@ const utils = {
       if (!args.query) return { error: "Missing query parameter" };
       const searchTerm = args.query.toLowerCase();
       const commands = Array.from(data.bot.commands.values())
-        .filter((cmd: any) => 
+        .filter((cmd: any) =>
           cmd.data?.name?.toLowerCase().includes(searchTerm) ||
           cmd.data?.description?.toLowerCase().includes(searchTerm) ||
           cmd.category?.toLowerCase().includes(searchTerm)
@@ -1238,6 +1355,242 @@ const utils = {
         endDate: vip[0].end_date,
         daysRemaining
       };
+    },
+    get_system_info: async (args: { requesterId?: string }): Promise<any> => {
+      if (!isOwner(args?.requesterId)) return { error: "Requester is not authorized to view system info" };
+      const mem = process.memoryUsage();
+      return {
+        platform: process.platform,
+        arch: process.arch,
+        node: process.version,
+        uptime: Math.floor(process.uptime()),
+        memory: {
+          heapUsed: Math.floor(mem.heapUsed / 1024 / 1024),
+          heapTotal: Math.floor(mem.heapTotal / 1024 / 1024),
+          rss: Math.floor(mem.rss / 1024 / 1024)
+        },
+        cpuCount: Array.isArray(os.cpus()) ? os.cpus().length : null,
+        cwd: PROJECT_ROOT
+      };
+    },
+    list_project_files: async (args: { path?: string; recursive?: boolean; maxResults?: number } = {}): Promise<any> => {
+      const directoryPath = resolveProjectPath(args.path ?? ".");
+      const stats = await safeStat(directoryPath);
+      if (!stats) return { error: "Path not found" };
+      if (!stats.isDirectory()) return { error: "Target is not a directory" };
+      const limit = Math.max(1, Math.min(args.maxResults ?? MAX_PROJECT_SCAN_RESULTS, MAX_PROJECT_SCAN_RESULTS));
+      if (args.recursive) {
+        const entries = await readDirectoryRecursive(directoryPath, limit, [], path.relative(PROJECT_ROOT, directoryPath) || "");
+        return { entries };
+      }
+      const items = await fs.readdir(directoryPath, { withFileTypes: true });
+      return {
+        entries: items.map(item => ({
+          path: path.join(path.relative(PROJECT_ROOT, directoryPath), item.name).replace(/\\/g, "/"),
+          type: item.isDirectory() ? "directory" : "file"
+        }))
+      };
+    },
+    read_project_file_lines: async (args: { path: string; startLine?: number; endLine?: number }): Promise<any> => {
+      if (!args?.path) return { error: "Missing path parameter" };
+      const filePath = resolveProjectPath(args.path);
+      const stats = await safeStat(filePath);
+      if (!stats) return { error: "File not found" };
+      if (!stats.isFile()) return { error: "Path is not a file" };
+      const content = await fs.readFile(filePath, "utf8");
+      const lines = content.split(/\r?\n/);
+      const start = Math.max(1, args.startLine ?? 1);
+      const end = Math.min(lines.length, args.endLine ?? Math.min(start + 200, lines.length));
+      const slice = lines.slice(start - 1, end);
+      return {
+        path: path.relative(PROJECT_ROOT, filePath).replace(/\\/g, "/"),
+        startLine: start,
+        endLine: end,
+        content: slice.join("\n")
+      };
+    },
+    search_project_text: async (args: { query: string; path?: string; maxResults?: number }): Promise<any> => {
+      if (!args?.query) return { error: "Missing query parameter" };
+      const basePath = resolveProjectPath(args.path ?? ".");
+      const stats = await safeStat(basePath);
+      if (!stats) return { error: "Path not found" };
+      const maxResults = Math.max(1, Math.min(args.maxResults ?? MAX_PROJECT_SCAN_RESULTS, MAX_PROJECT_SCAN_RESULTS));
+      const queue: string[] = [];
+      if (stats.isDirectory()) {
+        queue.push(basePath);
+      } else if (stats.isFile()) {
+        queue.push(basePath);
+      } else {
+        return { error: "Unsupported file type" };
+      }
+      const matches: { path: string; line: number; snippet: string }[] = [];
+      while (queue.length > 0 && matches.length < maxResults) {
+        const current = queue.shift() as string;
+        const currentStats = await fs.stat(current);
+        if (currentStats.isDirectory()) {
+          const children = await fs.readdir(current);
+          for (const child of children) {
+            queue.push(path.join(current, child));
+          }
+        } else if (currentStats.isFile() && currentStats.size <= MAX_FILE_SIZE_FOR_SEARCH) {
+          const fileMatches = await collectProjectSearchMatches(current, args.query, maxResults - matches.length);
+          matches.push(...fileMatches);
+        }
+      }
+      return { matches };
+    },
+    project_file_info: async (args: { path: string }): Promise<any> => {
+      if (!args?.path) return { error: "Missing path parameter" };
+      const target = resolveProjectPath(args.path);
+      const stats = await safeStat(target);
+      if (!stats) return { error: "Path not found" };
+      return {
+        info: {
+          path: path.relative(PROJECT_ROOT, target).replace(/\\/g, "/"),
+          size: stats.size,
+          isDirectory: stats.isDirectory(),
+          isFile: stats.isFile(),
+          modified: stats.mtime.toISOString()
+        }
+      };
+    },
+    list_log_files: async (args: { maxResults?: number } = {}): Promise<any> => {
+      const stats = await safeStat(LOGS_ROOT);
+      if (!stats || !stats.isDirectory()) return { error: "Logs directory not found" };
+      const limit = Math.max(1, Math.min(args.maxResults ?? 100, 500));
+      const items = await fs.readdir(LOGS_ROOT, { withFileTypes: true });
+      const files = items
+        .filter(item => item.isFile())
+        .slice(0, limit)
+        .map(item => ({
+          path: item.name,
+          name: item.name
+        }));
+      return { files };
+    },
+    read_log_file_lines: async (args: { path: string; startLine?: number; endLine?: number }): Promise<any> => {
+      if (!args?.path) return { error: "Missing path parameter" };
+      const filePath = resolveLogsPath(args.path);
+      const stats = await safeStat(filePath);
+      if (!stats) return { error: "Log file not found" };
+      if (!stats.isFile()) return { error: "Path is not a file" };
+      const content = await fs.readFile(filePath, "utf8");
+      const lines = content.split(/\r?\n/);
+      const start = Math.max(1, args.startLine ?? Math.max(1, lines.length - MAX_LOG_READ_LINES + 1));
+      const end = Math.min(lines.length, args.endLine ?? lines.length);
+      const slice = lines.slice(start - 1, end);
+      return {
+        path: path.relative(LOGS_ROOT, filePath).replace(/\\/g, "/"),
+        startLine: start,
+        endLine: end,
+        content: slice.join("\n")
+      };
+    },
+    tail_log_file: async (args: { path: string; lines?: number }): Promise<any> => {
+      if (!args?.path) return { error: "Missing path parameter" };
+      const filePath = resolveLogsPath(args.path);
+      const stats = await safeStat(filePath);
+      if (!stats) return { error: "Log file not found" };
+      if (!stats.isFile()) return { error: "Path is not a file" };
+      const content = await fs.readFile(filePath, "utf8");
+      const lines = content.split(/\r?\n/);
+      const count = Math.max(1, Math.min(args.lines ?? 200, MAX_LOG_READ_LINES));
+      const slice = lines.slice(Math.max(0, lines.length - count));
+      return {
+        path: path.relative(LOGS_ROOT, filePath).replace(/\\/g, "/"),
+        lines: slice.join("\n")
+      };
+    },
+    search_logs: async (args: { query: string; file?: string; maxResults?: number }): Promise<any> => {
+      if (!args?.query) return { error: "Missing query parameter" };
+      const stats = await safeStat(LOGS_ROOT);
+      if (!stats || !stats.isDirectory()) return { error: "Logs directory not found" };
+      const maxResults = Math.max(1, Math.min(args.maxResults ?? 200, 500));
+      const files = args.file ? [resolveLogsPath(args.file)] : (await fs.readdir(LOGS_ROOT)).map(f => path.join(LOGS_ROOT, f));
+      const matches: { path: string; line: number; snippet: string }[] = [];
+      for (const file of files) {
+        if (matches.length >= maxResults) break;
+        const fileStats = await safeStat(file);
+        if (!fileStats || !fileStats.isFile()) continue;
+        if (fileStats.size > MAX_FILE_SIZE_FOR_SEARCH) continue;
+        const content = await fs.readFile(file, "utf8");
+        const lines = content.split(/\r?\n/);
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].toLowerCase().includes(args.query.toLowerCase())) {
+            matches.push({
+              path: path.relative(LOGS_ROOT, file).replace(/\\/g, "/"),
+              line: i + 1,
+              snippet: lines[i].trim().slice(0, 200)
+            });
+            if (matches.length >= maxResults) break;
+          }
+        }
+      }
+      return { matches };
+    },
+    github_list_repo_dir: async (args: { path?: string; ref?: string }): Promise<any> => {
+      const repoPath = args.path ? args.path.replace(/^\/+/, "") : "";
+      const ref = args.ref ?? "master";
+      const url = `https://api.github.com/repos/Barnie-Corps/barniebot/contents/${repoPath}?ref=${encodeURIComponent(ref)}`;
+      const headers: Record<string, string> = {
+        "User-Agent": "barniebot"
+      };
+      const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch(url, { headers });
+      if (!response.ok) return { error: `GitHub request failed: ${response.status}` };
+      const data = await response.json() as any;
+      if (!Array.isArray(data)) return { error: "Path is not a directory" };
+      return {
+        entries: data.map((item: any) => ({
+          path: item.path,
+          type: item.type,
+          size: item.size
+        }))
+      };
+    },
+    github_fetch_repo_file: async (args: { path: string; ref?: string }): Promise<any> => {
+      if (!args?.path) return { error: "Missing path parameter" };
+      const ref = args.ref ?? "master";
+      const filePath = args.path.replace(/^\/+/, "");
+      const url = `https://raw.githubusercontent.com/Barnie-Corps/barniebot/${encodeURIComponent(ref)}/${filePath}`;
+      const headers: Record<string, string> = {
+        "User-Agent": "barniebot"
+      };
+      const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch(url, { headers });
+      if (!response.ok) return { error: `GitHub request failed: ${response.status}` };
+      const content = await response.text();
+      return { path: filePath, ref, content };
+    },
+    github_search_repo: async (args: { query: string; path?: string; filename?: string; limit?: number }): Promise<any> => {
+      if (!args?.query) return { error: "Missing query parameter" };
+      const repoQuery = [`${args.query} repo:Barnie-Corps/barniebot`];
+      if (args.path) repoQuery.push(`path:${args.path}`);
+      if (args.filename) repoQuery.push(`filename:${args.filename}`);
+      const q = encodeURIComponent(repoQuery.join(" "));
+      const url = `https://api.github.com/search/code?q=${q}`;
+      const headers: Record<string, string> = {
+        "User-Agent": "barniebot"
+      };
+      const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch(url, { headers });
+      if (!response.ok) return { error: `GitHub search failed: ${response.status}` };
+      const data = await response.json() as any;
+      const limit = Math.max(1, Math.min(args.limit ?? 20, 50));
+      const items = Array.isArray(data.items) ? data.items.slice(0, limit) : [];
+      return {
+        totalCount: data.total_count ?? 0,
+        items: items.map((item: any) => ({
+          path: item.path,
+          htmlUrl: item.html_url
+        }))
+      };
+    },
+    get_current_datetime: (): string => {
+      return new Date().toISOString();
     }
   },
   createSpaces: (length: number): string => {
@@ -1362,18 +1715,18 @@ const utils = {
   getRankSuffix: (rank?: string | null): string => {
     if (!rank) return "";
     const map: Record<string, string> = {
-        "Trial Support": "Trial SUPPORT",
+      "Trial Support": "Trial SUPPORT",
       "Support": "SUPPORT",
-        "Intern": "INTERN",
-        "Trial Moderator": "Trial MOD",
+      "Intern": "INTERN",
+      "Trial Moderator": "Trial MOD",
       "Moderator": "MOD",
       "Senior Moderator": "SR MOD",
       "Chief of Moderation": "CoM",
       "Probationary Administrator": "pADMIN",
       "Administrator": "ADMIN",
-        "Head Administrator": "Head ADMIN",
+      "Head Administrator": "Head ADMIN",
       "Chief of Staff": "CoS",
-        "Co-Owner": "Co-OWNER",
+      "Co-Owner": "Co-OWNER",
       "Owner": "OWNER"
     };
     return map[rank] ?? rank.toUpperCase();
@@ -1432,18 +1785,18 @@ const utils = {
    * Parallel translation for nested objects with breadth-first batching.
    * Avoids deep recursion blocking and maximizes concurrency across available workers.
    */
-    hasPermission: (rank: string | null, permission: string): boolean => {
-      return StaffRanksManager.hasPermission(rank, permission);
-    },
-    hasMinimumRank: (userRank: string | null, minimumRank: string): boolean => {
-      return StaffRanksManager.hasMinimumRank(userRank, minimumRank);
-    },
-    getStaffRankByHierarchy: (hierarchy: number) => {
-      return StaffRanksManager.getRankByHierarchy(hierarchy);
-    },
-    getStaffRankByName: (name: string) => {
-      return StaffRanksManager.getRankByName(name);
-    },
+  hasPermission: (rank: string | null, permission: string): boolean => {
+    return StaffRanksManager.hasPermission(rank, permission);
+  },
+  hasMinimumRank: (userRank: string | null, minimumRank: string): boolean => {
+    return StaffRanksManager.hasMinimumRank(userRank, minimumRank);
+  },
+  getStaffRankByHierarchy: (hierarchy: number) => {
+    return StaffRanksManager.getRankByHierarchy(hierarchy);
+  },
+  getStaffRankByName: (name: string) => {
+    return StaffRanksManager.getRankByName(name);
+  },
   autoTranslateParallel: async (obj: any, language: string, target: string): Promise<typeof obj> => {
     if (typeof obj !== "object" || Array.isArray(obj)) throw new TypeError(`autoTranslateParallel expects an object, got ${Array.isArray(obj) ? "Array" : typeof obj}`);
     if (typeof language !== "string") throw new TypeError(`autoTranslateParallel expects language as string, got ${typeof language}`);

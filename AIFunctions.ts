@@ -917,7 +917,178 @@ const functionDeclarations = {
             },
             required: ["userId"]
         }
-    }
+    },
+    get_system_info: {
+        name: "get_system_info",
+        description: "Get system information (platform, node version, memory usage, uptime). Owner-only command.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {}
+        }
+    },
+    list_project_files: {
+        name: "list_project_files",
+        description: "List files and directories in the project repository. Supports recursive listing.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                path: { type: SchemaType.STRING },
+                recursive: { type: SchemaType.BOOLEAN },
+                maxResults: { type: SchemaType.NUMBER }
+            }
+        }
+    },
+    read_project_file_lines: {
+        name: "read_project_file_lines",
+        description: "Read specific line ranges from a project file for targeted review.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                path: { type: SchemaType.STRING },
+                startLine: { type: SchemaType.NUMBER },
+                endLine: { type: SchemaType.NUMBER }
+            },
+            required: ["path"]
+        }
+    },
+    search_project_text: {
+        name: "search_project_text",
+        description: "Search for text within the project repository files.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                query: { type: SchemaType.STRING },
+                path: { type: SchemaType.STRING },
+                maxResults: { type: SchemaType.NUMBER }
+            },
+            required: ["query"]
+        }
+    },
+    project_file_info: {
+        name: "project_file_info",
+        description: "Get metadata about a project file or directory.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                path: { type: SchemaType.STRING }
+            },
+            required: ["path"]
+        }
+    },
+    list_log_files: {
+        name: "list_log_files",
+        description: "List available log files from the bot logs directory.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                maxResults: { type: SchemaType.NUMBER }
+            }
+        }
+    },
+    read_log_file_lines: {
+        name: "read_log_file_lines",
+        description: "Read specific line ranges from a log file.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                path: { type: SchemaType.STRING },
+                startLine: { type: SchemaType.NUMBER },
+                endLine: { type: SchemaType.NUMBER }
+            },
+            required: ["path"]
+        }
+    },
+    tail_log_file: {
+        name: "tail_log_file",
+        description: "Read the last N lines from a log file.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                path: { type: SchemaType.STRING },
+                lines: { type: SchemaType.NUMBER }
+            },
+            required: ["path"]
+        }
+    },
+    search_logs: {
+        name: "search_logs",
+        description: "Search text across log files or within a specific log file.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                query: { type: SchemaType.STRING },
+                file: { type: SchemaType.STRING },
+                maxResults: { type: SchemaType.NUMBER }
+            },
+            required: ["query"]
+        }
+    },
+    github_list_repo_dir: {
+        name: "github_list_repo_dir",
+        description: "List directory contents from the GitHub repository.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                path: { type: SchemaType.STRING },
+                ref: { type: SchemaType.STRING }
+            }
+        }
+    },
+    github_fetch_repo_file: {
+        name: "github_fetch_repo_file",
+        description: "Fetch a file from the GitHub repository by path and optional ref.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                path: { type: SchemaType.STRING },
+                ref: { type: SchemaType.STRING }
+            },
+            required: ["path"]
+        }
+    },
+    github_search_repo: {
+        name: "github_search_repo",
+        description: "Search the GitHub repository using the code search API.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                query: { type: SchemaType.STRING },
+                path: { type: SchemaType.STRING },
+                filename: { type: SchemaType.STRING },
+                limit: { type: SchemaType.NUMBER }
+            },
+            required: ["query"]
+        }
+    },
+    add_user_to_convo: {
+        name: "add_user_to_convo",
+        description: "Add a single additional user to the current AI chat so their messages are accepted.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
+    },
+    remove_user_from_convo: {
+        name: "remove_user_from_convo",
+        description: "Remove the additional user previously added to the current AI chat.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING }
+            }
+        }
+    },
+    get_current_datetime: {
+        name: "get_current_datetime",
+        description: "Get the current date and time in ISO 8601 format.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {}
+        }
+    },
 } as const satisfies Record<string, FunctionDeclaration>;
 
 export const AIFunctionDeclarations = Object.values(functionDeclarations);

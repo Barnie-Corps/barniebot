@@ -12,6 +12,7 @@ import db from "../mysql/database";
 import utils from "../utils";
 import data from "../data";
 import ai from "../ai";
+import client from "..";
 import * as fs from "fs";
 import * as path from "path";
 import { FunctionCall } from "@google/genai";
@@ -120,20 +121,53 @@ export default {
             }
             case "chat": {
                 if (!await utils.isVIP(interaction.user.id) && !data.bot.owners.includes(interaction.user.id)) return await reply(texts.errors.not_vip);
-                const collector = (interaction.channel as any).createMessageCollector({
-                    filter: (m: { author: { id: string } }) => m.author.id === interaction.user.id
+                const convoOwnerId = interaction.user.id;
+                let addedUserId: string | null = null;
+                let conversationEndedBy: string | null = null;
+                const add_user_to_convo = async (args: { userId?: string }): Promise<any> => {
+                    if (!args?.userId) return { error: "Missing userId parameter" };
+                    if (args.userId === convoOwnerId) return { error: "User is already in the conversation" };
+                    if (addedUserId && addedUserId !== args.userId) return { error: "A user is already added to the conversation" };
+                    try {
+                        await client.users.fetch(args.userId);
+                    } catch {
+                        return { error: "User not found" };
+                    }
+                    addedUserId = args.userId;
+                    return { success: true, addedUserId };
+                };
+                const remove_user_from_convo = async (args: { userId?: string }): Promise<any> => {
+                    if (!addedUserId) return { error: "No user is currently added to the conversation" };
+                    if (args?.userId && args.userId !== addedUserId) return { error: "Specified user is not in the conversation" };
+                    const removedUserId = addedUserId;
+                    addedUserId = null;
+                    return { success: true, removedUserId };
+                };
+                ai.setLocalFunctionHandlers(convoOwnerId, {
+                    add_user_to_convo,
+                    remove_user_from_convo
                 });
-                let isWaitingForResponse = false;
+                const collector = (interaction.channel as any).createMessageCollector({
+                    filter: (m: { author: { id: string } }) => m.author.id === convoOwnerId || (addedUserId !== null && m.author.id === addedUserId)
+                });
                 await reply(`${texts.common.started_chat} \`stop ai, ai stop, stop chat, end ai\`\n${texts.common.can_take_time}`);
                 collector?.on("collect", async (message: Message): Promise<any> => {
+                    let isWaitingForResponse = false;
                     if (isWaitingForResponse) return;
                     if (["stop ai", "ai stop", "stop chat", "end ai"].some(stop => message.content.toLowerCase().includes(stop))) {
-                        await reply(texts.common.stopped_ai);
+                        conversationEndedBy = message.author.id;
+                        if (conversationEndedBy === convoOwnerId) {
+                            await reply(texts.common.stopped_ai);
+                        } else {
+                            await reply(`${texts.common.stopped_ai} Ended by <@${conversationEndedBy}>.`);
+                        }
                         await message.react("🛑");
                         collector?.stop();
+                        isWaitingForResponse = false;
                         return;
                     }
                     await (interaction.channel as TextChannel).sendTyping?.();
+                    isWaitingForResponse = true;
 
                     let imageDescription = "";
                     if (message.attachments.size > 0) {
@@ -151,12 +185,18 @@ export default {
                     }
                     if (message.attachments.size > 0) await (interaction.channel as TextChannel).sendTyping?.();
 
-                    const userContent = message.attachments.size > 0 ? `<image>${imageDescription || 'No visual details detected.'}</image>\n\n${message.content}` : message.content;
+                    const speakerLabel = message.author.id === convoOwnerId
+                        ? `Speaker: Conversation owner (${message.author.username}, ${message.author.id})`
+                        : `Speaker: Added user (${message.author.username}, ${message.author.id})`;
+                    const payloadContent = message.attachments.size > 0
+                        ? `<image>${imageDescription || "No visual details detected."}</image>\n\n${message.content}`
+                        : message.content;
+                    const userContent = `${speakerLabel}\n${payloadContent}`;
 
                     const safety = await NVIDIAModels.GetConversationSafety([
                         { role: "user", content: userContent }
                     ]);
-                    if (!safety.safe && !(await utils.getUserStaffRank(interaction.user.id))) {
+                    if (!safety.safe && !(await utils.getUserStaffRank(message.author.id))) {
                         if (lang !== "en") {
                             safety.reason = (await utils.translate(safety.reason || "", "en", lang)).text;
                         }
@@ -172,9 +212,12 @@ export default {
                         isWaitingForResponse = false;
                         return await message.reply(texts.errors.no_response);
                     }
+                    const toolParse = utils.parseToolCalls(response.text);
+                    const toolCalls = toolParse.toolCalls;
+                    const cleanedResponseText = toolParse.cleanedText;
                     if (response.text.length > 2000) {
                         const filename = `./ai-response-${Date.now()}.md`;
-                        fs.writeFileSync(filename, response.text, "utf-8");
+                        fs.writeFileSync(filename, cleanedResponseText || response.text, "utf-8");
                         await message.reply({ content: texts.errors.long_response, files: [filename] });
                         fs.unlinkSync(filename);
                         isWaitingForResponse = false;
@@ -187,13 +230,26 @@ export default {
                             return;
                         }
                     }
-                    const msg = await message.reply(response.call ? `Executing command ${(response.call as FunctionCall).name} ${data.bot.loadingEmoji.mention}` : response.text);
+                    if (toolCalls.length > 0) {
+                        const toolLines = toolCalls.map(call => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
+                        const combined = cleanedResponseText ? `${cleanedResponseText}\n\n${toolLines}` : toolLines;
+                        const msg = await message.reply(combined);
+                        for (const call of toolCalls) {
+                            await ai.ExecuteFunction(interaction.user.id, call.name, call.args, msg);
+                        }
+                        isWaitingForResponse = false;
+                        return;
+                    }
+                    const msg = await message.reply(response.call ? `Executing command ${(response.call as FunctionCall).name} ${data.bot.loadingEmoji.mention}` : cleanedResponseText || response.text);
                     if (response.call) {
-                        await ai.ExecuteFunction(interaction.user.id, (response.call as FunctionCall).name!, (response.call as FunctionCall).args, msg);
+                        const callName = (response.call as FunctionCall).name || "";
+                        const callArgs = (response.call as FunctionCall).args as any;
+                        await ai.ExecuteFunction(interaction.user.id, callName, callArgs, msg);
                         isWaitingForResponse = false;
                     }
                 });
                 collector?.on("end", () => {
+                    ai.clearLocalFunctionHandlers(convoOwnerId);
                     ai.ClearChat(interaction.user.id);
                 });
                 break;
