@@ -11,6 +11,8 @@ ai_workspace/
 protos/
 database_backups/
 temp/
+.vscode/
 
 #Ignore vscode AI rules
 .github\instructions\codacy.instructions.md
+

@@ -14,10 +14,17 @@ class AiManager extends EventEmitter {
     private ratelimits: Map<string, Ratelimit> = new Map();
     private chats: Map<string, NIMChatSession> = new Map();
     private voiceChats: Map<string, NIMChatSession> = new Map();
+    private localFunctionHandlers: Map<string, Record<string, (args: any, message: Message) => Promise<any>>> = new Map();
     constructor(private ratelimit: number, private max: number, private timeout: number) {
         Log.info("AiManager initialized", { component: "AiManager" });
         setInterval(() => this.ClearTimeouts(), 1000);
         super();
+    }
+    public setLocalFunctionHandlers(id: string, handlers: Record<string, (args: any, message: Message) => Promise<any>>): void {
+        this.localFunctionHandlers.set(id, handlers);
+    }
+    public clearLocalFunctionHandlers(id: string): void {
+        this.localFunctionHandlers.delete(id);
     }
     public async ExecuteFunctionVoice(id: string, name: string, args: any, message: Message | null): Promise<any> {
         if (await this.RatelimitUser(id)) return { error: "You are sending too many messages, please wait a few seconds before sending another message." };
@@ -96,6 +103,18 @@ class AiManager extends EventEmitter {
             return this.ExecuteFunctionVoice(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
         }
         reply = rsp.response.text();
+        const toolParse = utils.parseToolCalls(reply);
+        if (toolParse.toolCalls.length > 0) {
+            const toolLines = toolParse.toolCalls.map(call => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
+            const combined = toolParse.cleanedText ? `${toolParse.cleanedText}\n\n${toolLines}` : toolLines;
+            if (message) {
+                await message.edit(combined);
+            }
+            for (const call of toolParse.toolCalls) {
+                await this.ExecuteFunctionVoice(id, call.name, call.args, message);
+            }
+            return combined;
+        }
         const filesPayload = attachments.map(att => ({
             attachment: att.path,
             name: att.name ?? path.basename(att.path)
@@ -155,7 +174,7 @@ class AiManager extends EventEmitter {
     public async GetResponse(id: string, text: string): Promise<any> {
         if (await this.RatelimitUser(id)) return "You are sending too many messages, please wait a few seconds before sending another message.";
         const chat = await this.GetChat(id, text);
-        const response = await utils.getAiResponse(text, chat);
+        let response = await utils.getAiResponse(text, chat);
         return response;
     }
     public async GetSingleResponse(id: string, text: string): Promise<string> {
@@ -172,8 +191,10 @@ class AiManager extends EventEmitter {
     public async ExecuteFunction(id: string, name: string, args: any, message: Message): Promise<any> {
         if (await this.RatelimitUser(id)) return { error: "You are sending too many messages, please wait a few seconds before sending another message." };
         const chat = await this.GetChat(id, "");
-        const func: any = utils.AIFunctions[name as keyof typeof utils.AIFunctions];
-        if (!func) {
+        const localHandlers = this.localFunctionHandlers.get(id);
+        const localHandler = localHandlers ? localHandlers[name] : undefined;
+        const func: any = localHandler ? null : utils.AIFunctions[name as keyof typeof utils.AIFunctions];
+        if (!localHandler && !func) {
             await message.edit(`The AI requested an unknown function, attempting to recover... ${data.bot.loadingEmoji.mention}`);
             const rsp = await chat.sendMessage([
                 {
@@ -214,32 +235,41 @@ class AiManager extends EventEmitter {
             });
             return;
         }
-        let preparedArgs: any = args;
-        if (["current_guild_info", "on_guild"].includes(name)) {
-            preparedArgs = message;
-        } else {
-            const isPlainObject = typeof args === "object" && args !== null && !Array.isArray(args);
-            if (isPlainObject) {
-                if (Object.keys(args).length === 0) {
-                    preparedArgs = id;
-                } else {
-                    preparedArgs = {
-                        ...args,
-                        requesterId: id,
-                        guildId: message?.guild?.id ?? null,
-                        channelId: message?.channel?.id ?? null
-                    };
-                }
-            } else if (preparedArgs === null || preparedArgs === undefined || preparedArgs === "") {
-                preparedArgs = id;
-            }
-        }
         let rawResult: any;
-        try {
-            rawResult = await func(preparedArgs);
-        } catch (error: any) {
-            Log.error(`AI function ${name} threw an exception`, error instanceof Error ? error : new Error(String(error)));
-            rawResult = { error: error instanceof Error ? error.message : String(error) };
+        if (localHandler) {
+            try {
+                rawResult = await localHandler(args, message);
+            } catch (error: any) {
+                Log.error(`AI function ${name} threw an exception`, error instanceof Error ? error : new Error(String(error)));
+                rawResult = { error: error instanceof Error ? error.message : String(error) };
+            }
+        } else {
+            let preparedArgs: any = args;
+            if (["current_guild_info", "on_guild"].includes(name)) {
+                preparedArgs = message;
+            } else {
+                const isPlainObject = typeof args === "object" && args !== null && !Array.isArray(args);
+                if (isPlainObject) {
+                    if (Object.keys(args).length === 0) {
+                        preparedArgs = id;
+                    } else {
+                        preparedArgs = {
+                            ...args,
+                            requesterId: id,
+                            guildId: message?.guild?.id ?? null,
+                            channelId: message?.channel?.id ?? null
+                        };
+                    }
+                } else if (preparedArgs === null || preparedArgs === undefined || preparedArgs === "") {
+                    preparedArgs = id;
+                }
+            }
+            try {
+                rawResult = await func(preparedArgs);
+            } catch (error: any) {
+                Log.error(`AI function ${name} threw an exception`, error instanceof Error ? error : new Error(String(error)));
+                rawResult = { error: error instanceof Error ? error.message : String(error) };
+            }
         }
         let attachments: Array<{ path: string; name?: string }> = [];
         let sanitizedResult = rawResult;
@@ -270,6 +300,18 @@ class AiManager extends EventEmitter {
             return this.ExecuteFunction(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
         }
         reply = rsp.response.text();
+        const toolParse = utils.parseToolCalls(reply);
+        if (toolParse.toolCalls.length > 0) {
+            const toolLines = toolParse.toolCalls.map(call => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
+            const combined = toolParse.cleanedText ? `${toolParse.cleanedText}\n\n${toolLines}` : toolLines;
+            if (message) {
+                await message.edit(combined);
+            }
+            for (const call of toolParse.toolCalls) {
+                await this.ExecuteFunction(id, call.name, call.args, message);
+            }
+            return combined;
+        }
         const filesPayload = attachments.map(att => ({
             attachment: att.path,
             name: att.name ?? path.basename(att.path)
@@ -312,7 +354,7 @@ class AiManager extends EventEmitter {
                 maxTokens: 800,
                 temperature: 0.7,
                 topP: 0.8,
-                systemInstruction: "Before responding to any user message at the start of the conversation, call the tools get_user_data, get_memories, and fetch_ai_rules in that order. Do not include <think> tags in responses."
+                systemInstruction: "Before responding to any user message at the start of the conversation, call the tools get_user_data, get_memories, and fetch_ai_rules in that order. Do not include <think> tags in responses. Never emit tool call markup like <|tool_call_begin|> in text; only use the tool calling interface. If a tool call fails, respond without tool markup."
             });
             this.chats.set(id, chat);
         }
@@ -326,7 +368,7 @@ class AiManager extends EventEmitter {
                 maxTokens: 256,
                 temperature: 0.7,
                 topP: 0.8,
-                systemInstruction: "You are the assistant's voice mode. Respond concisely (ideally 1–2 short sentences or tight bullets). Use the user's language. Avoid long explanations, code blocks, and heavy markdown unless explicitly requested. Before responding to any user message, call the tools get_user_data, get_memories, and fetch_ai_rules in that order. Do not include <think> tags in responses."
+                systemInstruction: "You are the assistant's voice mode. Respond concisely (ideally 1–2 short sentences or tight bullets). Use the user's language. Avoid long explanations, code blocks, and heavy markdown unless explicitly requested. Before responding to any user message, call the tools get_user_data, get_memories, and fetch_ai_rules in that order. Do not include <think> tags in responses. Never emit tool call markup like <|tool_call_begin|> in text; only use the tool calling interface. If a tool call fails, respond without tool markup."
             });
             this.voiceChats.set(id, chat);
         }

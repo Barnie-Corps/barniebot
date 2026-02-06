@@ -551,7 +551,7 @@ When ticket closed, two formats generated:
 - Active AI chat sessions maintained in memory only
 - Session contents:
   - User ID
-  - Conversation history (Google Gemini format)
+  - Conversation history (NVIDIA model context, not user messages)
   - Turn count
   - VIP status check
   - Last activity timestamp
@@ -799,7 +799,7 @@ We use the collected information for the following specific purposes, always lim
 - Block impersonation attempts by stripping fake staff tags
 
 **AI Features**:
-- Provide conversational AI via Google Gemini integration
+- Provide conversational AI via NVIDIA AI models with contextual understanding and function calling capabilities
 - Execute function calls for server information retrieval, user lookups, guild management
 - Store user-defined memories for persistent context across sessions
 - Generate AI responses tailored to conversation history (session-only, not stored)
@@ -1205,7 +1205,6 @@ We implement multiple layers of security controls to protect your data from unau
 
 **Data in Transit**:
 - **Discord API**: All communications use HTTPS with TLS 1.2+
-- **Google Gemini AI API**: HTTPS with TLS 1.2+
 - **Google Translate API**: HTTPS with TLS 1.2+
 - **NVIDIA Riva APIs**: gRPC with TLS encryption
 - **Gmail SMTP**: TLS encryption (STARTTLS)
@@ -1436,7 +1435,6 @@ We implement multiple layers of security controls to protect your data from unau
 - Discord's own privacy policy and security measures apply
 
 **Google Services**:
-- Gemini AI: Prompts sent via HTTPS, Google's privacy policy applies
 - Translate API: Text sent via HTTPS, Google's privacy policy applies
 - Gmail SMTP: Email delivery via TLS, Google's privacy policy applies
 
@@ -1473,43 +1471,6 @@ BarnieBot integrates with several external services to provide its features. Whe
 **Data Control**: Discord is the primary data controller for Discord accounts; we are a data processor
 
 **Note**: BarnieBot cannot function without Discord. By using Discord, you are subject to Discord's data practices independently of BarnieBot.
-
-### Google Gemini (AI Features)
-
-**Service Provider**: Google LLC  
-**Purpose**: Conversational AI, natural language understanding, function calling  
-**Features Using This Service**:
-- `/ai chat` (conversational AI sessions)
-- `/ai ask` (single-question responses)
-- Some `/ai voice` processing (AI response generation)
-
-**Data Shared**:
-- User messages/prompts (text content you send to AI)
-- Conversation history (within active session only)
-- User memories (persistent context strings you've added)
-- Function call results (when AI requests server/user information)
-- System prompts (instructions we provide to the AI)
-
-**Data NOT Shared**:
-- Discord passwords or bot tokens
-- Encrypted global chat messages (only decrypted content if you send it to AI)
-- Other users' private information (unless you explicitly request it)
-- RPG account passwords
-
-**Data Usage by Google**:
-- According to Google's Gemini API terms, your prompts may be used to improve Google's services
-- Google's data retention and usage policies apply
-- We have no control over how Google processes or retains data sent via the API
-
-**Privacy Policy**: https://policies.google.com/privacy  
-**Gemini API Terms**: https://ai.google.dev/terms  
-**Data Location**: Google's global infrastructure
-
-**User Control**:
-- Don't send sensitive personal information to AI
-- AI sessions are temporary (cleared on restart/end)
-- You control what prompts you send
-- User memories can be deleted via AI commands
 
 ### Google Translate (Translation Features)
 
@@ -1666,7 +1627,6 @@ BarnieBot integrates with several external services to provide its features. Whe
 - `discord.js`: Discord API wrapper (no external data transmission beyond Discord)
 - `mysql`: Database driver (connects to MySQL server)
 - `google-translate-api-x`: Translation (transmits text to Google)
-- `@google/generative-ai`: Gemini API client (transmits prompts to Google)
 - `axios`: HTTP client (used for API requests)
 - `bcryptjs`: Password hashing (local processing only)
 - `nodemailer`: Email sending (via Gmail SMTP)
@@ -1690,7 +1650,6 @@ BarnieBot may provide links to external websites:
 | Service | Data Shared | Purpose | Control |
 |---------|-------------|---------|---------|
 | Discord | User IDs, messages, guild data | Core platform | Discord's privacy policy |
-| Google Gemini | Prompts, conversation history | AI features | Google's privacy policy |
 | Google Translate | Text content | Translation | Google's privacy policy |
 | NVIDIA Riva | Audio/text | Voice conversations | NVIDIA's privacy policy |
 | Gmail SMTP | Email, verification codes | Account verification | Google's privacy policy |
@@ -1704,7 +1663,7 @@ BarnieBot may provide links to external websites:
 - You can opt out of features that use services you don't trust
 
 **Minimizing Third-Party Exposure**:
-- Don't use AI features if concerned about Google's data usage
+- Don't use AI features if concerned about data processing by AI providers
 - Disable auto-translate in global chat
 - Avoid `/meme` and `/ai voice` commands
 - Use disposable email for RPG registration
@@ -2204,8 +2163,8 @@ By using BarnieBot, you acknowledge that you have read, understood, and agree to
 
 **Thank you for trusting BarnieBot with your data. We are committed to protecting your privacy and being transparent about our data practices.**
 
-**Last Updated**: November 26, 2025  
+**Last Updated**: February 6, 2026
 **Version**: 2.0 (Comprehensive Expansion)
 
-© 2025 BarnieCorps. All rights reserved.
+© 2026 BarnieCorps. All rights reserved.
 
