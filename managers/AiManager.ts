@@ -1,19 +1,19 @@
 import EventEmitter from "events";
 import { Ratelimit } from "../types/interfaces";
 import utils from "../utils";
-import { ChatSession, GoogleGenerativeAI } from "@google/generative-ai";
+import type { NIMChatSession } from "./NVIDIAModelsManager";
 import Log from "../Log";
 import AIFunctions from "../AIFunctions";
 import { Message, ActionRowBuilder, ButtonBuilder } from "discord.js";
 import * as fs from "fs";
 import path from "path";
 import data from "../data";
-const genAI = new GoogleGenerativeAI(String(process.env.AI_API_KEY));
+import NVIDIAModels from "../NVIDIAModels";
 
 class AiManager extends EventEmitter {
     private ratelimits: Map<string, Ratelimit> = new Map();
-    private chats: Map<string, ChatSession> = new Map();
-    private voiceChats: Map<string, ChatSession> = new Map();
+    private chats: Map<string, NIMChatSession> = new Map();
+    private voiceChats: Map<string, NIMChatSession> = new Map();
     constructor(private ratelimit: number, private max: number, private timeout: number) {
         Log.info("AiManager initialized", { component: "AiManager" });
         setInterval(() => this.ClearTimeouts(), 1000);
@@ -160,17 +160,8 @@ class AiManager extends EventEmitter {
     }
     public async GetSingleResponse(id: string, text: string): Promise<string> {
         if (await this.RatelimitUser(id)) return "You are sending too many messages, please wait a few seconds before sending another message.";
-        const tempChat = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }).startChat({
-            history: [],
-            generationConfig: {
-                maxOutputTokens: 480,
-                temperature: 0.9,
-                topP: 0.9,
-                topK: 40,
-            }
-        });
-        const response = await utils.getAiResponse(text, tempChat);
-        return response.text;
+        const response = await NVIDIAModels.GetModelChatResponse([{ role: "user", content: text }], 20000, "chat", false);
+        return response.content;
     }
     public async GetVoiceResponse(id: string, text: string): Promise<any> {
         if (await this.RatelimitUser(id)) return { text: "You are sending too many messages, please wait a few seconds before sending another message.", call: null };
@@ -311,46 +302,35 @@ class AiManager extends EventEmitter {
                 await message.edit(reply.length ? reply : " ");
             }
         }
-        return reply; // Return the reply text so voice mode can use it for TTS
+        return reply;
     }
-    private async GetChat(id: string, text: string): Promise<ChatSession> {
+    private async GetChat(id: string, text: string): Promise<NIMChatSession> {
         let chat = this.chats.get(id);
         if (!chat) {
-            const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-            chat = model.startChat({
-                generationConfig: {
-                    maxOutputTokens: 800,
-                    temperature: 0.7,
-                    topP: 0.8,
-                    topK: 40,
-                },
-                tools: AIFunctions
+            chat = NVIDIAModels.CreateChatSession({
+                tools: AIFunctions,
+                maxTokens: 800,
+                temperature: 0.7,
+                topP: 0.8,
+                systemInstruction: "Before responding to any user message at the start of the conversation, call the tools get_user_data, get_memories, and fetch_ai_rules in that order. Do not include <think> tags in responses."
             });
             this.chats.set(id, chat);
         }
-        return this.chats.get(id) as ChatSession;
+        return this.chats.get(id) as NIMChatSession;
     }
-    private async GetVoiceChat(id: string): Promise<ChatSession> {
+    private async GetVoiceChat(id: string): Promise<NIMChatSession> {
         let chat = this.voiceChats.get(id);
         if (!chat) {
-            const model = genAI.getGenerativeModel({
-                model: "gemini-2.5-flash",
-                // Keep voice replies brief and natural; avoid heavy formatting in TTS
-                systemInstruction: "You are the assistant's voice mode. Respond concisely (ideally 1–2 short sentences or tight bullets). Use the user's language. Avoid long explanations, code blocks, and heavy markdown unless explicitly requested. If a tool is needed, call it."
-            });
-            chat = model.startChat({
-                history: [],
-                generationConfig: {
-                    maxOutputTokens: 256,
-                    temperature: 0.7,
-                    topP: 0.8,
-                    topK: 40,
-                },
-                tools: AIFunctions
+            chat = NVIDIAModels.CreateChatSession({
+                tools: AIFunctions,
+                maxTokens: 256,
+                temperature: 0.7,
+                topP: 0.8,
+                systemInstruction: "You are the assistant's voice mode. Respond concisely (ideally 1–2 short sentences or tight bullets). Use the user's language. Avoid long explanations, code blocks, and heavy markdown unless explicitly requested. Before responding to any user message, call the tools get_user_data, get_memories, and fetch_ai_rules in that order. Do not include <think> tags in responses."
             });
             this.voiceChats.set(id, chat);
         }
-        return this.voiceChats.get(id) as ChatSession;
+        return this.voiceChats.get(id) as NIMChatSession;
     }
     private ClearTimeouts(): void {
         this.ratelimits.forEach((ratelimit) => {

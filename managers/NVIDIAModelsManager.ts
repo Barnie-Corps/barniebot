@@ -6,6 +6,96 @@ import * as path from "path";
 import { promises as fs } from "fs";
 import sharp from "sharp";
 
+export type NIMToolCall = { name: string; args: any };
+export type NIMChatResponse = { text: () => string; functionCalls: () => NIMToolCall[] | undefined };
+export type NIMChatResult = { response: NIMChatResponse };
+export type NIMChatMessage = ChatCompletionMessageParam;
+export type NIMToolDefinition = {
+    type: "function";
+    function: {
+        name: string;
+        description?: string;
+        parameters?: any;
+    };
+};
+export type NIMChatSession = {
+    sendMessage: (input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>) => Promise<NIMChatResult>;
+};
+
+const stripThink = (text: string): string => {
+    if (!text) return "";
+    return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+};
+
+class NIMChatSessionImpl implements NIMChatSession {
+    private messages: NIMChatMessage[] = [];
+    private lastToolCalls: Array<{ id: string; name: string }> = [];
+    constructor(
+        private openai: OpenAi,
+        private model: string,
+        private tools: NIMToolDefinition[] | undefined,
+        private config: { max_tokens?: number; temperature?: number; top_p?: number; chat_template_kwargs?: any },
+        systemInstruction?: string
+    ) {
+        if (systemInstruction) {
+            this.messages.push({ role: "system", content: systemInstruction });
+        }
+    }
+    private parseArgs(value: string) {
+        try {
+            return value ? JSON.parse(value) : {};
+        } catch {
+            return value;
+        }
+    }
+    private createToolMessage(name: string, result: any) {
+        const toolCallId = this.lastToolCalls.find(call => call.name === name)?.id;
+        return {
+            role: "tool",
+            tool_call_id: toolCallId ?? `call_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+            content: JSON.stringify(result ?? {})
+        } as ChatCompletionMessageParam;
+    }
+    public async sendMessage(input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>): Promise<NIMChatResult> {
+        if (typeof input === "string") {
+            this.messages.push({ role: "user", content: input });
+        } else if (Array.isArray(input)) {
+            for (const item of input) {
+                const name = item?.functionResponse?.name;
+                if (!name) continue;
+                const result = item.functionResponse.response?.result;
+                this.messages.push(this.createToolMessage(name, result));
+            }
+        }
+        const response = await this.openai.chat.completions.create({
+            model: this.model,
+            messages: this.messages,
+            tools: this.tools,
+            tool_choice: this.tools && this.tools.length > 0 ? "auto" : undefined,
+            max_tokens: this.config.max_tokens,
+            temperature: this.config.temperature,
+            top_p: this.config.top_p,
+            stream: false,
+            ...(this.config.chat_template_kwargs && { chat_template_kwargs: this.config.chat_template_kwargs })
+        });
+        const message = response.choices[0]?.message as any;
+        if (message) {
+            this.messages.push(message as ChatCompletionMessageParam);
+        }
+        const toolCalls = Array.isArray(message?.tool_calls)
+            ? message.tool_calls.map((call: any) => ({
+                name: call.function?.name,
+                args: this.parseArgs(call.function?.arguments ?? "")
+            }))
+            : undefined;
+        this.lastToolCalls = Array.isArray(message?.tool_calls)
+            ? message.tool_calls.map((call: any) => ({ id: call.id, name: call.function?.name }))
+            : [];
+        const text = stripThink(message?.content ?? "");
+        return { response: { text: () => text, functionCalls: () => toolCalls } };
+    }
+}
+
 export default class NVIDIAModelsManager {
     private openai: OpenAi;
     private apiKey: string;
@@ -44,41 +134,43 @@ export default class NVIDIAModelsManager {
             }
             const response = await this.openai.chat.completions.create({
                 model: this.GetTaskBasedModel(task).name,
-                messages: this.GetTaskBasedModel(task).hasThinkMode ? [{ role: "system", content: think ? "/think" : "/no_think" }, ...messages] : messages,
+                messages: messages,
                 stream: false,
+                ...(this.GetTaskBasedModel(task).hasThinkMode && { chat_template_kwargs: { thinking: think ?? false } }),
                 ...this.GetCustomTaskConfig(task)
             }, { signal: controller.signal as any });
             clearTimeout(timer);
-            return { content: response.choices[0]?.message?.content || "", reasoning: this.GetTaskBasedModel(task).hasReasoning && think && this.GetTaskBasedModel(task).hasThinkMode ? (response.choices[0]?.message as any).reasoning_content : this.GetTaskBasedModel(task).hasReasoning ? (response.choices[0]?.message as any).reasoning_content : undefined };
+            const content = stripThink(response.choices[0]?.message?.content || "");
+            return { content, reasoning: this.GetTaskBasedModel(task).hasReasoning && think && this.GetTaskBasedModel(task).hasThinkMode ? (response.choices[0]?.message as any).reasoning_content : this.GetTaskBasedModel(task).hasReasoning ? (response.choices[0]?.message as any).reasoning_content : undefined };
         } catch (error) {
             console.error("Error getting reasoning response:", error);
             return { content: "", reasoning: undefined };
         }
     }
+    public CreateChatSession = (options: { tools?: NIMToolDefinition[]; systemInstruction?: string; maxTokens?: number; temperature?: number; topP?: number; model?: string } = {}): NIMChatSession => {
+        const model = options.model ?? "deepseek-ai/deepseek-v3.1-terminus";
+        return new NIMChatSessionImpl(
+            this.openai,
+            model,
+            options.tools,
+            {
+                max_tokens: options.maxTokens ?? 800,
+                temperature: options.temperature ?? 0.7,
+                top_p: options.topP ?? 0.8,
+                chat_template_kwargs: { thinking: false },
+            },
+            options.systemInstruction
+        );
+    }
     private GetTaskBasedModel = (task: string): { name: string, hasReasoning: boolean, hasThinkMode: boolean } => {
+        const base = { name: "deepseek-ai/deepseek-v3.1-terminus", hasReasoning: false, hasThinkMode: true };
         const taskModels: { [key: string]: { name: string, hasReasoning: boolean, hasThinkMode: boolean } } = {
-            "chat": {
-                "name": "openai/gpt-oss-20b",
-                "hasReasoning": true,
-                "hasThinkMode": false
-            },
-            "reasoning": {
-                "name": "qwen/qwen3-next-80b-a3b-thinking",
-                "hasReasoning": true,
-                "hasThinkMode": false
-            },
-            "math": {
-                "name": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-                "hasReasoning": true,
-                "hasThinkMode": true
-            },
-            "programming": {
-                "name": "moonshotai/kimi-k2-instruct-0905",
-                "hasReasoning": false,
-                "hasThinkMode": false
-            }
+            "chat": base,
+            "reasoning": base,
+            "math": base,
+            "programming": base
         };
-        return taskModels[task] || { name: "", hasReasoning: false, hasThinkMode: false };
+        return taskModels[task] || base;
     }
     private GetCustomTaskConfig = (task: string): { max_tokens: number, top_p: number, temperature: number } => {
         const taskConfigs: { [key: string]: { max_tokens: number, top_p: number, temperature: number } } = {

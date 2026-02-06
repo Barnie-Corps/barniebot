@@ -1,4 +1,21 @@
-import { FunctionDeclarationsTool, FunctionDeclaration, SchemaType } from "@google/generative-ai";
+export enum SchemaType {
+    OBJECT = "object",
+    STRING = "string",
+    NUMBER = "number",
+    INTEGER = "integer",
+    BOOLEAN = "boolean",
+    ARRAY = "array"
+}
+
+export type FunctionDeclaration = {
+    name: string;
+    description: string;
+    parameters: {
+        type: SchemaType;
+        properties: Record<string, any>;
+        required?: string[];
+    };
+};
 
 const functionDeclarations = {
     get_user_data: {
@@ -450,13 +467,469 @@ const functionDeclarations = {
             },
             required: ["to", "subject", "body", "isHtml"]
         }
+    },
+    get_bot_statistics: {
+        name: "get_bot_statistics",
+        description: "Get comprehensive bot statistics including guild count, user count, memory usage, and database metrics. Owner-only command.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {}
+        }
+    },
+    check_database_health: {
+        name: "check_database_health",
+        description: "Check the database connection health and latency. Owner-only command.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {}
+        }
+    },
+    get_worker_pool_status: {
+        name: "get_worker_pool_status",
+        description: "Get the status of worker pools (translation and ratelimit workers). Owner-only command.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {}
+        }
+    },
+    clear_translation_cache: {
+        name: "clear_translation_cache",
+        description: "Clear the translation cache to free up memory. Owner-only command.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {}
+        }
+    },
+    get_user_warnings: {
+        name: "get_user_warnings",
+        description: "Get all warnings for a specific user, including active, expired, and appealed warnings.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
+    },
+    get_warning_details: {
+        name: "get_warning_details",
+        description: "Get detailed information about a specific warning by its ID.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                warningId: { type: SchemaType.NUMBER }
+            },
+            required: ["warningId"]
+        }
+    },
+    appeal_warning: {
+        name: "appeal_warning",
+        description: "Submit an appeal for a warning. User can only appeal their own warnings.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING },
+                warningId: { type: SchemaType.NUMBER },
+                reason: { type: SchemaType.STRING }
+            },
+            required: ["userId", "warningId", "reason"]
+        }
+    },
+    get_pending_appeals: {
+        name: "get_pending_appeals",
+        description: "Get all pending warning appeals. Staff-only command.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {}
+        }
+    },
+    review_appeal: {
+        name: "review_appeal",
+        description: "Review and approve or reject a warning appeal. Staff-only command.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                warningId: { type: SchemaType.NUMBER },
+                approved: { type: SchemaType.BOOLEAN },
+                reviewNote: { type: SchemaType.STRING }
+            },
+            required: ["warningId", "approved"]
+        }
+    },
+    global_ban_user: {
+        name: "global_ban_user",
+        description: "Ban a user globally from using bot features. Staff-only command. Records action in audit log.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING },
+                reason: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
+    },
+    global_unban_user: {
+        name: "global_unban_user",
+        description: "Remove a global ban from a user. Staff-only command. Records action in audit log.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
+    },
+    global_mute_user: {
+        name: "global_mute_user",
+        description: "Mute a user globally from sending messages in global chat. Duration in milliseconds (0 for permanent). Staff-only command.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING },
+                duration: { type: SchemaType.NUMBER },
+                reason: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
+    },
+    global_unmute_user: {
+        name: "global_unmute_user",
+        description: "Remove a global mute from a user. Staff-only command. Records action in audit log.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
+    },
+    get_global_ban_status: {
+        name: "get_global_ban_status",
+        description: "Check if a user is globally banned and how many times they've been banned.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
+    },
+    get_global_mute_status: {
+        name: "get_global_mute_status",
+        description: "Check if a user is globally muted, the reason, and when the mute expires.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
+    },
+    create_support_ticket: {
+        name: "create_support_ticket",
+        description: "Create a new support ticket for a user. Can be used to help users submit bug reports, feature requests, or get help.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING },
+                category: { type: SchemaType.STRING },
+                priority: { type: SchemaType.STRING },
+                initialMessage: { type: SchemaType.STRING },
+                guildId: { type: SchemaType.STRING }
+            },
+            required: ["userId", "initialMessage"]
+        }
+    },
+    get_ticket_details: {
+        name: "get_ticket_details",
+        description: "Get detailed information about a specific support ticket by its ID.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                ticketId: { type: SchemaType.NUMBER }
+            },
+            required: ["ticketId"]
+        }
+    },
+    get_user_tickets: {
+        name: "get_user_tickets",
+        description: "Get all support tickets for a specific user. Optionally filter by status (open, closed, etc).",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING },
+                status: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
+    },
+    assign_ticket: {
+        name: "assign_ticket",
+        description: "Assign a support ticket to a staff member. Staff-only command.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                ticketId: { type: SchemaType.NUMBER },
+                staffId: { type: SchemaType.STRING }
+            },
+            required: ["ticketId", "staffId"]
+        }
+    },
+    close_ticket: {
+        name: "close_ticket",
+        description: "Close a support ticket. Users can close their own tickets, staff can close any ticket.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                ticketId: { type: SchemaType.NUMBER }
+            },
+            required: ["ticketId"]
+        }
+    },
+    add_ticket_message: {
+        name: "add_ticket_message",
+        description: "Add a message to an existing support ticket. Used for ticket conversation history.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                ticketId: { type: SchemaType.NUMBER },
+                userId: { type: SchemaType.STRING },
+                username: { type: SchemaType.STRING },
+                content: { type: SchemaType.STRING },
+                isStaff: { type: SchemaType.BOOLEAN }
+            },
+            required: ["ticketId", "userId", "username", "content"]
+        }
+    },
+    get_ticket_messages: {
+        name: "get_ticket_messages",
+        description: "Get all messages in a support ticket conversation.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                ticketId: { type: SchemaType.NUMBER }
+            },
+            required: ["ticketId"]
+        }
+    },
+    add_staff_note: {
+        name: "add_staff_note",
+        description: "Add an internal staff note about a user. Staff-only command. These notes are not visible to users.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING },
+                note: { type: SchemaType.STRING }
+            },
+            required: ["userId", "note"]
+        }
+    },
+    get_staff_notes: {
+        name: "get_staff_notes",
+        description: "Get all staff notes for a specific user. Staff-only command.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
+    },
+    update_staff_status: {
+        name: "update_staff_status",
+        description: "Update staff member's status (online, busy, away, offline) and optional status message. Staff-only command.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                status: { type: SchemaType.STRING },
+                statusMessage: { type: SchemaType.STRING }
+            },
+            required: ["status"]
+        }
+    },
+    get_staff_audit_log: {
+        name: "get_staff_audit_log",
+        description: "Get staff audit log entries. Can filter by staff member, action type, and limit results. Staff-only command.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                staffId: { type: SchemaType.STRING },
+                actionType: { type: SchemaType.STRING },
+                limit: { type: SchemaType.NUMBER }
+            }
+        }
+    },
+    get_rpg_character: {
+        name: "get_rpg_character",
+        description: "Get RPG character information including stats, level, experience, and more.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING },
+                accountId: { type: SchemaType.NUMBER }
+            },
+            required: ["userId"]
+        }
+    },
+    get_rpg_inventory: {
+        name: "get_rpg_inventory",
+        description: "Get a character's RPG inventory with all items, quantities, and details.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                characterId: { type: SchemaType.NUMBER }
+            },
+            required: ["characterId"]
+        }
+    },
+    get_rpg_equipment: {
+        name: "get_rpg_equipment",
+        description: "Get a character's currently equipped RPG items and their bonuses.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                characterId: { type: SchemaType.NUMBER }
+            },
+            required: ["characterId"]
+        }
+    },
+    get_rpg_session: {
+        name: "get_rpg_session",
+        description: "Check if a user has an active RPG session and get session details.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
+    },
+    get_rpg_account_status: {
+        name: "get_rpg_account_status",
+        description: "Get RPG account status including frozen/banned status and reasons.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                accountId: { type: SchemaType.NUMBER }
+            },
+            required: ["accountId"]
+        }
+    },
+    get_filter_config: {
+        name: "get_filter_config",
+        description: "Get the word filter configuration for a specific guild.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING }
+            },
+            required: ["guildId"]
+        }
+    },
+    get_filter_words: {
+        name: "get_filter_words",
+        description: "Get all filtered words for a specific guild.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING }
+            },
+            required: ["guildId"]
+        }
+    },
+    get_custom_responses: {
+        name: "get_custom_responses",
+        description: "Get all custom command responses configured for a specific guild.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING }
+            },
+            required: ["guildId"]
+        }
+    },
+    get_globalchat_config: {
+        name: "get_globalchat_config",
+        description: "Get the global chat configuration for a specific guild.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING }
+            },
+            required: ["guildId"]
+        }
+    },
+    get_command_list: {
+        name: "get_command_list",
+        description: "Get a list of all available bot commands with their names, descriptions, and categories.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {}
+        }
+    },
+    get_command_info: {
+        name: "get_command_info",
+        description: "Get detailed information about a specific command including options and parameters.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                commandName: { type: SchemaType.STRING }
+            },
+            required: ["commandName"]
+        }
+    },
+    search_commands: {
+        name: "search_commands",
+        description: "Search for commands by name, description, or category.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                query: { type: SchemaType.STRING }
+            },
+            required: ["query"]
+        }
+    },
+    get_bot_features: {
+        name: "get_bot_features",
+        description: "Get a comprehensive list of all bot features and capabilities.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {}
+        }
+    },
+    get_staff_permissions: {
+        name: "get_staff_permissions",
+        description: "Get staff rank permissions. If rankName provided, get specific rank details, otherwise get all ranks.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                rankName: { type: SchemaType.STRING }
+            }
+        }
+    },
+    check_vip_expiration: {
+        name: "check_vip_expiration",
+        description: "Check VIP status expiration date and days remaining for a user.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
     }
 } as const satisfies Record<string, FunctionDeclaration>;
 
-const AIFunctions: FunctionDeclarationsTool[] = [
-    {
-        functionDeclarations: Object.values(functionDeclarations),
-    }
-];
+export const AIFunctionDeclarations = Object.values(functionDeclarations);
+
+export type OpenAIToolDefinition = {
+    type: "function";
+    function: FunctionDeclaration;
+};
+
+const AIFunctions: OpenAIToolDefinition[] = AIFunctionDeclarations.map(fn => ({
+    type: "function",
+    function: fn
+}));
 
 export default AIFunctions;
