@@ -677,6 +677,567 @@ const utils = {
           stderr: truncate(String(error?.stderr ?? "").trim())
         };
       }
+    },
+    get_bot_statistics: async (args: { requesterId?: string }): Promise<any> => {
+      if (!isOwner(args?.requesterId)) return { error: "Requester is not authorized to view bot statistics" };
+      const guilds = client.guilds.cache.size;
+      const users = client.users.cache.size;
+      const channels = client.channels.cache.size;
+      const commands = data.bot.commands.size;
+      const uptime = process.uptime();
+      const memoryUsage = process.memoryUsage();
+      const dbUsers: any = await db.query("SELECT COUNT(*) as count FROM discord_users");
+      const dbGuilds: any = await db.query("SELECT COUNT(*) as count FROM guilds");
+      const vipUsers: any = await db.query("SELECT COUNT(*) as count FROM vip_users WHERE end_date > ?", [Date.now()]);
+      return {
+        cache: { guilds, users, channels },
+        commands,
+        database: {
+          users: dbUsers[0]?.count ?? 0,
+          guilds: dbGuilds[0]?.count ?? 0,
+          vipUsers: vipUsers[0]?.count ?? 0
+        },
+        uptime: Math.floor(uptime),
+        memory: {
+          heapUsed: Math.floor(memoryUsage.heapUsed / 1024 / 1024),
+          heapTotal: Math.floor(memoryUsage.heapTotal / 1024 / 1024),
+          rss: Math.floor(memoryUsage.rss / 1024 / 1024)
+        }
+      };
+    },
+    check_database_health: async (args: { requesterId?: string }): Promise<any> => {
+      if (!isOwner(args?.requesterId)) return { error: "Requester is not authorized to check database health" };
+      try {
+        const start = Date.now();
+        await db.query("SELECT 1");
+        const latency = Date.now() - start;
+        return { healthy: true, latency };
+      } catch (error: any) {
+        return { healthy: false, error: error.message };
+      }
+    },
+    get_worker_pool_status: async (args: { requesterId?: string }): Promise<any> => {
+      if (!isOwner(args?.requesterId)) return { error: "Requester is not authorized to view worker pool status" };
+      return {
+        translate: {
+          poolSize: TRANSLATE_WORKER_POOL_SIZE,
+          status: "operational"
+        },
+        ratelimit: {
+          poolSize: 1,
+          status: "operational"
+        }
+      };
+    },
+    clear_translation_cache: async (args: { requesterId?: string }): Promise<any> => {
+      if (!isOwner(args?.requesterId)) return { error: "Requester is not authorized to clear cache" };
+      const beforeSize = translationCache.size;
+      translationCache.clear();
+      pendingTranslations.clear();
+      return { success: true, clearedEntries: beforeSize };
+    },
+    get_user_warnings: async (args: { userId: string }): Promise<any> => {
+      if (!args.userId) return { error: "Missing userId parameter" };
+      const warnings: any = await db.query("SELECT * FROM global_warnings WHERE userid = ? ORDER BY createdAt DESC", [args.userId]);
+      return { warnings: Array.isArray(warnings) ? warnings : [] };
+    },
+    get_warning_details: async (args: { warningId: number }): Promise<any> => {
+      if (!args.warningId) return { error: "Missing warningId parameter" };
+      const warning: any = await db.query("SELECT * FROM global_warnings WHERE id = ?", [args.warningId]);
+      if (!warning || !warning[0]) return { error: "Warning not found" };
+      return { warning: warning[0] };
+    },
+    appeal_warning: async (args: { userId: string; warningId: number; reason: string }): Promise<any> => {
+      if (!args.userId || !args.warningId || !args.reason) return { error: "Missing parameters" };
+      const warning: any = await db.query("SELECT * FROM global_warnings WHERE id = ? AND userid = ?", [args.warningId, args.userId]);
+      if (!warning || !warning[0]) return { error: "Warning not found or does not belong to user" };
+      if (warning[0].appealed) return { error: "Warning has already been appealed" };
+      await db.query("UPDATE global_warnings SET appealed = TRUE, appeal_status = 'pending', appeal_reason = ? WHERE id = ?", [args.reason, args.warningId]);
+      return { success: true };
+    },
+    get_pending_appeals: async (args: { requesterId?: string }): Promise<any> => {
+      if (!args?.requesterId) return { error: "Missing requesterId parameter" };
+      if (!await utils.isStaff(args.requesterId)) return { error: "Requester is not authorized to view appeals" };
+      const appeals: any = await db.query("SELECT * FROM global_warnings WHERE appeal_status = 'pending' ORDER BY createdAt DESC");
+      return { appeals: Array.isArray(appeals) ? appeals : [] };
+    },
+    review_appeal: async (args: { requesterId?: string; warningId: number; approved: boolean; reviewNote?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.warningId || args.approved === undefined) return { error: "Missing parameters" };
+      if (!await utils.isStaff(args.requesterId)) return { error: "Requester is not authorized to review appeals" };
+      const warning: any = await db.query("SELECT * FROM global_warnings WHERE id = ?", [args.warningId]);
+      if (!warning || !warning[0]) return { error: "Warning not found" };
+      if (warning[0].appeal_status !== "pending") return { error: "Appeal is not pending review" };
+      const status = args.approved ? "approved" : "rejected";
+      const updates: any = {
+        appeal_status: status,
+        appeal_reviewed_by: args.requesterId,
+        appeal_reviewed_at: Date.now()
+      };
+      if (args.approved) {
+        updates.active = false;
+      }
+      await db.query("UPDATE global_warnings SET ? WHERE id = ?", [updates, args.warningId]);
+      return { success: true, status };
+    },
+    global_ban_user: async (args: { requesterId?: string; userId: string; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.userId) return { error: "Missing parameters" };
+      if (!await utils.isStaff(args.requesterId)) return { error: "Requester is not authorized to ban users" };
+      const existing: any = await db.query("SELECT * FROM global_bans WHERE id = ?", [args.userId]);
+      if (existing && existing[0]) {
+        await db.query("UPDATE global_bans SET active = TRUE, times = times + 1 WHERE id = ?", [args.userId]);
+      } else {
+        await db.query("INSERT INTO global_bans SET ?", [{ id: args.userId, active: true, times: 1 }]);
+      }
+      await db.query("INSERT INTO staff_audit_log SET ?", [{
+        staff_id: args.requesterId,
+        action_type: "global_ban",
+        target_id: args.userId,
+        details: args.reason ?? "No reason provided",
+        created_at: Date.now()
+      }]);
+      return { success: true };
+    },
+    global_unban_user: async (args: { requesterId?: string; userId: string }): Promise<any> => {
+      if (!args?.requesterId || !args.userId) return { error: "Missing parameters" };
+      if (!await utils.isStaff(args.requesterId)) return { error: "Requester is not authorized to unban users" };
+      await db.query("UPDATE global_bans SET active = FALSE WHERE id = ?", [args.userId]);
+      await db.query("INSERT INTO staff_audit_log SET ?", [{
+        staff_id: args.requesterId,
+        action_type: "global_unban",
+        target_id: args.userId,
+        created_at: Date.now()
+      }]);
+      return { success: true };
+    },
+    global_mute_user: async (args: { requesterId?: string; userId: string; duration?: number; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.userId) return { error: "Missing parameters" };
+      if (!await utils.isStaff(args.requesterId)) return { error: "Requester is not authorized to mute users" };
+      const until = args.duration ? Date.now() + args.duration : 0;
+      const existing: any = await db.query("SELECT * FROM global_mutes WHERE id = ?", [args.userId]);
+      if (existing && existing[0]) {
+        await db.query("UPDATE global_mutes SET until = ?, reason = ? WHERE id = ?", [until, args.reason ?? "No reason provided", args.userId]);
+      } else {
+        await db.query("INSERT INTO global_mutes SET ?", [{
+          id: args.userId,
+          reason: args.reason ?? "No reason provided",
+          authorid: args.requesterId,
+          createdAt: Date.now(),
+          until
+        }]);
+      }
+      await db.query("INSERT INTO staff_audit_log SET ?", [{
+        staff_id: args.requesterId,
+        action_type: "global_mute",
+        target_id: args.userId,
+        details: args.reason ?? "No reason provided",
+        metadata: JSON.stringify({ duration: args.duration, until }),
+        created_at: Date.now()
+      }]);
+      return { success: true };
+    },
+    global_unmute_user: async (args: { requesterId?: string; userId: string }): Promise<any> => {
+      if (!args?.requesterId || !args.userId) return { error: "Missing parameters" };
+      if (!await utils.isStaff(args.requesterId)) return { error: "Requester is not authorized to unmute users" };
+      await db.query("DELETE FROM global_mutes WHERE id = ?", [args.userId]);
+      await db.query("INSERT INTO staff_audit_log SET ?", [{
+        staff_id: args.requesterId,
+        action_type: "global_unmute",
+        target_id: args.userId,
+        created_at: Date.now()
+      }]);
+      return { success: true };
+    },
+    get_global_ban_status: async (args: { userId: string }): Promise<any> => {
+      if (!args.userId) return { error: "Missing userId parameter" };
+      const banned = await utils.isUserBlacklisted(args.userId);
+      if (!banned) return { banned: false };
+      const ban: any = await db.query("SELECT * FROM global_bans WHERE id = ? AND active = TRUE", [args.userId]);
+      return { banned: true, times: ban[0]?.times ?? 0 };
+    },
+    get_global_mute_status: async (args: { userId: string }): Promise<any> => {
+      if (!args.userId) return { error: "Missing userId parameter" };
+      const muted = await utils.isUserMuted(args.userId);
+      if (!muted) return { muted: false };
+      const mute: any = await db.query("SELECT * FROM global_mutes WHERE id = ?", [args.userId]);
+      if (!mute || !mute[0]) return { muted: false };
+      return {
+        muted: true,
+        reason: mute[0].reason,
+        until: mute[0].until,
+        permanent: !mute[0].until || mute[0].until === 0
+      };
+    },
+    create_support_ticket: async (args: { userId: string; category?: string; priority?: string; initialMessage: string; guildId?: string }): Promise<any> => {
+      if (!args.userId || !args.initialMessage) return { error: "Missing parameters" };
+      try {
+        const homeGuild = await client.guilds.fetch(data.bot.home_guild);
+        if (!homeGuild) return { error: "Support system is not properly configured" };
+        const category = homeGuild.channels.cache.get(data.bot.support_category);
+        if (!category || category.type !== 4) return { error: "Support category not found" };
+        let guildName = null;
+        if (args.guildId) {
+          const guild = client.guilds.cache.get(args.guildId);
+          guildName = guild?.name ?? null;
+        }
+        let assignedStaff: string | null = null;
+        try {
+          const allStaffResult: any = await db.query("SELECT uid FROM staff");
+          const staffIds = allStaffResult.map((s: any) => s.uid);
+          if (staffIds.length > 0) {
+            const statuses: any = await db.query("SELECT user_id FROM staff_status WHERE user_id IN (?) AND status IN ('online', 'available')", [staffIds]);
+            const availableStaffIds = statuses.map((s: any) => s.user_id);
+            if (availableStaffIds.length > 0) {
+              const workloads: any = await db.query("SELECT assigned_to, COUNT(*) as count FROM support_tickets WHERE assigned_to IN (?) AND status = 'open' GROUP BY assigned_to", [availableStaffIds]);
+              const workloadMap = new Map<string, number>();
+              workloads.forEach((w: any) => workloadMap.set(w.assigned_to, w.count));
+              let minWorkload = Infinity;
+              for (const staffId of availableStaffIds) {
+                const workload = workloadMap.get(staffId) || 0;
+                if (workload < minWorkload) {
+                  minWorkload = workload;
+                  assignedStaff = staffId;
+                }
+              }
+            }
+          }
+        } catch (error) {
+          assignedStaff = null;
+        }
+        const createdAt = Date.now();
+        const result: any = await db.query("INSERT INTO support_tickets SET ?", [{
+          user_id: args.userId,
+          channel_id: "pending",
+          status: "open",
+          priority: args.priority ?? "medium",
+          category: args.category ?? "general",
+          created_at: createdAt,
+          initial_message: args.initialMessage,
+          guild_id: args.guildId ?? null,
+          guild_name: guildName,
+          assigned_to: assignedStaff
+        }]);
+        const ticketId = result.insertId;
+        const user = await client.users.fetch(args.userId);
+        const channelName = `support-request-${ticketId}`;
+        const ticketChannel = await homeGuild.channels.create({
+          name: channelName,
+          type: 0,
+          parent: data.bot.support_category,
+          topic: `Support ticket #${ticketId} - User: ${user.tag} (${args.userId})`
+        });
+        await db.query("UPDATE support_tickets SET channel_id = ? WHERE id = ?", [ticketChannel.id, ticketId]);
+        await db.query("INSERT INTO support_messages SET ?", [{
+          ticket_id: ticketId,
+          user_id: args.userId,
+          username: user.tag,
+          content: args.initialMessage,
+          timestamp: createdAt,
+          is_staff: false,
+          staff_rank: null
+        }]);
+        try {
+          await user.send(`Your support ticket #${ticketId} has been created! Our staff will respond to you soon.`);
+        } catch (error) {
+          console.error("Failed to send ticket creation confirmation to user:", error);
+        }
+        return { success: true, ticketId, channelId: ticketChannel.id };
+      } catch (error: any) {
+        console.error("Support ticket creation error:", error);
+        return { error: error.message ?? "Failed to create support ticket" };
+      }
+    },
+    get_ticket_details: async (args: { ticketId: number }): Promise<any> => {
+      if (!args.ticketId) return { error: "Missing ticketId parameter" };
+      const ticket: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [args.ticketId]);
+      if (!ticket || !ticket[0]) return { error: "Ticket not found" };
+      return { ticket: ticket[0] };
+    },
+    get_user_tickets: async (args: { userId: string; status?: string }): Promise<any> => {
+      if (!args.userId) return { error: "Missing userId parameter" };
+      let query = "SELECT * FROM support_tickets WHERE user_id = ?";
+      const params: any[] = [args.userId];
+      if (args.status) {
+        query += " AND status = ?";
+        params.push(args.status);
+      }
+      query += " ORDER BY created_at DESC";
+      const tickets: any = await db.query(query, params);
+      return { tickets: Array.isArray(tickets) ? tickets : [] };
+    },
+    assign_ticket: async (args: { requesterId?: string; ticketId: number; staffId: string }): Promise<any> => {
+      if (!args?.requesterId || !args.ticketId || !args.staffId) return { error: "Missing parameters" };
+      if (!await utils.isStaff(args.requesterId)) return { error: "Requester is not authorized to assign tickets" };
+      const ticket: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [args.ticketId]);
+      if (!ticket || !ticket[0]) return { error: "Ticket not found" };
+      await db.query("UPDATE support_tickets SET assigned_to = ? WHERE id = ?", [args.staffId, args.ticketId]);
+      await db.query("INSERT INTO staff_audit_log SET ?", [{
+        staff_id: args.requesterId,
+        action_type: "assign_ticket",
+        target_id: String(args.ticketId),
+        details: `Assigned to ${args.staffId}`,
+        created_at: Date.now()
+      }]);
+      return { success: true };
+    },
+    close_ticket: async (args: { requesterId?: string; ticketId: number }): Promise<any> => {
+      if (!args?.requesterId || !args.ticketId) return { error: "Missing parameters" };
+      const ticket: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [args.ticketId]);
+      if (!ticket || !ticket[0]) return { error: "Ticket not found" };
+      if (ticket[0].user_id !== args.requesterId && !await utils.isStaff(args.requesterId)) {
+        return { error: "Requester is not authorized to close this ticket" };
+      }
+      await db.query("UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ?", [Date.now(), args.requesterId, args.ticketId]);
+      if (await utils.isStaff(args.requesterId)) {
+        await db.query("INSERT INTO staff_audit_log SET ?", [{
+          staff_id: args.requesterId,
+          action_type: "close_ticket",
+          target_id: String(args.ticketId),
+          created_at: Date.now()
+        }]);
+      }
+      return { success: true };
+    },
+    add_ticket_message: async (args: { ticketId: number; userId: string; username: string; content: string; isStaff?: boolean }): Promise<any> => {
+      if (!args.ticketId || !args.userId || !args.username || !args.content) return { error: "Missing parameters" };
+      const ticket: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [args.ticketId]);
+      if (!ticket || !ticket[0]) return { error: "Ticket not found" };
+      const staffRank = await utils.getUserStaffRank(args.userId);
+      const message: any = {
+        ticket_id: args.ticketId,
+        user_id: args.userId,
+        username: args.username,
+        content: args.content,
+        timestamp: Date.now(),
+        is_staff: args.isStaff ?? false,
+        staff_rank: staffRank
+      };
+      const result: any = await db.query("INSERT INTO support_messages SET ?", [message]);
+      if (args.isStaff && !ticket[0].first_response_at) {
+        await db.query("UPDATE support_tickets SET first_response_at = ?, first_response_by = ? WHERE id = ?", [Date.now(), args.userId, args.ticketId]);
+      }
+      return { success: true, messageId: result.insertId };
+    },
+    get_ticket_messages: async (args: { ticketId: number }): Promise<any> => {
+      if (!args.ticketId) return { error: "Missing ticketId parameter" };
+      const messages: any = await db.query("SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY timestamp ASC", [args.ticketId]);
+      return { messages: Array.isArray(messages) ? messages : [] };
+    },
+    add_staff_note: async (args: { requesterId?: string; userId: string; note: string }): Promise<any> => {
+      if (!args?.requesterId || !args.userId || !args.note) return { error: "Missing parameters" };
+      if (!await utils.isStaff(args.requesterId)) return { error: "Requester is not authorized to add staff notes" };
+      const noteData: any = {
+        user_id: args.userId,
+        staff_id: args.requesterId,
+        note: args.note,
+        created_at: Date.now()
+      };
+      const result: any = await db.query("INSERT INTO staff_notes SET ?", [noteData]);
+      return { success: true, noteId: result.insertId };
+    },
+    get_staff_notes: async (args: { requesterId?: string; userId: string }): Promise<any> => {
+      if (!args?.requesterId || !args.userId) return { error: "Missing parameters" };
+      if (!await utils.isStaff(args.requesterId)) return { error: "Requester is not authorized to view staff notes" };
+      const notes: any = await db.query("SELECT * FROM staff_notes WHERE user_id = ? ORDER BY created_at DESC", [args.userId]);
+      return { notes: Array.isArray(notes) ? notes : [] };
+    },
+    update_staff_status: async (args: { requesterId?: string; status: string; statusMessage?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.status) return { error: "Missing parameters" };
+      if (!await utils.isStaff(args.requesterId)) return { error: "Requester is not authorized to update staff status" };
+      const validStatuses = ["online", "busy", "away", "offline"];
+      if (!validStatuses.includes(args.status)) return { error: "Invalid status" };
+      const existing: any = await db.query("SELECT * FROM staff_status WHERE user_id = ?", [args.requesterId]);
+      if (existing && existing[0]) {
+        await db.query("UPDATE staff_status SET status = ?, status_message = ?, updated_at = ? WHERE user_id = ?", [args.status, args.statusMessage ?? null, Date.now(), args.requesterId]);
+      } else {
+        await db.query("INSERT INTO staff_status SET ?", [{
+          user_id: args.requesterId,
+          status: args.status,
+          status_message: args.statusMessage ?? null,
+          updated_at: Date.now()
+        }]);
+      }
+      return { success: true };
+    },
+    get_staff_audit_log: async (args: { requesterId?: string; staffId?: string; actionType?: string; limit?: number }): Promise<any> => {
+      if (!args?.requesterId) return { error: "Missing requesterId parameter" };
+      if (!await utils.isStaff(args.requesterId)) return { error: "Requester is not authorized to view audit log" };
+      let query = "SELECT * FROM staff_audit_log WHERE 1=1";
+      const params: any[] = [];
+      if (args.staffId) {
+        query += " AND staff_id = ?";
+        params.push(args.staffId);
+      }
+      if (args.actionType) {
+        query += " AND action_type = ?";
+        params.push(args.actionType);
+      }
+      query += " ORDER BY created_at DESC";
+      if (args.limit && args.limit > 0) {
+        query += " LIMIT ?";
+        params.push(args.limit);
+      } else {
+        query += " LIMIT 50";
+      }
+      const logs: any = await db.query(query, params);
+      return { logs: Array.isArray(logs) ? logs : [] };
+    },
+    get_rpg_character: async (args: { userId: string; accountId?: number }): Promise<any> => {
+      if (!args.userId) return { error: "Missing userId parameter" };
+      let character: any;
+      if (args.accountId) {
+        character = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [args.accountId]);
+      } else {
+        character = await db.query("SELECT * FROM rpg_characters WHERE uid = ? ORDER BY created_at DESC LIMIT 1", [args.userId]);
+      }
+      if (!character || !character[0]) return { error: "Character not found" };
+      return { character: character[0] };
+    },
+    get_rpg_inventory: async (args: { characterId: number }): Promise<any> => {
+      if (!args.characterId) return { error: "Missing characterId parameter" };
+      const inventory: any = await db.query(`
+        SELECT i.*, item.name, item.description, item.type, item.rarity
+        FROM rpg_inventory i
+        JOIN rpg_items item ON i.item_id = item.id
+        WHERE i.character_id = ?
+        ORDER BY item.rarity, item.name
+      `, [args.characterId]);
+      return { inventory: Array.isArray(inventory) ? inventory : [] };
+    },
+    get_rpg_equipment: async (args: { characterId: number }): Promise<any> => {
+      if (!args.characterId) return { error: "Missing characterId parameter" };
+      const equipment: any = await db.query(`
+        SELECT eq.*, ce.equipped_at
+        FROM rpg_character_equipment ce
+        JOIN rpg_equipment eq ON ce.equipment_id = eq.id
+        WHERE ce.character_id = ?
+      `, [args.characterId]);
+      return { equipment: Array.isArray(equipment) ? equipment : [] };
+    },
+    get_rpg_session: async (args: { userId: string }): Promise<any> => {
+      if (!args.userId) return { error: "Missing userId parameter" };
+      const session: any = await db.query("SELECT * FROM rpg_sessions WHERE uid = ? AND active = TRUE", [args.userId]);
+      if (!session || !session[0]) return { active: false };
+      return { active: true, session: session[0] };
+    },
+    get_rpg_account_status: async (args: { accountId: number }): Promise<any> => {
+      if (!args.accountId) return { error: "Missing accountId parameter" };
+      const status: any = await db.query("SELECT * FROM rpg_account_status WHERE account_id = ?", [args.accountId]);
+      if (!status || !status[0]) return { frozen: false, banned: false };
+      return { status: status[0] };
+    },
+    get_filter_config: async (args: { guildId: string }): Promise<any> => {
+      if (!args.guildId) return { error: "Missing guildId parameter" };
+      const config: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [args.guildId]);
+      if (!config || !config[0]) return { error: "Filter config not found" };
+      return { config: config[0] };
+    },
+    get_filter_words: async (args: { guildId: string }): Promise<any> => {
+      if (!args.guildId) return { error: "Missing guildId parameter" };
+      const words: any = await db.query("SELECT * FROM filter_words WHERE guild = ?", [args.guildId]);
+      return { words: Array.isArray(words) ? words : [] };
+    },
+    get_custom_responses: async (args: { guildId: string }): Promise<any> => {
+      if (!args.guildId) return { error: "Missing guildId parameter" };
+      const responses: any = await db.query("SELECT * FROM custom_responses WHERE guild = ?", [args.guildId]);
+      return { responses: Array.isArray(responses) ? responses : [] };
+    },
+    get_globalchat_config: async (args: { guildId: string }): Promise<any> => {
+      if (!args.guildId) return { error: "Missing guildId parameter" };
+      const config: any = await db.query("SELECT guild, channel, enabled, banned, autotranslate, language FROM globalchats WHERE guild = ?", [args.guildId]);
+      if (!config || !config[0]) return { error: "Global chat not configured for this guild" };
+      return { config: config[0] };
+    },
+    get_command_list: async (): Promise<any> => {
+      const commands = Array.from(data.bot.commands.values()).map((cmd: any) => ({
+        name: cmd.data?.name,
+        description: cmd.data?.description,
+        category: cmd.category
+      }));
+      return { commands };
+    },
+    get_command_info: async (args: { commandName: string }): Promise<any> => {
+      if (!args.commandName) return { error: "Missing commandName parameter" };
+      const command: any = data.bot.commands.get(args.commandName);
+      if (!command) return { error: "Command not found" };
+      const options = command.data?.options?.map((opt: any) => ({
+        name: opt.name,
+        description: opt.description,
+        type: opt.type,
+        required: opt.required
+      })) ?? [];
+      return {
+        name: command.data?.name,
+        description: command.data?.description,
+        category: command.category,
+        options
+      };
+    },
+    search_commands: async (args: { query: string }): Promise<any> => {
+      if (!args.query) return { error: "Missing query parameter" };
+      const searchTerm = args.query.toLowerCase();
+      const commands = Array.from(data.bot.commands.values())
+        .filter((cmd: any) => 
+          cmd.data?.name?.toLowerCase().includes(searchTerm) ||
+          cmd.data?.description?.toLowerCase().includes(searchTerm) ||
+          cmd.category?.toLowerCase().includes(searchTerm)
+        )
+        .map((cmd: any) => ({
+          name: cmd.data?.name,
+          description: cmd.data?.description,
+          category: cmd.category
+        }));
+      return { commands };
+    },
+    get_bot_features: async (): Promise<any> => {
+      return {
+        features: [
+          "AI Chat & Voice Conversations",
+          "Global Chat with Auto-Translation",
+          "RPG System with Characters & Inventory",
+          "Support Ticket System",
+          "Custom Word Filters",
+          "Staff Management & Audit Logs",
+          "VIP System",
+          "Custom Command Responses",
+          "Global Moderation (Warnings, Bans, Mutes)",
+          "User Notifications",
+          "Email Integration",
+          "AI Workspace for File Management",
+          "Multi-language Support"
+        ],
+        supportServer: data.bot.home_guild,
+        logChannel: data.bot.log_channel
+      };
+    },
+    get_staff_permissions: async (args: { rankName?: string }): Promise<any> => {
+      if (args.rankName) {
+        const rank = StaffRanksManager.getRankByName(args.rankName);
+        if (!rank) return { error: "Rank not found" };
+        return { rank };
+      }
+      const ranks = data.bot.staff_ranks.map(r => ({
+        name: r.name,
+        hierarchy: r.hierarchy_position,
+        permissions: r.permissions
+      }));
+      return { ranks };
+    },
+    check_vip_expiration: async (args: { userId: string }): Promise<any> => {
+      if (!args.userId) return { error: "Missing userId parameter" };
+      const vip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [args.userId]);
+      if (!vip || !vip[0]) return { isVip: false };
+      const now = Date.now();
+      const endDate = Number(vip[0].end_date);
+      if (endDate < now) {
+        return { isVip: false, expired: true, expiredAt: endDate };
+      }
+      const daysRemaining = Math.floor((endDate - now) / (1000 * 60 * 60 * 24));
+      return {
+        isVip: true,
+        startDate: vip[0].start_date,
+        endDate: vip[0].end_date,
+        daysRemaining
+      };
     }
   },
   createSpaces: (length: number): string => {
