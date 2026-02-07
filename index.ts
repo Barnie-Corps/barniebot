@@ -650,7 +650,7 @@ client.on("guildMemberRemove", async (member): Promise<any> => {
 client.on("channelCreate", async (channel): Promise<any> => {
     if (!("guild" in channel) || !channel.guild) return;
     try {
-        await aiMonitor.handleChannelCreate(channel.guild, channel.id);
+        await aiMonitor.handleChannelCreate(channel);
     } catch (error: any) {
         Log.warn("AI monitor channelCreate failed", { component: "AiMonitor", error: error?.message || String(error) });
     }
@@ -659,7 +659,7 @@ client.on("channelCreate", async (channel): Promise<any> => {
 client.on("channelDelete", async (channel): Promise<any> => {
     if (!("guild" in channel) || !channel.guild) return;
     try {
-        await aiMonitor.handleChannelDelete(channel.guild, channel.id);
+        await aiMonitor.handleChannelDelete(channel);
     } catch (error: any) {
         Log.warn("AI monitor channelDelete failed", { component: "AiMonitor", error: error?.message || String(error) });
     }
@@ -668,7 +668,7 @@ client.on("channelDelete", async (channel): Promise<any> => {
 client.on("channelUpdate", async (oldChannel, newChannel): Promise<any> => {
     if (!("guild" in newChannel) || !newChannel.guild) return;
     try {
-        await aiMonitor.handleChannelUpdate(newChannel.guild, newChannel.id);
+        await aiMonitor.handleChannelUpdate(oldChannel as any, newChannel as any);
     } catch (error: any) {
         Log.warn("AI monitor channelUpdate failed", { component: "AiMonitor", error: error?.message || String(error) });
     }
@@ -679,6 +679,72 @@ client.on("inviteCreate", async (invite): Promise<any> => {
         await aiMonitor.handleInviteCreate(invite as any);
     } catch (error: any) {
         Log.warn("AI monitor inviteCreate failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("guildMemberUpdate", async (oldMember, newMember): Promise<any> => {
+    try {
+        await aiMonitor.handleMemberUpdate(oldMember as any, newMember as any);
+    } catch (error: any) {
+        Log.warn("AI monitor memberUpdate failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("roleCreate", async (role): Promise<any> => {
+    try {
+        await aiMonitor.handleRoleCreate(role as any);
+    } catch (error: any) {
+        Log.warn("AI monitor roleCreate failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("roleUpdate", async (oldRole, newRole): Promise<any> => {
+    try {
+        await aiMonitor.handleRoleUpdate(oldRole as any, newRole as any);
+    } catch (error: any) {
+        Log.warn("AI monitor roleUpdate failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("roleDelete", async (role): Promise<any> => {
+    try {
+        await aiMonitor.handleRoleDelete(role as any);
+    } catch (error: any) {
+        Log.warn("AI monitor roleDelete failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("webhookUpdate", async (channel): Promise<any> => {
+    try {
+        await aiMonitor.handleWebhookUpdate(channel as any);
+    } catch (error: any) {
+        Log.warn("AI monitor webhookUpdate failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("guildBanAdd", async (ban): Promise<any> => {
+    try {
+        await aiMonitor.handleGuildBanAdd(ban.guild, ban.user);
+    } catch (error: any) {
+        Log.warn("AI monitor guildBanAdd failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("guildBanRemove", async (ban): Promise<any> => {
+    try {
+        await aiMonitor.handleGuildBanRemove(ban.guild, ban.user);
+    } catch (error: any) {
+        Log.warn("AI monitor guildBanRemove failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("messageDeleteBulk", async (messages): Promise<any> => {
+    try {
+        const first = messages.first();
+        if (!first?.guild) return;
+        await aiMonitor.handleMessageDeleteBulk(first.guild, first.channelId, messages.size);
+    } catch (error: any) {
+        Log.warn("AI monitor messageDeleteBulk failed", { component: "AiMonitor", error: error?.message || String(error) });
     }
 });
 

@@ -1,7 +1,8 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, Client, EmbedBuilder, Guild, GuildMember, Invite, Message, PartialGuildMember, TextChannel } from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, Client, EmbedBuilder, Guild, GuildMember, Invite, Message, PartialGuildMember, PermissionFlagsBits, TextChannel } from "discord.js";
 import db from "../mysql/database";
 import NVIDIAModels from "../NVIDIAModels";
 import Log from "../Log";
+import { executeAiMonitorTool, getAiMonitorTools, type AIMonitorToolName } from "../AIMonitorFunctions";
 
 type MonitorConfig = {
     guild_id: string;
@@ -9,6 +10,7 @@ type MonitorConfig = {
     logs_channel: string;
     allow_actions: boolean;
     analyze_potentially: boolean;
+    allow_investigation_tools: boolean;
 };
 
 type TriageResult = {
@@ -19,12 +21,16 @@ type TriageResult = {
     confidence: number;
 };
 
+type ActionType = "notify" | "warn" | "timeout" | "kick" | "ban" | "delete_message";
+
 type ReviewResult = {
     suspicious: boolean;
     risk: "low" | "medium" | "high";
     summary: string;
     reason: string;
-    recommended_action: "notify" | "warn" | "timeout" | "kick" | "ban" | "delete_message";
+    recommended_action?: ActionType;
+    recommended_actions?: ActionType[];
+    warning_message?: string;
     action_duration_ms?: number;
     delete_message?: boolean;
     confidence: number;
@@ -45,7 +51,8 @@ export default class AiMonitorManager {
             enabled: Boolean(rows[0].enabled),
             logs_channel: rows[0].logs_channel,
             allow_actions: Boolean(rows[0].allow_actions),
-            analyze_potentially: Boolean(rows[0].analyze_potentially)
+            analyze_potentially: Boolean(rows[0].analyze_potentially),
+            allow_investigation_tools: Boolean(rows[0].allow_investigation_tools)
         };
     }
 
@@ -78,6 +85,119 @@ export default class AiMonitorManager {
         } catch {
             return fallback;
         }
+    }
+
+    private getAccountAgeDays(user: { createdTimestamp?: number } | null): number | null {
+        if (!user?.createdTimestamp) return null;
+        const ageMs = Date.now() - user.createdTimestamp;
+        return Math.floor(ageMs / (1000 * 60 * 60 * 24));
+    }
+
+    private buildMessageSignals(message: Message) {
+        const content = message.content || "";
+        const scamPatterns = [
+            /accidentally sent you\s*\$?\d+/i,
+            /send (?:me|it) back/i,
+            /mark (?:it|this) as delivered/i,
+            /payment (?:is|was) (?:pending|failed)/i,
+            /refund (?:me|it)/i,
+            /chargeback/i,
+            /gift ?card/i,
+            /crypto|bitcoin|usdt|eth/i,
+            /verification (?:fee|payment)/i,
+            /wire transfer|bank transfer/i,
+            /i sent you \$?\d+/i,
+            /prove (?:you|it) by/i,
+            /free nitro|discord\.gift/i,
+            /steam (?:code|gift)/i,
+            /limited time|urgent|act now/i,
+            /investment|double your money/i,
+            /free (?:money|cash|crypto)/i,
+            /easy money/i,
+            /send (?:me|the) money/i,
+            /giveaway|winner|you (?:won|have won)/i,
+            /claim (?:your|the) (?:reward|prize|gift)/i,
+            /verify (?:your|the) account/i,
+            /login (?:to|here)/i,
+            /account (?:locked|suspended|disabled)/i,
+            /support team|customer support/i,
+            /limited offer|last chance/i,
+            /airdrop|whitelist/i,
+            /bonus (?:available|ending)/i
+        ];
+        const suspiciousKeywords = [
+            "refund",
+            "chargeback",
+            "delivery",
+            "mark it",
+            "invoice",
+            "payment",
+            "wire",
+            "bank",
+            "cashapp",
+            "venmo",
+            "paypal",
+            "airdrop",
+            "claim",
+            "verify",
+            "free nitro",
+            "gift card",
+            "crypto",
+            "btc",
+            "usdt",
+            "free money",
+            "free cash",
+            "easy money",
+            "send me the money",
+            "giveaway",
+            "winner",
+            "reward",
+            "prize",
+            "account locked",
+            "account suspended",
+            "login",
+            "support",
+            "bonus",
+            "whitelist",
+            "airdrop",
+            "nitro",
+            "steam",
+            "epic",
+            "robux",
+            "vbucks",
+            "gift"
+        ];
+        const badExtensions = ["exe", "scr", "bat", "cmd", "js", "jar", "vbs", "ps1", "apk", "msi", "dll", "zip", "rar", "7z", "iso"];
+        const obfuscatedLink = /hxxp|\[\.\]|\(dot\)|\{dot\}|\s+dot\s+/i.test(content);
+        const urlMatches = content.match(/https?:\/\/[^\s]+/gi) || [];
+        const inviteMatches = content.match(/discord\.gg\/[^\s]+|discord\.com\/invite\/[^\s]+/gi) || [];
+        const shortLink = urlMatches.some(u => /(bit\.ly|tinyurl\.com|t\.co|goo\.gl|is\.gd|cutt\.ly|rb\.gy|rebrand\.ly)/i.test(u));
+        const mentionCount = message.mentions.users.size + message.mentions.roles.size + (message.mentions.everyone ? 1 : 0);
+        const scamSignal = scamPatterns.some(pattern => pattern.test(content));
+        const keywordSignal = suspiciousKeywords.some(word => content.toLowerCase().includes(word));
+        const attachmentSignal = message.attachments.some(att => {
+            const name = (att.name || "").toLowerCase();
+            const ext = name.includes(".") ? name.split(".").pop() : "";
+            return ext ? badExtensions.includes(ext) : false;
+        });
+        const massMention = mentionCount >= 10 || (message.mentions.everyone && mentionCount >= 1);
+        const multiInvite = inviteMatches.length >= 2;
+        const linkAndMention = (urlMatches.length > 0 || inviteMatches.length > 0) && message.mentions.everyone;
+        const promoLink = urlMatches.length > 0 && /(free|money|cash|claim|gift|giveaway|nitro|airdrop|login|verify|account|reward|prize|bonus)/i.test(content);
+        const forceReview = scamSignal || keywordSignal || obfuscatedLink || attachmentSignal || massMention || multiInvite || linkAndMention || promoLink || shortLink;
+        return {
+            content,
+            urlMatches,
+            inviteMatches,
+            mentionCount,
+            scamSignal,
+            keywordSignal,
+            obfuscatedLink,
+            attachmentSignal,
+            forceReview,
+            promoLink,
+            shortLink
+        };
     }
 
     private async getRecentHistory(guildId: string, userId?: string | null) {
@@ -117,7 +237,7 @@ export default class AiMonitorManager {
     private async review(eventType: string, data: any): Promise<ReviewResult> {
         const prompt = JSON.stringify({
             role: "review",
-            instructions: "Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_action(\"notify\"|\"warn\"|\"timeout\"|\"kick\"|\"ban\"|\"delete_message\"), action_duration_ms(optional number), delete_message(optional boolean), confidence(number 0-1).",
+            instructions: "Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 2 from [\"notify\",\"warn\",\"timeout\",\"kick\",\"ban\",\"delete_message\"]), warning_message(optional string for warn action), action_duration_ms(optional number), delete_message(optional boolean), confidence(number 0-1).",
             eventType,
             data
         });
@@ -127,9 +247,83 @@ export default class AiMonitorManager {
             risk: "low",
             summary: "not suspicious",
             reason: "",
-            recommended_action: "notify",
+            recommended_actions: ["notify"],
             confidence: 0
         });
+    }
+
+    private getInvestigationTools() {
+        return getAiMonitorTools();
+    }
+
+    private async reviewWithTools(eventType: string, data: any, config: MonitorConfig): Promise<ReviewResult> {
+        if (!config.allow_investigation_tools) return this.review(eventType, data);
+        const tools = this.getInvestigationTools();
+        if (!tools.length) return this.review(eventType, data);
+        const prompt = JSON.stringify({
+            role: "review",
+            instructions: "Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 2 from [\"notify\",\"warn\",\"timeout\",\"kick\",\"ban\",\"delete_message\"]), warning_message(optional string for warn action), action_duration_ms(optional number), delete_message(optional boolean), confidence(number 0-1). Use tools only when needed.",
+            eventType,
+            data
+        });
+        const chat = NVIDIAModels.CreateChatSession({
+            tools: tools as any,
+            model: "deepseek-ai/deepseek-v3.1-terminus",
+            maxTokens: 1024,
+            temperature: 0.4,
+            topP: 0.8,
+            systemInstruction: "You are an AI monitor investigator. You may call tools to verify suspicious activity. Only call tools provided. Never fabricate tool outputs. Return JSON only."
+        });
+        let result = await chat.sendMessage(prompt);
+        for (let i = 0; i < 3; i += 1) {
+            const calls = result.response.functionCalls() || [];
+            if (!calls.length) {
+                const text = result.response.text();
+                return this.parseJson<ReviewResult>(text, {
+                    suspicious: false,
+                    risk: "low",
+                    summary: "not suspicious",
+                    reason: "",
+                    recommended_actions: ["notify"],
+                    confidence: 0
+                });
+            }
+            const toolPayload = [] as Array<{ functionResponse: { name: string; response: { result: any } } }>;
+            for (const call of calls) {
+                console.log("[AI Monitor] tool call", {
+                    tool: call.name,
+                    eventType,
+                    guildId: data?.guild?.id ?? null
+                });
+                const toolResult = await executeAiMonitorTool(call.name as AIMonitorToolName, call.args, {
+                    guildId: data?.guild?.id ?? null,
+                    requesterId: null
+                });
+                toolPayload.push({
+                    functionResponse: {
+                        name: call.name,
+                        response: { result: toolResult }
+                    }
+                });
+            }
+            result = await chat.sendMessage(toolPayload);
+        }
+        const finalText = result.response.text();
+        return this.parseJson<ReviewResult>(finalText, {
+            suspicious: false,
+            risk: "low",
+            summary: "not suspicious",
+            reason: "",
+            recommended_actions: ["notify"],
+            confidence: 0
+        });
+    }
+
+    private normalizeRecommendedActions(review: ReviewResult): ActionType[] {
+        const allowList: ActionType[] = ["notify", "warn", "timeout", "kick", "ban", "delete_message"];
+        const list = Array.isArray(review.recommended_actions) ? review.recommended_actions : (review.recommended_action ? [review.recommended_action] : []);
+        const filtered = list.filter(action => allowList.includes(action)).slice(0, 2);
+        return filtered.length > 0 ? filtered : ["notify"];
     }
 
     private async createCase(params: {
@@ -141,6 +335,7 @@ export default class AiMonitorManager {
         summary: string;
         risk: string;
         recommended_action: string;
+        recommended_actions?: string[] | null;
         action_payload: any;
         allow_actions: boolean;
         auto_action_taken: boolean;
@@ -159,6 +354,7 @@ export default class AiMonitorManager {
             summary: params.summary,
             risk: params.risk,
             recommended_action: params.recommended_action,
+            recommended_actions: params.recommended_actions ? JSON.stringify(params.recommended_actions) : null,
             action_payload: params.action_payload ? JSON.stringify(params.action_payload) : null,
             status: "open",
             created_at: now,
@@ -194,7 +390,7 @@ export default class AiMonitorManager {
         summary: string;
         reason: string;
         risk: string;
-        recommended_action: string;
+        recommended_actions: string[];
         userId?: string | null;
         channelId?: string | null;
         messageId?: string | null;
@@ -213,7 +409,7 @@ export default class AiMonitorManager {
                 { name: "Risk", value: payload.risk, inline: true },
                 { name: "Summary", value: payload.summary || "N/A", inline: false },
                 { name: "Reason", value: payload.reason || "N/A", inline: false },
-                { name: "Recommended", value: payload.recommended_action, inline: true }
+                { name: "Recommended", value: payload.recommended_actions.join(" + "), inline: true }
             )
             .setTimestamp();
 
@@ -244,6 +440,7 @@ export default class AiMonitorManager {
         channelId?: string | null;
         messageId?: string | null;
         reason?: string | null;
+        warnMessage?: string | null;
         durationMs?: number | null;
     }): Promise<{ ok: boolean; detail: string }>{
         const reason = context.reason || "AI Monitor";
@@ -260,7 +457,10 @@ export default class AiMonitorManager {
             const member = await guild.members.fetch(context.userId).catch(() => null);
             if (!member) return { ok: false, detail: "Member not found" };
             if (action === "warn") {
-                await member.send(`You received a warning: ${reason}`).catch(() => null);
+                const warnText = context.warnMessage && context.warnMessage.trim().length > 0
+                    ? context.warnMessage.trim()
+                    : `You received a warning: ${reason}`;
+                await member.send(warnText).catch(() => null);
                 return { ok: true, detail: "Warned via DM" };
             }
             if (action === "timeout") {
@@ -335,15 +535,30 @@ export default class AiMonitorManager {
         if (!this.canProcess(guild.id)) return;
         if (!config.logs_channel || config.logs_channel === "0") return;
 
+        console.log("[AI Monitor] analyze", {
+            eventType,
+            guildId: guild.id,
+            userId: context.userId ?? null,
+            channelId: context.channelId ?? null,
+            messageId: context.messageId ?? null
+        });
+
         const history = await this.getRecentHistory(guild.id, context.userId ?? null);
         if (history.length > 0) data.recent_cases = history;
 
         const triage = await this.triage(eventType, data);
         const scamSignal = Boolean(data?.extra?.scam_signal);
-        if (!triage.suspicious && !scamSignal) return;
+        const forceReview = Boolean(data?.extra?.force_review);
+        if (!triage.suspicious && !scamSignal && !forceReview) return;
 
-        const review = await this.review(eventType, data);
+        console.log("[AI Monitor] large review", {
+            eventType,
+            guildId: guild.id,
+            allowInvestigationTools: config.allow_investigation_tools
+        });
+        const review = await this.reviewWithTools(eventType, data, config);
         if (!review.suspicious) return;
+        const recommendedActions = this.normalizeRecommendedActions(review);
 
         if (eventType === "message_create" && context.messageId) {
             this.markAlertedMessage(context.messageId);
@@ -354,31 +569,31 @@ export default class AiMonitorManager {
             channelId: context.channelId ?? null,
             messageId: context.messageId ?? null,
             reason: review.reason || triage.reason,
+            warnMessage: review.warning_message ?? null,
             durationMs: review.action_duration_ms ?? null,
-            deleteMessage: Boolean(review.delete_message)
+            deleteMessage: Boolean(review.delete_message),
+            recommended_actions: recommendedActions
         };
 
         let autoAction: string | null = null;
         let autoActionTaken = false;
 
-        if (config.allow_actions && review.recommended_action && review.recommended_action !== "notify") {
-            const actionResult = await this.executeAction(guild, review.recommended_action, {
-                userId: actionPayload.userId,
-                channelId: actionPayload.channelId,
-                messageId: actionPayload.messageId,
-                reason: actionPayload.reason,
-                durationMs: actionPayload.durationMs
-            });
-            autoAction = `${review.recommended_action}: ${actionResult.ok ? "ok" : "failed"} (${actionResult.detail})`;
-            autoActionTaken = actionResult.ok;
-        } else if (config.allow_actions && review.recommended_action === "delete_message" && actionPayload.messageId) {
-            const actionResult = await this.executeAction(guild, "delete_message", {
-                channelId: actionPayload.channelId,
-                messageId: actionPayload.messageId,
-                reason: actionPayload.reason
-            });
-            autoAction = `delete_message: ${actionResult.ok ? "ok" : "failed"} (${actionResult.detail})`;
-            autoActionTaken = actionResult.ok;
+        if (config.allow_actions) {
+            const results: string[] = [];
+            for (const action of recommendedActions) {
+                if (action === "notify") continue;
+                const actionResult = await this.executeAction(guild, action, {
+                    userId: actionPayload.userId,
+                    channelId: actionPayload.channelId,
+                    messageId: actionPayload.messageId,
+                    reason: actionPayload.reason,
+                    warnMessage: actionPayload.warnMessage,
+                    durationMs: actionPayload.durationMs
+                });
+                results.push(`${action}: ${actionResult.ok ? "ok" : "failed"} (${actionResult.detail})`);
+                if (actionResult.ok) autoActionTaken = true;
+            }
+            autoAction = results.length > 0 ? results.join("; ") : null;
         }
 
         const caseId = await this.createCase({
@@ -389,7 +604,8 @@ export default class AiMonitorManager {
             messageId: context.messageId,
             summary: review.summary || triage.summary,
             risk: review.risk || triage.risk,
-            recommended_action: review.recommended_action || "notify",
+            recommended_action: recommendedActions[0] || "notify",
+            recommended_actions: recommendedActions,
             action_payload: actionPayload,
             allow_actions: config.allow_actions,
             auto_action_taken: autoActionTaken,
@@ -403,7 +619,7 @@ export default class AiMonitorManager {
             summary: review.summary || triage.summary,
             reason: review.reason || triage.reason,
             risk: review.risk || triage.risk,
-            recommended_action: review.recommended_action || "notify",
+            recommended_actions: recommendedActions,
             userId: context.userId,
             channelId: context.channelId,
             messageId: context.messageId,
@@ -417,41 +633,32 @@ export default class AiMonitorManager {
         if (!message.content && message.attachments.size === 0) return;
         const config = await this.getConfig(message.guild.id);
         if (!config || !config.enabled) return;
-        const content = message.content || "";
-        const scamPatterns = [
-            /accidentally sent you\s*\$?\d+/i,
-            /send (?:me|it) back/i,
-            /mark (?:it|this) as delivered/i,
-            /payment (?:is|was) (?:pending|failed)/i,
-            /refund (?:me|it)/i,
-            /chargeback/i,
-            /gift ?card/i,
-            /crypto|bitcoin|usdt|eth/i,
-            /verification (?:fee|payment)/i,
-            /wire transfer|bank transfer/i,
-            /i sent you \$?\d+/i,
-            /prove (?:you|it) by/i
-        ];
-        const scamSignal = scamPatterns.some(pattern => pattern.test(content));
-        const urlMatches = content.match(/https?:\/\/[^\s]+/gi) || [];
-        const inviteMatches = content.match(/discord\.gg\/[^\s]+|discord\.com\/invite\/[^\s]+/gi) || [];
-        const mentionCount = message.mentions.users.size + message.mentions.roles.size + (message.mentions.everyone ? 1 : 0);
+        const signals = this.buildMessageSignals(message);
+        const accountAgeDays = this.getAccountAgeDays(message.author);
+        const lowAgeSignal = accountAgeDays !== null && accountAgeDays < 3 && (signals.scamSignal || signals.keywordSignal || signals.obfuscatedLink);
         if (!config.analyze_potentially) {
             const hasAttachment = message.attachments.size > 0;
-            const hasLink = urlMatches.length > 0 || inviteMatches.length > 0;
-            const hasMentions = mentionCount >= 5;
-            if (!hasAttachment && !hasLink && !hasMentions && !scamSignal) return;
+            const hasLink = signals.urlMatches.length > 0 || signals.inviteMatches.length > 0;
+            const hasMentions = signals.mentionCount >= 5;
+            if (!hasAttachment && !hasLink && !hasMentions && !signals.scamSignal && !signals.forceReview) return;
         }
         const data = this.buildEventData({
             eventType: "message_create",
             message,
             guild: message.guild,
             extra: {
-                urls: urlMatches,
-                invites: inviteMatches,
-                mentionCount,
+                urls: signals.urlMatches,
+                invites: signals.inviteMatches,
+                mentionCount: signals.mentionCount,
                 attachments: message.attachments.map(a => ({ url: a.url, name: a.name, contentType: a.contentType, size: a.size })),
-                scam_signal: scamSignal
+                scam_signal: signals.scamSignal,
+                keyword_signal: signals.keywordSignal,
+                obfuscated_link: signals.obfuscatedLink,
+                attachment_signal: signals.attachmentSignal,
+                promo_link: signals.promoLink,
+                short_link: signals.shortLink,
+                account_age_days: accountAgeDays,
+                force_review: signals.forceReview || lowAgeSignal
             }
         });
         await this.handleEvent("message_create", message.guild, data, {
@@ -465,12 +672,41 @@ export default class AiMonitorManager {
         const message = newMessage.partial ? await newMessage.fetch().catch(() => null) : newMessage;
         if (!message || !message.guild || message.author?.bot) return;
         if (!message.content && message.attachments.size === 0) return;
-        const data = this.buildEventData({ eventType: "message_update", message, guild: message.guild });
+        const config = await this.getConfig(message.guild.id);
+        if (!config || !config.enabled) return;
+        const signals = this.buildMessageSignals(message);
+        const accountAgeDays = this.getAccountAgeDays(message.author);
+        const lowAgeSignal = accountAgeDays !== null && accountAgeDays < 3 && (signals.scamSignal || signals.keywordSignal || signals.obfuscatedLink);
+        if (!config.analyze_potentially) {
+            const hasAttachment = message.attachments.size > 0;
+            const hasLink = signals.urlMatches.length > 0 || signals.inviteMatches.length > 0;
+            const hasMentions = signals.mentionCount >= 5;
+            if (!hasAttachment && !hasLink && !hasMentions && !signals.scamSignal && !signals.forceReview) return;
+        }
+        const data = this.buildEventData({
+            eventType: "message_update",
+            message,
+            guild: message.guild,
+            extra: {
+                urls: signals.urlMatches,
+                invites: signals.inviteMatches,
+                mentionCount: signals.mentionCount,
+                attachments: message.attachments.map((a: any) => ({ url: a.url, name: a.name, contentType: a.contentType, size: a.size })),
+                scam_signal: signals.scamSignal,
+                keyword_signal: signals.keywordSignal,
+                obfuscated_link: signals.obfuscatedLink,
+                attachment_signal: signals.attachmentSignal,
+                promo_link: signals.promoLink,
+                short_link: signals.shortLink,
+                account_age_days: accountAgeDays,
+                force_review: signals.forceReview || lowAgeSignal
+            }
+        });
         await this.handleEvent("message_update", message.guild, data, {
             userId: message.author.id,
             channelId: message.channelId,
             messageId: message.id
-        });
+        }, config);
     }
 
     public async handleMessageDelete(message: Message | any) {
@@ -494,7 +730,16 @@ export default class AiMonitorManager {
         if (!member.guild) return;
         const config = await this.getConfig(member.guild.id);
         if (!config || !config.enabled) return;
-        const data = this.buildEventData({ eventType: "member_add", member, guild: member.guild });
+        const accountAgeDays = this.getAccountAgeDays(member.user);
+        const data = this.buildEventData({
+            eventType: "member_add",
+            member,
+            guild: member.guild,
+            extra: {
+                account_age_days: accountAgeDays,
+                force_review: accountAgeDays !== null && accountAgeDays < 3
+            }
+        });
         await this.handleEvent("member_add", member.guild, data, {
             userId: member.id,
             channelId: null,
@@ -533,29 +778,213 @@ export default class AiMonitorManager {
         });
     }
 
-    public async handleChannelCreate(guild: Guild, channelId: string) {
-        const data = this.buildEventData({ eventType: "channel_create", guild, channelId });
-        await this.handleEvent("channel_create", guild, data, {
+    public async handleMemberUpdate(oldMember: GuildMember, newMember: GuildMember) {
+        if (!newMember.guild) return;
+        const addedRoles = newMember.roles.cache.filter(r => !oldMember.roles.cache.has(r.id));
+        const removedRoles = oldMember.roles.cache.filter(r => !newMember.roles.cache.has(r.id));
+        const highPerms = [
+            PermissionFlagsBits.Administrator,
+            PermissionFlagsBits.ManageGuild,
+            PermissionFlagsBits.ManageRoles,
+            PermissionFlagsBits.ManageChannels,
+            PermissionFlagsBits.ManageWebhooks,
+            PermissionFlagsBits.BanMembers,
+            PermissionFlagsBits.KickMembers
+        ];
+        const addedPrivRoles = addedRoles.filter(r => highPerms.some(p => r.permissions.has(p)));
+        const removedPrivRoles = removedRoles.filter(r => highPerms.some(p => r.permissions.has(p)));
+        if (addedRoles.size === 0 && removedRoles.size === 0) return;
+        const data = this.buildEventData({
+            eventType: "member_update",
+            member: newMember,
+            guild: newMember.guild,
+            extra: {
+                added_roles: addedRoles.map(r => ({ id: r.id, name: r.name })),
+                removed_roles: removedRoles.map(r => ({ id: r.id, name: r.name })),
+                added_priv_roles: addedPrivRoles.map(r => ({ id: r.id, name: r.name })),
+                removed_priv_roles: removedPrivRoles.map(r => ({ id: r.id, name: r.name })),
+                force_review: addedPrivRoles.size > 0 || removedPrivRoles.size > 0
+            }
+        });
+        await this.handleEvent("member_update", newMember.guild, data, {
+            userId: newMember.id,
+            channelId: null,
+            messageId: null
+        });
+    }
+
+    public async handleRoleCreate(role: any) {
+        if (!role?.guild) return;
+        const highPerms = [
+            PermissionFlagsBits.Administrator,
+            PermissionFlagsBits.ManageGuild,
+            PermissionFlagsBits.ManageRoles,
+            PermissionFlagsBits.ManageChannels,
+            PermissionFlagsBits.ManageWebhooks,
+            PermissionFlagsBits.BanMembers,
+            PermissionFlagsBits.KickMembers
+        ];
+        const hasHighPerm = highPerms.some(p => role.permissions?.has?.(p));
+        const data = this.buildEventData({
+            eventType: "role_create",
+            guild: role.guild,
+            extra: {
+                role: { id: role.id, name: role.name, permissions: role.permissions?.toArray?.() ?? [] },
+                force_review: hasHighPerm
+            }
+        });
+        await this.handleEvent("role_create", role.guild, data, {
+            userId: null,
+            channelId: null,
+            messageId: null
+        });
+    }
+
+    public async handleRoleUpdate(oldRole: any, newRole: any) {
+        if (!newRole?.guild) return;
+        const data = this.buildEventData({
+            eventType: "role_update",
+            guild: newRole.guild,
+            extra: {
+                old_role: { id: oldRole.id, name: oldRole.name, permissions: oldRole.permissions?.toArray?.() ?? [] },
+                new_role: { id: newRole.id, name: newRole.name, permissions: newRole.permissions?.toArray?.() ?? [] },
+                force_review: true
+            }
+        });
+        await this.handleEvent("role_update", newRole.guild, data, {
+            userId: null,
+            channelId: null,
+            messageId: null
+        });
+    }
+
+    public async handleRoleDelete(role: any) {
+        if (!role?.guild) return;
+        const data = this.buildEventData({
+            eventType: "role_delete",
+            guild: role.guild,
+            extra: {
+                role: { id: role.id, name: role.name, permissions: role.permissions?.toArray?.() ?? [] },
+                force_review: true
+            }
+        });
+        await this.handleEvent("role_delete", role.guild, data, {
+            userId: null,
+            channelId: null,
+            messageId: null
+        });
+    }
+
+    public async handleWebhookUpdate(channel: any) {
+        if (!channel?.guild) return;
+        const data = this.buildEventData({
+            eventType: "webhook_update",
+            guild: channel.guild,
+            channelId: channel.id,
+            extra: { force_review: true }
+        });
+        await this.handleEvent("webhook_update", channel.guild, data, {
+            userId: null,
+            channelId: channel.id,
+            messageId: null
+        });
+    }
+
+    public async handleGuildBanAdd(guild: Guild, user: any) {
+        const data = this.buildEventData({
+            eventType: "guild_ban_add",
+            guild,
+            extra: { user: { id: user?.id, tag: user?.tag }, force_review: true }
+        });
+        await this.handleEvent("guild_ban_add", guild, data, {
+            userId: user?.id ?? null,
+            channelId: null,
+            messageId: null
+        });
+    }
+
+    public async handleGuildBanRemove(guild: Guild, user: any) {
+        const data = this.buildEventData({
+            eventType: "guild_ban_remove",
+            guild,
+            extra: { user: { id: user?.id, tag: user?.tag }, force_review: true }
+        });
+        await this.handleEvent("guild_ban_remove", guild, data, {
+            userId: user?.id ?? null,
+            channelId: null,
+            messageId: null
+        });
+    }
+
+    public async handleMessageDeleteBulk(guild: Guild, channelId: string, count: number) {
+        const data = this.buildEventData({
+            eventType: "message_delete_bulk",
+            guild,
+            channelId,
+            extra: { count, force_review: true }
+        });
+        await this.handleEvent("message_delete_bulk", guild, data, {
             userId: null,
             channelId,
             messageId: null
         });
     }
 
-    public async handleChannelDelete(guild: Guild, channelId: string) {
-        const data = this.buildEventData({ eventType: "channel_delete", guild, channelId });
-        await this.handleEvent("channel_delete", guild, data, {
+    public async handleChannelCreate(channel: any) {
+        if (!channel?.guild) return;
+        const typeName = ChannelType[channel.type as keyof typeof ChannelType] ?? String(channel.type);
+        const suspiciousName = /(spam|raid|giveaway|free|nitro|drop|airdrop)/i.test(channel.name || "");
+        const data = this.buildEventData({
+            eventType: "channel_create",
+            guild: channel.guild,
+            channelId: channel.id,
+            extra: {
+                name: channel.name,
+                type: typeName,
+                force_review: suspiciousName
+            }
+        });
+        await this.handleEvent("channel_create", channel.guild, data, {
             userId: null,
-            channelId,
+            channelId: channel.id,
             messageId: null
         });
     }
 
-    public async handleChannelUpdate(guild: Guild, channelId: string) {
-        const data = this.buildEventData({ eventType: "channel_update", guild, channelId });
-        await this.handleEvent("channel_update", guild, data, {
+    public async handleChannelDelete(channel: any) {
+        if (!channel?.guild) return;
+        const typeName = ChannelType[channel.type as keyof typeof ChannelType] ?? String(channel.type);
+        const data = this.buildEventData({
+            eventType: "channel_delete",
+            guild: channel.guild,
+            channelId: channel.id,
+            extra: { name: channel.name, type: typeName, force_review: true }
+        });
+        await this.handleEvent("channel_delete", channel.guild, data, {
             userId: null,
-            channelId,
+            channelId: channel.id,
+            messageId: null
+        });
+    }
+
+    public async handleChannelUpdate(oldChannel: any, newChannel: any) {
+        if (!newChannel?.guild) return;
+        const typeName = ChannelType[newChannel.type as keyof typeof ChannelType] ?? String(newChannel.type);
+        const nameChanged = oldChannel?.name !== newChannel?.name;
+        const data = this.buildEventData({
+            eventType: "channel_update",
+            guild: newChannel.guild,
+            channelId: newChannel.id,
+            extra: {
+                old_name: oldChannel?.name ?? null,
+                new_name: newChannel?.name ?? null,
+                type: typeName,
+                force_review: nameChanged
+            }
+        });
+        await this.handleEvent("channel_update", newChannel.guild, data, {
+            userId: null,
+            channelId: newChannel.id,
             messageId: null
         });
     }
@@ -598,21 +1027,29 @@ export default class AiMonitorManager {
             return true;
         }
         const payload = record.action_payload ? JSON.parse(record.action_payload) : {};
-        const action = record.recommended_action || "notify";
-        if (action === "notify") {
+        const actions: ActionType[] = Array.isArray(payload.recommended_actions)
+            ? payload.recommended_actions
+            : (record.recommended_action ? [record.recommended_action] : ["notify"]);
+        const actionable = actions.filter((a: ActionType) => a !== "notify");
+        if (actionable.length === 0) {
             await interaction.reply({ content: "No action recommended for this case.", ephemeral: true });
             return true;
         }
-        const result = await this.executeAction(guild, action, {
-            userId: payload.userId ?? record.user_id,
-            channelId: payload.channelId ?? record.channel_id,
-            messageId: payload.messageId ?? record.message_id,
-            reason: payload.reason ?? record.reason,
-            durationMs: payload.durationMs ?? null
-        });
+        const results: string[] = [];
+        for (const action of actionable.slice(0, 2)) {
+            const result = await this.executeAction(guild, action, {
+                userId: payload.userId ?? record.user_id,
+                channelId: payload.channelId ?? record.channel_id,
+                messageId: payload.messageId ?? record.message_id,
+                reason: payload.reason ?? record.reason,
+                warnMessage: payload.warnMessage ?? null,
+                durationMs: payload.durationMs ?? null
+            });
+            results.push(`${action}: ${result.ok ? "ok" : "failed"} (${result.detail})`);
+        }
         await this.markCase(caseId, "actioned", interaction.user.id);
         await this.disableButtons(interaction);
-        await interaction.reply({ content: result.ok ? "Action executed." : `Action failed: ${result.detail}`, ephemeral: true });
+        await interaction.reply({ content: `Actions executed: ${results.join("; ")}`, ephemeral: true });
         return true;
     }
 

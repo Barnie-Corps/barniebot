@@ -82,6 +82,11 @@ export default {
                         .setDescription("Also analyze potentially harmful links, attachments, invite spam, and raid signals")
                         .setRequired(false)
                 )
+                .addBooleanOption(o =>
+                    o.setName("allow_investigation_tools")
+                        .setDescription("Allow the large model to use safe investigation tools for AI monitor")
+                        .setRequired(false)
+                )
         ),
     category: "AI",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
@@ -295,6 +300,7 @@ export default {
                 const logsChannel = interaction.options.getChannel("logs_channel");
                 const allowActions = interaction.options.getBoolean("allow_actions") ?? false;
                 const analyzePotential = interaction.options.getBoolean("analyze_potential") ?? false;
+                const allowInvestigationTools = interaction.options.getBoolean("allow_investigation_tools") ?? false;
                 const existing = await db.query("SELECT * FROM ai_monitor_configs WHERE guild_id = ?", [interaction.guildId]) as unknown as any[];
                 if (action === "status") {
                     if (!existing[0]) return await reply(texts.errors.monitor_disabled);
@@ -302,13 +308,14 @@ export default {
                     const channelText = existing[0].logs_channel && existing[0].logs_channel !== "0" ? `<#${existing[0].logs_channel}>` : "not set";
                     const actionsText = existing[0].allow_actions ? "enabled" : "disabled";
                     const potentialText = existing[0].analyze_potentially ? "enabled" : "disabled";
-                    return await reply(`AI monitor is ${statusText}. Logs: ${channelText}. Auto actions: ${actionsText}. Potential analysis: ${potentialText}.`);
+                    const toolsText = existing[0].allow_investigation_tools ? "enabled" : "disabled";
+                    return await reply(`AI monitor is ${statusText}. Logs: ${channelText}. Auto actions: ${actionsText}. Potential analysis: ${potentialText}. Investigation tools: ${toolsText}.`);
                 }
                 if (action === "enable") {
                     if (!logsChannel || logsChannel.type !== ChannelType.GuildText) return await reply("Please provide a text logs channel.");
                     const now = Date.now();
                     if (existing[0]) {
-                        await db.query("UPDATE ai_monitor_configs SET enabled = TRUE, logs_channel = ?, allow_actions = ?, analyze_potentially = ?, updated_at = ? WHERE guild_id = ?", [logsChannel.id, allowActions, analyzePotential, now, interaction.guildId]);
+                        await db.query("UPDATE ai_monitor_configs SET enabled = TRUE, logs_channel = ?, allow_actions = ?, analyze_potentially = ?, allow_investigation_tools = ?, updated_at = ? WHERE guild_id = ?", [logsChannel.id, allowActions, analyzePotential, allowInvestigationTools, now, interaction.guildId]);
                     } else {
                         await db.query("INSERT INTO ai_monitor_configs SET ?", [{
                             guild_id: interaction.guildId,
@@ -316,11 +323,12 @@ export default {
                             logs_channel: logsChannel.id,
                             allow_actions: allowActions,
                             analyze_potentially: analyzePotential,
+                            allow_investigation_tools: allowInvestigationTools,
                             created_at: now,
                             updated_at: now
                         }]);
                     }
-                    return await reply(`AI monitor enabled. Logs channel: <#${logsChannel.id}>. Auto actions: ${allowActions ? "enabled" : "disabled"}. Potential analysis: ${analyzePotential ? "enabled" : "disabled"}.`);
+                    return await reply(`AI monitor enabled. Logs channel: <#${logsChannel.id}>. Auto actions: ${allowActions ? "enabled" : "disabled"}. Potential analysis: ${analyzePotential ? "enabled" : "disabled"}. Investigation tools: ${allowInvestigationTools ? "enabled" : "disabled"}.`);
                 }
                 if (action === "disable") {
                     if (!existing[0]) return await reply(texts.errors.monitor_disabled);

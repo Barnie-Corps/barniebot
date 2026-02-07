@@ -352,6 +352,49 @@ const utils = {
         return { error: "Failed to fetch URL" };
       }
     },
+    fetch_url_safe: async (args: { url: string; maxChars?: number; timeoutMs?: number }): Promise<any> => {
+      if (!args.url) return { error: "Missing url parameter" };
+      let parsed: URL;
+      try {
+        parsed = new URL(args.url);
+      } catch {
+        return { error: "Invalid URL" };
+      }
+      if (!/^https?:$/.test(parsed.protocol)) return { error: "Only http/https URLs are allowed" };
+      const maxBytes = 200 * 1024;
+      const maxChars = Math.min(Math.max(args.maxChars ?? 50000, 1000), 50000);
+      const timeoutMs = Math.min(Math.max(args.timeoutMs ?? 4000, 1000), 8000);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(parsed.toString(), {
+          method: "GET",
+          redirect: "manual",
+          headers: { "User-Agent": "BarnieBot-AIMonitor/1.0" },
+          signal: controller.signal as any
+        });
+        const status = response.status;
+        const contentType = response.headers.get("content-type") || "";
+        const contentLength = Number(response.headers.get("content-length") || 0);
+        if (status >= 300 && status < 400) {
+          const location = response.headers.get("location") || "";
+          return { error: "Redirect blocked", status, location };
+        }
+        if (status < 200 || status >= 300) return { error: `HTTP ${status}`, status };
+        if (contentLength && contentLength > maxBytes) return { error: "Content too large", status, contentLength };
+        if (!/^text\//i.test(contentType) && !/application\/(json|xml)/i.test(contentType)) {
+          return { error: "Unsupported content type", status, contentType };
+        }
+        const buf = Buffer.from(await response.arrayBuffer());
+        if (buf.length > maxBytes) return { error: "Content too large", status, contentLength: buf.length };
+        const text = buf.toString("utf8").slice(0, maxChars);
+        return { url: parsed.toString(), status, contentType, truncated: text.length >= maxChars, content: text };
+      } catch (error: any) {
+        return { error: error?.name === "AbortError" ? "Request timed out" : "Failed to fetch URL" };
+      } finally {
+        clearTimeout(timer);
+      }
+    },
     retrieve_owners: (): string[] => {
       return data.bot.owners;
     },
