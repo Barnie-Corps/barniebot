@@ -97,7 +97,10 @@ export default {
                 no_male_voice: "No male voice available for language: {lang}. Supported languages: en-US, es-US, fr-FR, de-DE, zh-CN",
                 voice_processing_error: "Sorry, I encountered an error processing your voice.",
                 temporary_unavailable: "Temporary unavailable due to high demand. Please use the chat command.",
-                max_attachments: "You can only send up to 1 attachment per message."
+                max_attachments: "You can only send up to 1 attachment per message.",
+                monitor_already_enabled: "AI monitor is already enabled for this guild.",
+                monitor_already_disabled: "AI monitor is already disabled for this guild.",
+                monitor_disabled: "AI monitor is disabled for this guild.",
             },
             common: {
                 question: "Your question was:",
@@ -294,7 +297,7 @@ export default {
                 const analyzePotential = interaction.options.getBoolean("analyze_potential") ?? false;
                 const existing = await db.query("SELECT * FROM ai_monitor_configs WHERE guild_id = ?", [interaction.guildId]) as unknown as any[];
                 if (action === "status") {
-                    if (!existing[0]) return await reply("AI monitor is disabled for this guild.");
+                    if (!existing[0]) return await reply(texts.errors.monitor_disabled);
                     const statusText = existing[0].enabled ? "enabled" : "disabled";
                     const channelText = existing[0].logs_channel && existing[0].logs_channel !== "0" ? `<#${existing[0].logs_channel}>` : "not set";
                     const actionsText = existing[0].allow_actions ? "enabled" : "disabled";
@@ -320,7 +323,7 @@ export default {
                     return await reply(`AI monitor enabled. Logs channel: <#${logsChannel.id}>. Auto actions: ${allowActions ? "enabled" : "disabled"}. Potential analysis: ${analyzePotential ? "enabled" : "disabled"}.`);
                 }
                 if (action === "disable") {
-                    if (!existing[0]) return await reply("AI monitor is already disabled for this guild.");
+                    if (!existing[0]) return await reply(texts.errors.monitor_disabled);
                     await db.query("UPDATE ai_monitor_configs SET enabled = FALSE, updated_at = ? WHERE guild_id = ?", [Date.now(), interaction.guildId]);
                     return await reply("AI monitor disabled.");
                 }
@@ -370,7 +373,6 @@ export default {
                 console.log(`[Voice AI] Connection state: ${connection.state.status}`);
                 console.log(`[Voice AI] Receiver ready: ${connection.receiver ? 'YES' : 'NO'}`);
 
-                // Wait for connection to be ready
                 connection.on(VoiceConnectionStatus.Ready, async () => {
                     console.log(`[Voice AI] Connection is now READY, setting up audio receiver`);
                     if (interaction.guild?.members.me && interaction.guild.members.me.voice.serverDeaf) {
@@ -440,7 +442,6 @@ export default {
                             isProcessing = true;
                             console.log(`[Voice AI] Processing ${audioChunks.length} audio chunks`);
 
-                            // Deafen the bot while processing to avoid feedback and ignore channel audio
                             try {
                                 const me = interaction.guild?.members.me;
                                 if (me && !me.voice.serverDeaf) {
@@ -457,7 +458,7 @@ export default {
                             try {
                                 const audioBuffer = Buffer.concat(audioChunks as any);
                                 audioChunks = [];
-                                isListening = false; // Reset immediately so user can interrupt with new speech
+                                isListening = false;
                                 console.log(`[Voice AI] Combined audio buffer size: ${audioBuffer.length} bytes`);
 
                                 if (audioBuffer.length < 10000) {
@@ -470,14 +471,13 @@ export default {
                                 console.log(`[Voice AI] Preparing audio for ASR...`);
                                 console.log(`[Voice AI] Raw PCM: 48kHz stereo, ${audioBuffer.length} bytes = ${audioBuffer.length / 4 / 48000} seconds`);
 
-                                // Discord audio is 48kHz stereo PCM - convert to 16kHz mono
                                 let processedAudio = audioBuffer;
 
                                 // First resample from 48kHz to 16kHz (stereo)
                                 console.log(`[Voice AI] Resampling from 48kHz to 16kHz...`);
                                 processedAudio = Buffer.from(resampleAudio(processedAudio, 48000, 16000, 2));
 
-                                // Then convert stereo to mono
+                                // Convert stereo to mono
                                 console.log(`[Voice AI] Converting stereo to mono...`);
                                 processedAudio = Buffer.from(stereoToMono(processedAudio));
 
@@ -495,7 +495,6 @@ export default {
                                 if (!transcript || transcript.trim().length === 0) {
                                     console.log(`[Voice AI] Empty transcript, skipping`);
                                     if (statusMessage) { await safeDelete(statusMessage); listeningMessage = null; }
-                                    // Ready for next input -> undeafen
                                     try {
                                         const me = interaction.guild?.members.me;
                                         if (me && me.voice.serverDeaf) {
@@ -509,7 +508,6 @@ export default {
                                     return;
                                 }
 
-                                // Show what user said (without placeholder, just append text)
                                 if (statusMessage) await safeEdit(statusMessage, `🎤 ${transcript}`);
 
                                 if (["stop", "end conversation", "goodbye"].some(word => transcript.toLowerCase().includes(word))) {
@@ -531,7 +529,6 @@ export default {
                                     if (statusMessage) await safeEdit(statusMessage, `${texts.errors.unsafe_message}`);
                                     connection.destroy();
                                     ai.ClearChat(interaction.user.id);
-                                    // Ended -> undeafen
                                     try {
                                         const me = interaction.guild?.members.me;
                                         if (me && me.voice.serverDeaf) {
@@ -609,7 +606,6 @@ export default {
                                 const tempFile = path.join(__dirname, `../temp-tts-${Date.now()}.wav`);
                                 fs.writeFileSync(tempFile, wavBuffer as any);
 
-                                // If audio is currently playing, stop it to play the new response
                                 if (player.state.status === AudioPlayerStatus.Playing) {
                                     console.log(`[Voice AI] Stopping current audio to play new response`);
                                     player.stop();
@@ -627,7 +623,6 @@ export default {
                                     }
                                     if (statusMessage) { await safeDelete(statusMessage); listeningMessage = null; }
                                     isProcessing = false;
-                                    // Ready to listen again -> undeafen
                                     (async () => {
                                         try {
                                             const me = interaction.guild?.members.me;
@@ -646,7 +641,6 @@ export default {
                                 console.error("[Voice AI] Error in processAudio:", error);
                                 console.error("[Voice AI] Error stack:", (error as Error).stack);
                                 if (statusMessage) await safeEdit(statusMessage, texts.errors.voice_processing_error);
-                                // Error path -> attempt to undeafen so we can listen again
                                 try {
                                     const me = interaction.guild?.members.me;
                                     if (me && me.voice.serverDeaf) {
