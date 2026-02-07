@@ -304,6 +304,7 @@ const getGuildAndMember = async (guildId: string, userId: string) => {
   if (!member) return { error: "Member not found in guild" };
   return { guild, member };
 };
+const isSystemRequester = (requesterId?: string | null) => requesterId === "__ai_monitor__";
 const isAdminStaffUser = async (userId: string) => {
   const rank = await utils.getUserStaffRank(userId);
   return StaffRanksManager.hasMinimumRank(rank, "Administrator");
@@ -499,6 +500,126 @@ const utils = {
       let member = guild.members.cache.get(args.memberId);
       if (!member) return { error: "Member not found" };
       return { roles: member.roles.cache.map(r => ({ id: r.id, name: r.name })) };
+    },
+    get_message_context: async (args: { requesterId?: string; guildId?: string; channelId?: string; messageId?: string; limit?: number }): Promise<any> => {
+      if (!args.guildId || !args.channelId || !args.messageId) return { error: "Missing parameters" };
+      if (!isSystemRequester(args.requesterId)) {
+        if (!args.requesterId) return { error: "Missing requesterId" };
+        const owner = isOwner(args.requesterId) === true;
+        const adminStaff = await isAdminStaffUser(args.requesterId);
+        const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+        if (guildInfo.error) return { error: guildInfo.error };
+        const member = guildInfo.member as any;
+        const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageMessages);
+        if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      }
+      const guild = client.guilds.cache.get(args.guildId);
+      if (!guild) return { error: "Guild not found" };
+      const channel = guild.channels.cache.get(args.channelId) as any;
+      if (!channel || !channel.isTextBased?.()) return { error: "Channel not text-based" };
+      const target = await channel.messages.fetch(args.messageId).catch(() => null);
+      if (!target) return { error: "Message not found" };
+      const limit = Math.max(1, Math.min(args.limit ?? 12, 20));
+      const around = await channel.messages.fetch({ limit, around: args.messageId }).catch(() => null);
+      const aroundList = around ? Array.from(around.values()) : [];
+      const mapMsg = (m: any) => ({
+        id: m.id,
+        authorId: m.author?.id ?? null,
+        authorTag: m.author?.tag ?? null,
+        content: m.content,
+        createdAt: m.createdTimestamp,
+        attachments: m.attachments.map((a: any) => ({ url: a.url, name: a.name, size: a.size, contentType: a.contentType }))
+      });
+      return {
+        guild: { id: guild.id, name: guild.name },
+        channel: { id: channel.id, name: channel.name },
+        message: mapMsg(target),
+        around: aroundList.sort((a: any, b: any) => a.createdTimestamp - b.createdTimestamp).map(mapMsg)
+      };
+    },
+    get_user_context: async (args: { requesterId?: string; guildId?: string; userId?: string }): Promise<any> => {
+      if (!args.guildId || !args.userId) return { error: "Missing parameters" };
+      if (!isSystemRequester(args.requesterId)) {
+        if (!args.requesterId) return { error: "Missing requesterId" };
+        const owner = isOwner(args.requesterId) === true;
+        const adminStaff = await isAdminStaffUser(args.requesterId);
+        const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+        if (guildInfo.error) return { error: guildInfo.error };
+        const member = guildInfo.member as any;
+        const hasPerm = hasGuildPermission(member, PermissionFlagsBits.KickMembers) || hasGuildPermission(member, PermissionFlagsBits.ManageGuild);
+        if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      }
+      const guild = client.guilds.cache.get(args.guildId);
+      if (!guild) return { error: "Guild not found" };
+      const user = await client.users.fetch(args.userId).catch(() => null);
+      const member = await guild.members.fetch(args.userId).catch(() => null);
+      return {
+        user: user ? {
+          id: user.id,
+          tag: user.tag,
+          createdAt: user.createdTimestamp,
+          bot: user.bot
+        } : null,
+        member: member ? {
+          id: member.id,
+          joinedAt: member.joinedTimestamp,
+          nick: member.nickname ?? null,
+          roles: member.roles.cache.map((r: any) => ({ id: r.id, name: r.name })),
+          permissions: member.permissions?.toArray?.() ?? [],
+          communicationDisabledUntil: member.communicationDisabledUntilTimestamp ?? null
+        } : null
+      };
+    },
+    get_guild_context: async (args: { requesterId?: string; guildId?: string }): Promise<any> => {
+      if (!args.guildId) return { error: "Missing guildId parameter" };
+      if (!isSystemRequester(args.requesterId)) {
+        if (!args.requesterId) return { error: "Missing requesterId" };
+        const owner = isOwner(args.requesterId) === true;
+        const adminStaff = await isAdminStaffUser(args.requesterId);
+        const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+        if (guildInfo.error) return { error: guildInfo.error };
+        const member = guildInfo.member as any;
+        const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageGuild);
+        if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      }
+      const guild = client.guilds.cache.get(args.guildId);
+      if (!guild) return { error: "Guild not found" };
+      const botMember = guild.members.me;
+      const canViewInvites = botMember?.permissions?.has(PermissionFlagsBits.ManageGuild);
+      let invites: any[] | null = null;
+      if (canViewInvites) {
+        const list = await guild.invites.fetch().catch(() => null);
+        invites = list ? Array.from(list.values()).slice(0, 5).map(inv => ({
+          code: inv.code,
+          uses: inv.uses ?? 0,
+          maxUses: inv.maxUses ?? 0,
+          channelId: inv.channelId,
+          inviterId: inv.inviter?.id ?? null
+        })) : null;
+      }
+      const channelCounts = {
+        text: guild.channels.cache.filter(ch => ch.type === ChannelType.GuildText).size,
+        voice: guild.channels.cache.filter(ch => ch.type === ChannelType.GuildVoice).size,
+        category: guild.channels.cache.filter(ch => ch.type === ChannelType.GuildCategory).size
+      };
+      return {
+        guild: {
+          id: guild.id,
+          name: guild.name,
+          ownerId: guild.ownerId,
+          memberCount: guild.memberCount,
+          createdAt: guild.createdTimestamp,
+          verificationLevel: guild.verificationLevel,
+          mfaLevel: guild.mfaLevel,
+          features: guild.features
+        },
+        counts: {
+          roles: guild.roles.cache.size,
+          channels: guild.channels.cache.size,
+          ...channelCounts
+        },
+        invites
+      };
     },
     list_guild_channels: async (args: { requesterId?: string; guildId?: string; type?: string; limit?: number }): Promise<any> => {
       if (!args?.requesterId || !args.guildId) return { error: "Missing parameters" };

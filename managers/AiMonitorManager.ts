@@ -237,7 +237,7 @@ export default class AiMonitorManager {
     private async review(eventType: string, data: any): Promise<ReviewResult> {
         const prompt = JSON.stringify({
             role: "review",
-            instructions: "Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 2 from [\"notify\",\"warn\",\"timeout\",\"kick\",\"ban\",\"delete_message\"]), warning_message(optional string for warn action), action_duration_ms(optional number), delete_message(optional boolean), confidence(number 0-1).",
+            instructions: "Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 2 from [\"notify\",\"warn\",\"timeout\",\"kick\",\"ban\",\"delete_message\"]), warning_message(optional string for warn action), action_duration_ms(optional number), delete_message(optional boolean), confidence(number 0-1). Use recent_cases only as context; do not recommend punitive actions if the current content appears benign. If current content is benign, set suspicious=false, risk=low, recommended_actions=[\"notify\"].",
             eventType,
             data
         });
@@ -262,7 +262,7 @@ export default class AiMonitorManager {
         if (!tools.length) return this.review(eventType, data);
         const prompt = JSON.stringify({
             role: "review",
-            instructions: "Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 2 from [\"notify\",\"warn\",\"timeout\",\"kick\",\"ban\",\"delete_message\"]), warning_message(optional string for warn action), action_duration_ms(optional number), delete_message(optional boolean), confidence(number 0-1). Use tools only when needed.",
+            instructions: "Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 2 from [\"notify\",\"warn\",\"timeout\",\"kick\",\"ban\",\"delete_message\"]), warning_message(optional string for warn action), action_duration_ms(optional number), delete_message(optional boolean), confidence(number 0-1). Use tools only when needed. Use recent_cases only as context; do not recommend punitive actions if the current content appears benign. If current content is benign, set suspicious=false, risk=low, recommended_actions=[\"notify\"].",
             eventType,
             data
         });
@@ -297,7 +297,7 @@ export default class AiMonitorManager {
                 });
                 const toolResult = await executeAiMonitorTool(call.name as AIMonitorToolName, call.args, {
                     guildId: data?.guild?.id ?? null,
-                    requesterId: null
+                    requesterId: "__ai_monitor__"
                 });
                 toolPayload.push({
                     functionResponse: {
@@ -543,13 +543,13 @@ export default class AiMonitorManager {
             messageId: context.messageId ?? null
         });
 
-        const history = await this.getRecentHistory(guild.id, context.userId ?? null);
-        if (history.length > 0) data.recent_cases = history;
-
         const triage = await this.triage(eventType, data);
         const scamSignal = Boolean(data?.extra?.scam_signal);
         const forceReview = Boolean(data?.extra?.force_review);
         if (!triage.suspicious && !scamSignal && !forceReview) return;
+
+        const history = await this.getRecentHistory(guild.id, context.userId ?? null);
+        if (history.length > 0) data.recent_cases = history;
 
         console.log("[AI Monitor] large review", {
             eventType,

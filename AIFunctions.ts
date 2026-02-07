@@ -49,19 +49,6 @@ const functionDeclarations = {
             required: ["url"]
         }
     },
-    fetch_url_safe: {
-        name: "fetch_url_safe",
-        description: "Safely fetches a URL with strict limits. Text-only, size capped, and redirects blocked. Use this for investigating suspicious links.",
-        parameters: {
-            type: SchemaType.OBJECT,
-            properties: {
-                url: { type: SchemaType.STRING, description: "The URL to fetch content from." },
-                maxChars: { type: SchemaType.NUMBER, description: "Maximum characters to return (default 50000, max 50000)." },
-                timeoutMs: { type: SchemaType.NUMBER, description: "Timeout in milliseconds (default 4000, max 8000)." }
-            },
-            required: ["url"]
-        }
-    },
     retrieve_owners: {
         name: "retrieve_owners",
         description: "Retrieve the list of bot owners from the database. [DOES NOT REQUIRE ID PARAMETER].",
