@@ -36,6 +36,7 @@ import path from "path";
 import { inspect } from "util";
 import langs from "langs";
 import NVIDIAModels from "./NVIDIAModels";
+import AiMonitorManager from "./managers/AiMonitorManager";
 const manager = new ChatManager();
 const globalCommandsManager = new GlobalCommandsManager();
 process.on("uncaughtException", (err: any) => {
@@ -48,6 +49,7 @@ const client = new Client({
     intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.GuildMessageTyping, GatewayIntentBits.GuildEmojisAndStickers, GatewayIntentBits.DirectMessages, GatewayIntentBits.DirectMessageTyping, GatewayIntentBits.DirectMessageReactions, GatewayIntentBits.GuildVoiceStates],
     partials: [Partials.Channel, Partials.GuildMember, Partials.Message, Partials.User]
 });
+const aiMonitor = new AiMonitorManager(client);
 (async function () {
     const commandsDir = fs.readdirSync("./commands").filter(f => f.endsWith(".ts"));
     for (const cmdFile of commandsDir) {
@@ -604,6 +606,83 @@ ${"═".repeat(78)}`;
 });
 
 client.on("messageCreate", async (message): Promise<any> => {
+    try {
+        await aiMonitor.handleMessageCreate(message);
+    } catch (error: any) {
+        Log.warn("AI monitor messageCreate failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("messageUpdate", async (oldMessage, newMessage): Promise<any> => {
+    try {
+        await aiMonitor.handleMessageUpdate(oldMessage as any, newMessage as any);
+    } catch (error: any) {
+        Log.warn("AI monitor messageUpdate failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("messageDelete", async (message): Promise<any> => {
+    try {
+        await aiMonitor.handleMessageDelete(message as any);
+    } catch (error: any) {
+        Log.warn("AI monitor messageDelete failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("guildMemberAdd", async (member): Promise<any> => {
+    try {
+        await aiMonitor.handleMemberAdd(member);
+    } catch (error: any) {
+        Log.warn("AI monitor memberAdd failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("guildMemberRemove", async (member): Promise<any> => {
+    try {
+        const fullMember = "partial" in member && member.partial ? await member.fetch().catch(() => null) : member;
+        if (!fullMember) return;
+        await aiMonitor.handleMemberRemove(fullMember as any);
+    } catch (error: any) {
+        Log.warn("AI monitor memberRemove failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("channelCreate", async (channel): Promise<any> => {
+    if (!("guild" in channel) || !channel.guild) return;
+    try {
+        await aiMonitor.handleChannelCreate(channel.guild, channel.id);
+    } catch (error: any) {
+        Log.warn("AI monitor channelCreate failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("channelDelete", async (channel): Promise<any> => {
+    if (!("guild" in channel) || !channel.guild) return;
+    try {
+        await aiMonitor.handleChannelDelete(channel.guild, channel.id);
+    } catch (error: any) {
+        Log.warn("AI monitor channelDelete failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("channelUpdate", async (oldChannel, newChannel): Promise<any> => {
+    if (!("guild" in newChannel) || !newChannel.guild) return;
+    try {
+        await aiMonitor.handleChannelUpdate(newChannel.guild, newChannel.id);
+    } catch (error: any) {
+        Log.warn("AI monitor channelUpdate failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("inviteCreate", async (invite): Promise<any> => {
+    try {
+        await aiMonitor.handleInviteCreate(invite as any);
+    } catch (error: any) {
+        Log.warn("AI monitor inviteCreate failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+});
+
+client.on("messageCreate", async (message): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(message.author.id)) return;
     if (message.author.bot) return;
     const customResponses: any = await db.query("SELECT * FROM custom_responses WHERE guild = ?", [message.guildId]);
@@ -733,6 +812,12 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
         }
     }
     else if (interaction.isButton()) {
+        try {
+            const handled = await aiMonitor.handleButton(interaction);
+            if (handled) return;
+        } catch (error: any) {
+            Log.warn("AI monitor button failed", { component: "AiMonitor", error: error?.message || String(error) });
+        }
         const [event, ...args] = interaction.customId.trim().split("-");
         switch (event) {
             case "cancel_setup": {

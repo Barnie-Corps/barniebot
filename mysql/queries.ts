@@ -64,6 +64,10 @@ export default function queries(): void {
     db.query("CREATE TABLE IF NOT EXISTS staff_notes (id INT PRIMARY KEY AUTO_INCREMENT, user_id VARCHAR(255) NOT NULL, staff_id VARCHAR(255) NOT NULL, note TEXT NOT NULL, created_at BIGINT(255) NOT NULL)");
     
     db.query("CREATE TABLE IF NOT EXISTS staff_audit_log (id INT PRIMARY KEY AUTO_INCREMENT, staff_id VARCHAR(255) NOT NULL, action_type VARCHAR(50) NOT NULL, target_id VARCHAR(255) DEFAULT NULL, details TEXT, metadata JSON DEFAULT NULL, created_at BIGINT(255) NOT NULL)");
+
+    db.query("CREATE TABLE IF NOT EXISTS ai_monitor_configs (guild_id VARCHAR(255) NOT NULL PRIMARY KEY, enabled BOOLEAN NOT NULL DEFAULT FALSE, logs_channel VARCHAR(255) NOT NULL DEFAULT '0', allow_actions BOOLEAN NOT NULL DEFAULT FALSE, analyze_potentially BOOLEAN NOT NULL DEFAULT FALSE, created_at BIGINT(255) NOT NULL, updated_at BIGINT(255) NOT NULL)");
+
+    db.query("CREATE TABLE IF NOT EXISTS ai_monitor_cases (case_id VARCHAR(64) NOT NULL PRIMARY KEY, guild_id VARCHAR(255) NOT NULL, event_type VARCHAR(50) NOT NULL, user_id VARCHAR(255) DEFAULT NULL, channel_id VARCHAR(255) DEFAULT NULL, message_id VARCHAR(255) DEFAULT NULL, summary TEXT, risk VARCHAR(20) NOT NULL DEFAULT 'low', recommended_action VARCHAR(32) NOT NULL DEFAULT 'notify', action_payload JSON DEFAULT NULL, status VARCHAR(20) NOT NULL DEFAULT 'open', created_at BIGINT(255) NOT NULL, updated_at BIGINT(255) NOT NULL, log_channel_id VARCHAR(255) DEFAULT NULL, log_message_id VARCHAR(255) DEFAULT NULL, allow_actions BOOLEAN NOT NULL DEFAULT FALSE, auto_action_taken BOOLEAN NOT NULL DEFAULT FALSE, reason TEXT, confidence DECIMAL(4,3) DEFAULT NULL)");
     
     db.query("CREATE TABLE IF NOT EXISTS global_notifications (id INT PRIMARY KEY AUTO_INCREMENT, content TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL, language VARCHAR(5) NOT NULL DEFAULT 'en', created_by VARCHAR(255) NOT NULL, created_at BIGINT(255) NOT NULL)");
     

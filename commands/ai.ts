@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, TextChannel, VoiceChannel, GuildMember, AttachmentBuilder, Message } from "discord.js";
+import { ChatInputCommandInteraction, SlashCommandBuilder, TextChannel, VoiceChannel, GuildMember, AttachmentBuilder, Message, PermissionFlagsBits, ChannelType } from "discord.js";
 import {
     joinVoiceChannel,
     createAudioPlayer,
@@ -53,6 +53,35 @@ export default {
         .addSubcommand(s =>
             s.setName("voice")
                 .setDescription("Starts a voice conversation with the AI (requires being in a voice channel).")
+        )
+        .addSubcommand(s =>
+            s.setName("monitor")
+                .setDescription("Configure AI monitoring for this guild")
+                .addStringOption(o =>
+                    o.setName("action")
+                        .setDescription("Enable, disable, or check status")
+                        .setRequired(true)
+                        .addChoices(
+                            { name: "Enable", value: "enable" },
+                            { name: "Disable", value: "disable" },
+                            { name: "Status", value: "status" }
+                        )
+                )
+                .addChannelOption(o =>
+                    o.setName("logs_channel")
+                        .setDescription("Logs channel for AI monitor alerts")
+                        .setRequired(false)
+                )
+                .addBooleanOption(o =>
+                    o.setName("allow_actions")
+                        .setDescription("Allow the AI to take automatic actions")
+                        .setRequired(false)
+                )
+                .addBooleanOption(o =>
+                    o.setName("analyze_potential")
+                        .setDescription("Also analyze potentially harmful links, attachments, invite spam, and raid signals")
+                        .setRequired(false)
+                )
         ),
     category: "AI",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
@@ -63,6 +92,7 @@ export default {
                 long_response: "Oh no! The response is too long. I'll send it as a Markdown-formatted text file.",
                 unsafe_message: "Your message was flagged as unsafe. Conversation cannot continue and it'll be ended. You can reach out in our support server if you believe this was a mistake made by the safety check model.",
                 guild_only: "This command can only be used in a server.",
+                not_admin: "Administrator permission is required to configure AI monitoring.",
                 not_in_voice: "You must be in a voice channel to use this command.",
                 no_male_voice: "No male voice available for language: {lang}. Supported languages: en-US, es-US, fr-FR, de-DE, zh-CN",
                 voice_processing_error: "Sorry, I encountered an error processing your voice.",
@@ -231,6 +261,7 @@ export default {
                         }
                     }
                     if (toolCalls.length > 0) {
+                        console.log(`AI requested ${toolCalls.length} tool calls:`, toolCalls.map(c => c.name));
                         const toolLines = toolCalls.map(call => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
                         const combined = cleanedResponseText ? `${cleanedResponseText}\n\n${toolLines}` : toolLines;
                         const msg = await message.reply(combined);
@@ -253,6 +284,47 @@ export default {
                     ai.ClearChat(interaction.user.id);
                 });
                 break;
+            }
+            case "monitor": {
+                if (!interaction.inGuild()) return await reply(texts.errors.guild_only);
+                if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) return await reply(texts.errors.not_admin);
+                const action = interaction.options.getString("action", true);
+                const logsChannel = interaction.options.getChannel("logs_channel");
+                const allowActions = interaction.options.getBoolean("allow_actions") ?? false;
+                const analyzePotential = interaction.options.getBoolean("analyze_potential") ?? false;
+                const existing = await db.query("SELECT * FROM ai_monitor_configs WHERE guild_id = ?", [interaction.guildId]) as unknown as any[];
+                if (action === "status") {
+                    if (!existing[0]) return await reply("AI monitor is disabled for this guild.");
+                    const statusText = existing[0].enabled ? "enabled" : "disabled";
+                    const channelText = existing[0].logs_channel && existing[0].logs_channel !== "0" ? `<#${existing[0].logs_channel}>` : "not set";
+                    const actionsText = existing[0].allow_actions ? "enabled" : "disabled";
+                    const potentialText = existing[0].analyze_potentially ? "enabled" : "disabled";
+                    return await reply(`AI monitor is ${statusText}. Logs: ${channelText}. Auto actions: ${actionsText}. Potential analysis: ${potentialText}.`);
+                }
+                if (action === "enable") {
+                    if (!logsChannel || logsChannel.type !== ChannelType.GuildText) return await reply("Please provide a text logs channel.");
+                    const now = Date.now();
+                    if (existing[0]) {
+                        await db.query("UPDATE ai_monitor_configs SET enabled = TRUE, logs_channel = ?, allow_actions = ?, analyze_potentially = ?, updated_at = ? WHERE guild_id = ?", [logsChannel.id, allowActions, analyzePotential, now, interaction.guildId]);
+                    } else {
+                        await db.query("INSERT INTO ai_monitor_configs SET ?", [{
+                            guild_id: interaction.guildId,
+                            enabled: true,
+                            logs_channel: logsChannel.id,
+                            allow_actions: allowActions,
+                            analyze_potentially: analyzePotential,
+                            created_at: now,
+                            updated_at: now
+                        }]);
+                    }
+                    return await reply(`AI monitor enabled. Logs channel: <#${logsChannel.id}>. Auto actions: ${allowActions ? "enabled" : "disabled"}. Potential analysis: ${analyzePotential ? "enabled" : "disabled"}.`);
+                }
+                if (action === "disable") {
+                    if (!existing[0]) return await reply("AI monitor is already disabled for this guild.");
+                    await db.query("UPDATE ai_monitor_configs SET enabled = FALSE, updated_at = ? WHERE guild_id = ?", [Date.now(), interaction.guildId]);
+                    return await reply("AI monitor disabled.");
+                }
+                return await reply("Invalid action.");
             }
             case "voice": {
                 if (!interaction.guild) return await utils.safeInteractionRespond(interaction, texts.errors.guild_only);

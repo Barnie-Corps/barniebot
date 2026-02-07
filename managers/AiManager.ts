@@ -1,7 +1,7 @@
 import EventEmitter from "events";
 import { Ratelimit } from "../types/interfaces";
 import utils from "../utils";
-import type { NIMChatSession } from "./NVIDIAModelsManager";
+import type { NIMChatSession, NIMToolCall } from "./NVIDIAModelsManager";
 import Log from "../Log";
 import AIFunctions from "../AIFunctions";
 import { Message, ActionRowBuilder, ButtonBuilder } from "discord.js";
@@ -141,10 +141,11 @@ class AiManager extends EventEmitter {
             return;
         }
         if (message) {
+            const safeText = reply.length ? reply : "[empty response]";
             if (filesPayload.length > 0) {
-                await message.edit({ content: reply.length ? reply : " ", files: filesPayload, attachments: [] });
+                await message.edit({ content: safeText, files: filesPayload, attachments: [] });
             } else {
-                await message.edit(reply.length ? reply : " ");
+                await message.edit(safeText);
             }
         }
         return reply;
@@ -188,12 +189,12 @@ class AiManager extends EventEmitter {
         const response = await utils.getAiResponse(text, chat);
         return response;
     }
-    public async ExecuteFunction(id: string, name: string, args: any, message: Message): Promise<any> {
+    public async ExecuteFunction(id: string, name: string, args: any, message: Message, Queue?: NIMToolCall[]): Promise<any> {
         if (await this.RatelimitUser(id)) return { error: "You are sending too many messages, please wait a few seconds before sending another message." };
         const chat = await this.GetChat(id, "");
         const localHandlers = this.localFunctionHandlers.get(id);
-        const localHandler = localHandlers ? localHandlers[name] : undefined;
-        const func: any = localHandler ? null : utils.AIFunctions[name as keyof typeof utils.AIFunctions];
+        const localHandler = localHandlers ? localHandlers[name ?? Queue![0].name] : undefined;
+        const func: any = localHandler ? null : utils.AIFunctions[name as keyof typeof utils.AIFunctions ?? Queue![0].name as keyof typeof utils.AIFunctions];
         if (!localHandler && !func) {
             await message.edit(`The AI requested an unknown function, attempting to recover... ${data.bot.loadingEmoji.mention}`);
             const rsp = await chat.sendMessage([
@@ -208,7 +209,7 @@ class AiManager extends EventEmitter {
             ]);
             if (rsp.response.functionCalls()?.length) {
                 await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} ${data.bot.loadingEmoji.mention}`);
-                return this.ExecuteFunction(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
+                return this.ExecuteFunction(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message, Queue!.slice(1));
             }
         }
         if (name === "send_email") {
@@ -247,11 +248,13 @@ class AiManager extends EventEmitter {
             let preparedArgs: any = args;
             if (["current_guild_info", "on_guild"].includes(name)) {
                 preparedArgs = message;
+                console.log(name, preparedArgs);
             } else {
                 const isPlainObject = typeof args === "object" && args !== null && !Array.isArray(args);
                 if (isPlainObject) {
                     if (Object.keys(args).length === 0) {
                         preparedArgs = id;
+                        console.log(name, preparedArgs);
                     } else {
                         preparedArgs = {
                             ...args,
@@ -259,9 +262,11 @@ class AiManager extends EventEmitter {
                             guildId: message?.guild?.id ?? null,
                             channelId: message?.channel?.id ?? null
                         };
+                        console.log(name, preparedArgs);
                     }
                 } else if (preparedArgs === null || preparedArgs === undefined || preparedArgs === "") {
                     preparedArgs = id;
+                    console.log(name, preparedArgs);
                 }
             }
             try {
@@ -338,10 +343,11 @@ class AiManager extends EventEmitter {
             return;
         }
         if (message) {
+            const safeText = reply.length ? reply : ".";
             if (filesPayload.length > 0) {
-                await message.edit({ content: reply.length ? reply : " ", files: filesPayload, attachments: [] });
+                await message.edit({ content: safeText, files: filesPayload, attachments: [] });
             } else {
-                await message.edit(reply.length ? reply : " ");
+                await message.edit(safeText);
             }
         }
         return reply;
