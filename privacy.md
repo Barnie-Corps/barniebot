@@ -1,6 +1,6 @@
 # BarnieBot Privacy Policy
 
-Last Updated: November 26, 2025
+Last Updated: February 6, 2026
 
 ## Table of Contents
 1. [Introduction](#introduction)
