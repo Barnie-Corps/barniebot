@@ -2054,7 +2054,7 @@ We may update this policy when:
 ### Effective Date
 The "Last Updated" date at the top of this policy indicates when the current version became effective.
 
-**Current Version Effective**: November 26, 2025
+**Current Version Effective**: February 6, 2026
 
 **Previous Versions**: We do not maintain a public archive of previous policy versions. Contact barniecorps@gmail.com if you need a previous version for legal or compliance purposes.
 
@@ -2069,6 +2069,7 @@ The "Last Updated" date at the top of this policy indicates when the current ver
 **Grace Period**: For material changes, we may provide a 30-day grace period before enforcement, announced with the change.
 
 ### Version History Summary
+- **February 6, 2026**: Minor change, removal of Google's Gemini references.
 - **November 26, 2025**: Major expansion with comprehensive detail on all data practices, security measures, user rights, and third-party services
 - **November 19, 2025**: Previous version with core privacy information
 
@@ -2164,7 +2165,7 @@ By using BarnieBot, you acknowledge that you have read, understood, and agree to
 **Thank you for trusting BarnieBot with your data. We are committed to protecting your privacy and being transparent about our data practices.**
 
 **Last Updated**: February 6, 2026
-**Version**: 2.0 (Comprehensive Expansion)
+**Version**: 2.0
 
 © 2026 BarnieCorps. All rights reserved.
 
