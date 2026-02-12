@@ -60,7 +60,8 @@ export default class ChatManager extends EventEmitter {
     private guildCache: { expires: number, data: any[] } | null = null;
     private languageCache = new Collection<string, { expires: number, lang: string }>();
     private webhookCache = new Collection<string, WebhookClient>();
-    private messageQueue: QueuedMessage[] = [];
+    private messageQueueHigh: QueuedMessage[] = [];
+    private messageQueueLow: QueuedMessage[] = [];
     private isProcessingQueue = false;
     private queueProcessor: NodeJS.Timer | null = null;
     constructor(public options: ChatManagerOptions = DefaultChatManagerOptions) {
@@ -109,11 +110,16 @@ export default class ChatManager extends EventEmitter {
         const guilds = await this.getActiveGuilds();
         const priority = guilds.length > 50 ? 1 : 0;
 
-        this.messageQueue.push({
+        const entry = {
             message,
             priority,
             timestamp: Date.now()
-        });
+        };
+        if (priority > 0) {
+            this.messageQueueHigh.push(entry);
+        } else {
+            this.messageQueueLow.push(entry);
+        }
 
         message.react(data.bot.loadingEmoji.id).catch(() => { });
     }
@@ -129,12 +135,19 @@ export default class ChatManager extends EventEmitter {
     }
 
     private async processMessageQueue(): Promise<void> {
-        if (this.isProcessingQueue || this.messageQueue.length === 0) return;
+        if (this.isProcessingQueue || (this.messageQueueHigh.length === 0 && this.messageQueueLow.length === 0)) return;
         this.isProcessingQueue = true;
 
-        this.messageQueue.sort((a, b) => b.priority - a.priority || a.timestamp - b.timestamp);
-
-        const batch = this.messageQueue.splice(0, 5);
+        const takeBatch = (queue: QueuedMessage[], remaining: number) => {
+            if (remaining <= 0 || queue.length === 0) return [];
+            const count = Math.min(queue.length, remaining);
+            return queue.splice(0, count);
+        };
+        const highBatch = takeBatch(this.messageQueueHigh, 5);
+        const batch = [
+            ...highBatch,
+            ...takeBatch(this.messageQueueLow, 5 - highBatch.length)
+        ];
 
         await Promise.allSettled(batch.map(item => this.dispatchMessage(item.message)));
 
@@ -153,18 +166,15 @@ export default class ChatManager extends EventEmitter {
         const hasTextContent = baseContent.trim().length > 0;
         let sanitizedDefaultContent = this.sanitizeContent(baseContent);
 
-        // Handle attachments: append URLs to content for webhook compatibility
         const hasAttachments = message.attachments.size > 0;
         const attachmentUrls = hasAttachments ? message.attachments.map(att => att.url).join('\n') : '';
 
         if (hasAttachments) {
-            // Append attachment URLs to content (webhooks will auto-embed them)
             sanitizedDefaultContent = sanitizedDefaultContent.trim()
                 ? `${sanitizedDefaultContent}\n${attachmentUrls}`
                 : attachmentUrls;
         }
 
-        // Fallback for truly empty messages
         if (!sanitizedDefaultContent || !sanitizedDefaultContent.trim().length) {
             sanitizedDefaultContent = "*Empty message*";
         }
@@ -254,7 +264,6 @@ export default class ChatManager extends EventEmitter {
         const guilds = await this.getActiveGuilds();
         if (guilds.length === 0) return;
 
-        // Handle attachments by appending URLs to content
         const hasAttachments = attachments && attachments.size > 0;
         const attachmentUrls = hasAttachments ? attachments.map(att => att.url).join('\n') : '';
 
@@ -262,14 +271,12 @@ export default class ChatManager extends EventEmitter {
         const sourceLanguageName = langs.where("1", language)?.name ?? language;
         let sanitizedDefaultContent = message.trim();
 
-        // Append attachment URLs to content
         if (hasAttachments) {
             sanitizedDefaultContent = sanitizedDefaultContent
                 ? `${sanitizedDefaultContent}\n${attachmentUrls}`
                 : attachmentUrls;
         }
 
-        // Fallback for truly empty messages
         if (!sanitizedDefaultContent || !sanitizedDefaultContent.trim().length) {
             sanitizedDefaultContent = "*Empty message*";
         }
@@ -414,7 +421,6 @@ export default class ChatManager extends EventEmitter {
             default: "Message translated from",
             name: sourceLanguageName
         };
-        // Resolve translated variants per language only once per dispatch round.
         return async (targetLanguage: string): Promise<string> => {
             if (!hasTextContent) return sanitizedFallback;
             const normalizedTarget = (targetLanguage ?? "").toLowerCase();
@@ -422,14 +428,12 @@ export default class ChatManager extends EventEmitter {
             const cacheKey = normalizedTarget || targetLanguage;
             const cached = cache.get(cacheKey);
             if (cached) return cached;
-            // Check app-level cache first
             const appCacheKey = `${sourceLanguage}:${targetLanguage}:${baseContent.substring(0, 100)}`;
             const now = Date.now();
             const appCached = APP_TRANSLATION_CACHE.get(appCacheKey);
             if (appCached && appCached.expires > now) {
                 return appCached.text;
             }
-            // Check circuit breaker
             if (translationFailureCount >= TRANSLATION_CIRCUIT_THRESHOLD) {
                 if (now - lastTranslationFailure > TRANSLATION_CIRCUIT_TIMEOUT) {
                     translationFailureCount = 0;
@@ -452,9 +456,7 @@ export default class ChatManager extends EventEmitter {
                         ? `${translatedContent.text}\n${noticeText}`
                         : noticeText;
                     const sanitized = this.sanitizeContent(combined) || sanitizedFallback;
-                    // Store in app-level cache
                     APP_TRANSLATION_CACHE.set(appCacheKey, { text: sanitized, expires: now + APP_TRANSLATION_CACHE_TTL });
-                    // Cleanup app cache if too large
                     if (APP_TRANSLATION_CACHE.size > APP_TRANSLATION_CACHE_LIMIT) {
                         const toDelete: string[] = [];
                         for (const [key, val] of APP_TRANSLATION_CACHE.entries()) {
@@ -463,7 +465,6 @@ export default class ChatManager extends EventEmitter {
                         }
                         toDelete.forEach(k => APP_TRANSLATION_CACHE.delete(k));
                     }
-                    // Success - decay failure counter
                     if (translationFailureCount > 0) {
                         translationFailureCount = Math.max(0, translationFailureCount - 1);
                     }

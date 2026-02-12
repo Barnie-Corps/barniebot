@@ -1,24 +1,53 @@
 # BarnieBot
 
-A powerful TypeScript Discord bot that bridges communities through global chat, AI assistance, comprehensive moderation tools, a fully-featured RPG system with account management, and a fully managed support ticket workflow.
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)
+![Discord.js](https://img.shields.io/badge/Discord.js-v14-5865F2?logo=discord&logoColor=white)
+![Node](https://img.shields.io/badge/Node-18%2B-339933?logo=node.js&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-5.7%2B-4479A1?logo=mysql&logoColor=white)
 
-## What It Does
+Global chat. AI. RPG. Moderation. Tickets. All inside Discord.
 
-**Global Chat Network** – Connect multiple Discord servers with encrypted cross-guild messaging, automatic translation (20+ languages), staff rank suffixes, anti-impersonation protection, and global custom commands (`b.rules`, `b.help`).
+## ⚡ Hero: One Bot, Five Worlds
+BarnieBot is your server stack in a single process: global chat, AI, RPG, moderation, and global bot support tickets with real-world guardrails (permissions, audits, and rate limits).
 
-**AI Powered** – NVIDIA AI models integration for conversational chat (`/ai chat`), quick and reasoning questions (`/ai ask`), and voice conversations with speech-to-text.
+## ✨ Quick Hits
+- Encrypted global chat with auto-translation across connected guilds.
+- NVIDIA NIM + DeepSeek for chat, voice, and image understanding.
+- Full RPG loop: characters, gear, trading, and turn-based combat.
+- Thirteen-tier staff system with audits, warnings, mutes, and tickets.
+
+## 🧭 Choose Your Lane
+| Mode | What it does | Key commands |
+|------|---------------|--------------|
+| Global Chat | Cross-guild relay with encryption and translation | `b.rules`, `/globalchat set` |
+| AI | Chat, Q&A, voice, and image understanding | `/ai ask`, `/ai chat`, `/ai voice`, `/ai monitor` |
+| RPG | Characters, gear, economy, and battles | `/rpg create`, `/rpg battle` |
+| Support | Global bot support tickets with transcripts | `/support`, `/stafftools tickets` |
+| Moderation | Global warnings, mutes, and blacklists | `/globalmod warn`, `/globalmod mute` |
+
+## 💥 Why It Hits Different
+- **Built for scale**: Global chat uses queues, worker pools, and caching to stay responsive.
+- **Real accountability**: Staff actions are audited and tied to ranks and permissions.
+- **AI with guardrails**: Safety checks, tool gating, and structured monitoring keep it sane.
+- **Not just a minigame**: The RPG system is persistent, enforced, and staff-manageable.
+
+## 🔍 What It Does
+
+**Global Chat Network** – Bridges multiple Discord servers with encrypted cross-guild messaging, automatic translation (20+ languages), staff rank suffixes, anti-impersonation protection, and global custom commands (`b.rules`, `b.help`).
+
+**AI Powered** – NVIDIA NIM integration with DeepSeek for chat (`/ai chat`), tasked Q&A (`/ai ask`), image understanding, and voice conversations with speech-to-text.
 
 **RPG System** – Complete character progression with account registration, 5 unique classes (Warrior, Mage, Rogue, Paladin, Archer), stat management, equipment system (7 slots), inventory management, shop with database-driven items, player-to-player trading, turn-based combat with difficulty scaling, quest system, and leaderboards. Includes single-session login enforcement, account status management (freeze/ban), and comprehensive admin tools.
 
-**Staff & Moderation System** – Eight-tier staff hierarchy (Support → Owner) with global enforcement tools: blacklists, warnings, mutes, ticket assignment & auditing. Interactive pagination for case history (`/staff cases`). Includes appeal system for warnings with staff review workflow and comprehensive audit logging.
+**Staff & Moderation System** – Thirteen-tier staff hierarchy (Trial Support → Owner) with global enforcement tools: blacklists, warnings, mutes, ticket assignment & auditing. Interactive pagination for case history (`/staff cases`). Includes appeal system for warnings with staff review workflow and comprehensive audit logging.
 
-**Support Tickets** – Users open tickets via `/support` (DM or guild); system creates a home-guild channel, relays messages bi‑directionally (user ↔ staff), auto-assigns available staff (fair workload), tracks first response time, exports TXT+HTML transcripts, and supports priority/category, internal staff notes, audit logging, and controlled closure.
+**Support Tickets** – Global bot support (not guild-specific). Users open tickets via `/support` (DM or guild); the system creates a home-guild channel, relays messages bi-directionally (user ↔ staff), auto-assigns available staff (fair workload), tracks first response time, exports TXT+HTML transcripts, and supports priority/category, internal staff notes, audit logging, and controlled closure.
 
 **Guild Customization** – Per-server content filters with protected words, custom command responses (regex or literal), language preferences, and webhook-based dispatch.
 
-## Core Features
+## 🧩 Core Features
 - **Global Chat**: Encrypted messages, per-guild language settings, optional auto-translate, staff suffix display, global custom commands (`b.rules [lang]`, `b.help`)
-- **RPG System**: 
+- **RPG System**:
   - Account Management: Email verification, encrypted passwords (AES-256-CBC), single-session enforcement
   - Character System: 5 classes with unique base stats, level progression (1-100+), stat point allocation, HP/MP management
   - Equipment: 7 slots (weapon, helmet, armor, gloves, boots, 2 accessories), stat bonuses, level/class requirements
@@ -28,25 +57,26 @@ A powerful TypeScript Discord bot that bridges communities through global chat, 
   - Combat: Turn-based battles with 4 difficulty tiers, critical hits, experience/gold rewards, combat logs
   - Admin Tools: Freeze/ban accounts, modify stats, change passwords, force logout, give/remove items, detailed account info
 - **Moderation**: Interactive warning viewer with appeal system, global blacklists, timed/indefinite mutes, action audit trail with staff attribution
-- **Support Tickets**: `/support` creation, auto-assignment by workload, priority & category, first response time tracking, HTML/TXT transcripts, user close button, confirmation dialogs, channel delete flow, internal staff notes
+- **Support Tickets**: Global bot support (not guild-specific). `/support` creation, auto-assignment by workload, priority & category, first response time tracking, HTML/TXT transcripts, user close button, confirmation dialogs, channel delete flow, internal staff notes
 - **Staff Tools**: `/stafftools tickets|assign|priority|category|status|note|notes|search|auditlog|reviewappeals|notify|rpg_*` for comprehensive management
 - **AI Functions**: Session-based chat, function calling for server info/user lookup/guild management, VIP-gated features, persistent user memories
+- **AI Monitor**: Event analysis, case logging, optional investigation tools, and optional auto-actions in configured guilds
 - **Content Filter**: Word-based filtering, single-word vs substring matching, protected words, log webhooks
 - **Custom Responses**: Guild-specific commands with regex support
 - **Worker Pools**: Translation and rate-limit processing off the main loop (dynamic sizing, prewarm, keep-alive)
 - **VIP System**: Time-based subscriptions for extended AI access
 - **Process Manager**: Optional resilient runner (`npm run start:managed`) with crash pattern detection, auto-restart, reboot flag & completion announcement
 
-## Tech Stack
+## 🧪 Tech Stack
 - **Runtime**: Node.js 18+ with TypeScript
 - **Discord**: Discord.js v14 (Gateway + Interactions)
 - **Database**: MySQL 5.7+ with auto-migration
-- **AI**: NVIDIA AI models for chat, function calling, reasoning and voice.
+- **AI**: NVIDIA NIM for chat/function calling, Llama safety/monitoring, vision, and Riva ASR/TTS.
 - **Workers**: Node.js worker threads for translation and rate limiting
 - **Security**: AES-256-CBC encryption, parameterized queries, staff impersonation stripping
 - **Mail**: Gmail SMTP for notifications
 
-## Quick Start
+## 🚀 Quick Start
 ```bash
 git clone https://github.com/Barnie-Corps/barniebot.git
 cd barniebot
@@ -69,7 +99,7 @@ DB_USER=barniebot
 DB_PASSWORD=your-db-password
 DB_NAME=barniebot
 ENCRYPTION_KEY=base64-encoded-32-bytes
-AI_API_KEY=google-gemini-key
+NVIDIA_API_KEY=nvidia-api-key
 EMAIL_PASSWORD=gmail-app-password
 ```
 
@@ -83,6 +113,8 @@ TEST=0                             # Owner-only mode if 1
 IGNORE_GLOBAL_CHAT=0               # Skip global chat processing
 SEARCH_ENGINE_API_KEY=             # Google custom search (AI function)
 SEARCH_ENGINE_CX=                  # Custom search engine ID
+NVIDIA_STT_FUNCTION_ID=            # Riva ASR function ID (voice)
+NVIDIA_TTS_FUNCTION_ID=            # Riva TTS function ID (voice)
 ```
 
 **Notes:**
@@ -108,6 +140,7 @@ These are lightweight, globally broadcast informational commands executed in a c
 | `/ai ask` | Single AI question (task-specific models) |
 | `/ai chat` | Start contextual AI session (VIP only) |
 | `/ai voice` | Voice conversation in VC (VIP only) |
+| `/ai monitor` | Configure AI monitoring (Admin only) |
 | `/register new` | Create new RPG account with email verification |
 | `/register verify` | Verify account with 6-digit code |
 | `/register resend` | Resend verification code (1min cooldown) |
@@ -163,10 +196,12 @@ These are lightweight, globally broadcast informational commands executed in a c
 | `/staff cases` | Anyone | View moderation history (interactive pagination) |
 | `/globalmod blacklist` | Chief of Moderation+ | Ban from global chat |
 | `/globalmod unblacklist` | Chief of Moderation+ | Unban from global chat |
-| `/globalmod warn` | Chief of Moderation+ | Issue warning |
-| `/globalmod mute` | Chief of Moderation+ | Mute in global chat (timed/indefinite) |
-| `/globalmod unmute` | Chief of Moderation+ | Remove mute |
-| `/globalmod status` | Chief of Moderation+ | Check user status |
+| `/globalmod warn` | Staff | Issue warning |
+| `/globalmod mute` | Moderator+ | Mute in global chat (timed/indefinite) |
+| `/globalmod unmute` | Moderator+ | Remove mute |
+| `/globalmod status` | Anyone | Check user status |
+| `/globalmod closeticket` | Staff | Close a support ticket (with transcript export) |
+| `/globalmod search_user` | Staff | Search users by username and show moderation status |
 | `/workers` | Anyone | Worker pool health stats |
 
 ### Owner Commands (prefix: `b.`)
@@ -195,7 +230,10 @@ These are lightweight, globally broadcast informational commands executed in a c
 | `note <user> <content>` | Add internal note about a user |
 | `notes <user>` | View stored notes about a user |
 | `search <query>` | Search open tickets (content/user) |
-| `auditlog [staff] [action] [days]` | View filtered staff action audit log |
+| `auditlog [staff] [action] [days]` | View filtered staff action audit log (Moderator+) |
+| `reviewappeals` | Review warning appeals (Moderator+) |
+| `notify` | Send a global notification to all users (Probationary Administrator+) |
+| `rpg_*` | RPG admin tools (Probationary Administrator+), `rpg_info` is Moderator+ |
 
 ### Ticket Lifecycle Essentials
 - User runs `/support` → channel auto-created in home guild category
@@ -218,14 +256,19 @@ These are lightweight, globally broadcast informational commands executed in a c
 
 ## Staff Hierarchy
 From lowest to highest authority:
-1. **Support** – Basic assistance (suffix: SUPPORT)
-2. **Moderator** – Standard moderation (MOD)
-3. **Senior Moderator** – Experienced moderation (SR MOD)
-4. **Chief of Moderation** – Moderation team lead (CoM)
-5. **Probationary Administrator** – Trial admin (pADMIN)
-6. **Administrator** – Full admin (ADMIN)
-7. **Chief of Staff** – Staff leadership (CoS)
-8. **Owner** – Bot operators (OWNER)
+1. **Trial Support** – Entry support role
+2. **Support** – Basic assistance
+3. **Intern** – Limited staff access
+4. **Trial Moderator** – Entry moderation role
+5. **Moderator** – Standard moderation
+6. **Senior Moderator** – Experienced moderation
+7. **Chief of Moderation** – Moderation team lead
+8. **Probationary Administrator** – Trial admin
+9. **Administrator** – Full admin
+10. **Head Administrator** – Senior admin
+11. **Chief of Staff** – Staff leadership
+12. **Co-Owner** – Co-operator
+13. **Owner** – Bot operators
 
 **Permissions:**
 - Chief of Moderation+ can manage lower ranks and use moderation commands

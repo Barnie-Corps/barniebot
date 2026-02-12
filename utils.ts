@@ -16,6 +16,7 @@ import * as vm from "vm";
 import { exec as execCallback } from "child_process";
 import { promisify, inspect, TextDecoder, TextEncoder } from "util";
 import * as mathjs from "mathjs";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, PermissionsBitField, EmbedBuilder, TextChannel } from "discord.js";
 import type { DiscordUser, UserLanguage, AIMemory } from "./types/interfaces";
 const TRANSLATE_WORKER_TYPE = "translate";
 const RATELIMIT_WORKER_TYPE = "ratelimit";
@@ -193,6 +194,31 @@ const parseToolCalls = (content: string): { cleanedText: string; toolCalls: Arra
   const callsEndTokens = ["<|tool_calls_end|>", "|tool_calls_end|"];
   const ranges: Array<{ start: number; end: number }> = [];
   let cursor = 0;
+  const tryParseArgs = (raw: string) => {
+    try {
+      return { ok: true, value: JSON.parse(raw) };
+    } catch {
+      return { ok: false, value: {} };
+    }
+  };
+  const repairJson = (raw: string) => {
+    let candidate = raw;
+    const firstBrace = candidate.indexOf("{");
+    const lastBrace = candidate.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      candidate = candidate.slice(firstBrace, lastBrace + 1);
+    }
+    const openBraces = (candidate.match(/\{/g) || []).length;
+    const closeBraces = (candidate.match(/\}/g) || []).length;
+    if (openBraces > closeBraces) {
+      candidate = candidate + "}".repeat(openBraces - closeBraces);
+    }
+    const quoteCount = (candidate.match(/"/g) || []).length;
+    if (quoteCount % 2 === 1) {
+      candidate = candidate + '"';
+    }
+    return candidate;
+  };
   while (true) {
     const beginIdx = beginTokens.reduce((best, token) => {
       const idx = content.indexOf(token, cursor);
@@ -232,16 +258,21 @@ const parseToolCalls = (content: string): { cleanedText: string; toolCalls: Arra
     }
     const rawArgs = content.slice(argsStart, endIdx).trim();
     let parsedArgs: any = {};
-    try {
+    const primaryCandidate = (() => {
       const firstBrace = rawArgs.indexOf("{");
       const lastBrace = rawArgs.lastIndexOf("}");
       if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-        parsedArgs = JSON.parse(rawArgs.slice(firstBrace, lastBrace + 1));
-      } else {
-        parsedArgs = JSON.parse(rawArgs);
+        return rawArgs.slice(firstBrace, lastBrace + 1);
       }
-    } catch {
-      parsedArgs = {};
+      return rawArgs;
+    })();
+    const primaryParse = tryParseArgs(primaryCandidate);
+    if (primaryParse.ok) {
+      parsedArgs = primaryParse.value;
+    } else {
+      const repaired = repairJson(primaryCandidate);
+      const repairedParse = tryParseArgs(repaired);
+      parsedArgs = repairedParse.ok ? repairedParse.value : {};
     }
     toolCalls.push({ name, args: parsedArgs });
     const matchedEndToken = endTokens.find(token => content.startsWith(token, endIdx)) ?? endTokens[0];
@@ -265,6 +296,21 @@ const parseToolCalls = (content: string): { cleanedText: string; toolCalls: Arra
   }
   cleaned = cleaned.trim();
   return { cleanedText: cleaned, toolCalls };
+};
+const getGuildAndMember = async (guildId: string, userId: string) => {
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return { error: "Guild not found" };
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (!member) return { error: "Member not found in guild" };
+  return { guild, member };
+};
+const isSystemRequester = (requesterId?: string | null) => requesterId === "__ai_monitor__";
+const isAdminStaffUser = async (userId: string) => {
+  const rank = await utils.getUserStaffRank(userId);
+  return StaffRanksManager.hasMinimumRank(rank, "Administrator");
+};
+const hasGuildPermission = (member: any, permission: bigint) => {
+  return member.permissions?.has(permission);
 };
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
@@ -305,6 +351,49 @@ const utils = {
         return { content: text };
       } catch (error) {
         return { error: "Failed to fetch URL" };
+      }
+    },
+    fetch_url_safe: async (args: { url: string; maxChars?: number; timeoutMs?: number }): Promise<any> => {
+      if (!args.url) return { error: "Missing url parameter" };
+      let parsed: URL;
+      try {
+        parsed = new URL(args.url);
+      } catch {
+        return { error: "Invalid URL" };
+      }
+      if (!/^https?:$/.test(parsed.protocol)) return { error: "Only http/https URLs are allowed" };
+      const maxBytes = 200 * 1024;
+      const maxChars = Math.min(Math.max(args.maxChars ?? 50000, 1000), 50000);
+      const timeoutMs = Math.min(Math.max(args.timeoutMs ?? 4000, 1000), 8000);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(parsed.toString(), {
+          method: "GET",
+          redirect: "manual",
+          headers: { "User-Agent": "BarnieBot-AIMonitor/1.0" },
+          signal: controller.signal as any
+        });
+        const status = response.status;
+        const contentType = response.headers.get("content-type") || "";
+        const contentLength = Number(response.headers.get("content-length") || 0);
+        if (status >= 300 && status < 400) {
+          const location = response.headers.get("location") || "";
+          return { error: "Redirect blocked", status, location };
+        }
+        if (status < 200 || status >= 300) return { error: `HTTP ${status}`, status };
+        if (contentLength && contentLength > maxBytes) return { error: "Content too large", status, contentLength };
+        if (!/^text\//i.test(contentType) && !/application\/(json|xml)/i.test(contentType)) {
+          return { error: "Unsupported content type", status, contentType };
+        }
+        const buf = Buffer.from(await response.arrayBuffer());
+        if (buf.length > maxBytes) return { error: "Content too large", status, contentLength: buf.length };
+        const text = buf.toString("utf8").slice(0, maxChars);
+        return { url: parsed.toString(), status, contentType, truncated: text.length >= maxChars, content: text };
+      } catch (error: any) {
+        return { error: error?.name === "AbortError" ? "Request timed out" : "Failed to fetch URL" };
+      } finally {
+        clearTimeout(timer);
       }
     },
     retrieve_owners: (): string[] => {
@@ -411,6 +500,402 @@ const utils = {
       let member = guild.members.cache.get(args.memberId);
       if (!member) return { error: "Member not found" };
       return { roles: member.roles.cache.map(r => ({ id: r.id, name: r.name })) };
+    },
+    get_message_context: async (args: { requesterId?: string; guildId?: string; channelId?: string; messageId?: string; limit?: number }): Promise<any> => {
+      if (!args.guildId || !args.channelId || !args.messageId) return { error: "Missing parameters" };
+      if (!isSystemRequester(args.requesterId)) {
+        if (!args.requesterId) return { error: "Missing requesterId" };
+        const owner = isOwner(args.requesterId) === true;
+        const adminStaff = await isAdminStaffUser(args.requesterId);
+        const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+        if (guildInfo.error) return { error: guildInfo.error };
+        const member = guildInfo.member as any;
+        const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageMessages);
+        if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      }
+      const guild = client.guilds.cache.get(args.guildId);
+      if (!guild) return { error: "Guild not found" };
+      const channel = guild.channels.cache.get(args.channelId) as any;
+      if (!channel || !channel.isTextBased?.()) return { error: "Channel not text-based" };
+      const target = await channel.messages.fetch(args.messageId).catch(() => null);
+      if (!target) return { error: "Message not found" };
+      const limit = Math.max(1, Math.min(args.limit ?? 12, 20));
+      const around = await channel.messages.fetch({ limit, around: args.messageId }).catch(() => null);
+      const aroundList = around ? Array.from(around.values()) : [];
+      const mapMsg = (m: any) => ({
+        id: m.id,
+        authorId: m.author?.id ?? null,
+        authorTag: m.author?.tag ?? null,
+        content: m.content,
+        createdAt: m.createdTimestamp,
+        attachments: m.attachments.map((a: any) => ({ url: a.url, name: a.name, size: a.size, contentType: a.contentType }))
+      });
+      return {
+        guild: { id: guild.id, name: guild.name },
+        channel: { id: channel.id, name: channel.name },
+        message: mapMsg(target),
+        around: aroundList.sort((a: any, b: any) => a.createdTimestamp - b.createdTimestamp).map(mapMsg)
+      };
+    },
+    get_user_context: async (args: { requesterId?: string; guildId?: string; userId?: string }): Promise<any> => {
+      if (!args.guildId || !args.userId) return { error: "Missing parameters" };
+      if (!isSystemRequester(args.requesterId)) {
+        if (!args.requesterId) return { error: "Missing requesterId" };
+        const owner = isOwner(args.requesterId) === true;
+        const adminStaff = await isAdminStaffUser(args.requesterId);
+        const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+        if (guildInfo.error) return { error: guildInfo.error };
+        const member = guildInfo.member as any;
+        const hasPerm = hasGuildPermission(member, PermissionFlagsBits.KickMembers) || hasGuildPermission(member, PermissionFlagsBits.ManageGuild);
+        if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      }
+      const guild = client.guilds.cache.get(args.guildId);
+      if (!guild) return { error: "Guild not found" };
+      const user = await client.users.fetch(args.userId).catch(() => null);
+      const member = await guild.members.fetch(args.userId).catch(() => null);
+      return {
+        user: user ? {
+          id: user.id,
+          tag: user.tag,
+          createdAt: user.createdTimestamp,
+          bot: user.bot
+        } : null,
+        member: member ? {
+          id: member.id,
+          joinedAt: member.joinedTimestamp,
+          nick: member.nickname ?? null,
+          roles: member.roles.cache.map((r: any) => ({ id: r.id, name: r.name })),
+          permissions: member.permissions?.toArray?.() ?? [],
+          communicationDisabledUntil: member.communicationDisabledUntilTimestamp ?? null
+        } : null
+      };
+    },
+    get_guild_context: async (args: { requesterId?: string; guildId?: string }): Promise<any> => {
+      if (!args.guildId) return { error: "Missing guildId parameter" };
+      if (!isSystemRequester(args.requesterId)) {
+        if (!args.requesterId) return { error: "Missing requesterId" };
+        const owner = isOwner(args.requesterId) === true;
+        const adminStaff = await isAdminStaffUser(args.requesterId);
+        const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+        if (guildInfo.error) return { error: guildInfo.error };
+        const member = guildInfo.member as any;
+        const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageGuild);
+        if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      }
+      const guild = client.guilds.cache.get(args.guildId);
+      if (!guild) return { error: "Guild not found" };
+      const botMember = guild.members.me;
+      const canViewInvites = botMember?.permissions?.has(PermissionFlagsBits.ManageGuild);
+      let invites: any[] | null = null;
+      if (canViewInvites) {
+        const list = await guild.invites.fetch().catch(() => null);
+        invites = list ? Array.from(list.values()).slice(0, 5).map(inv => ({
+          code: inv.code,
+          uses: inv.uses ?? 0,
+          maxUses: inv.maxUses ?? 0,
+          channelId: inv.channelId,
+          inviterId: inv.inviter?.id ?? null
+        })) : null;
+      }
+      const channelCounts = {
+        text: guild.channels.cache.filter(ch => ch.type === ChannelType.GuildText).size,
+        voice: guild.channels.cache.filter(ch => ch.type === ChannelType.GuildVoice).size,
+        category: guild.channels.cache.filter(ch => ch.type === ChannelType.GuildCategory).size
+      };
+      return {
+        guild: {
+          id: guild.id,
+          name: guild.name,
+          ownerId: guild.ownerId,
+          memberCount: guild.memberCount,
+          createdAt: guild.createdTimestamp,
+          verificationLevel: guild.verificationLevel,
+          mfaLevel: guild.mfaLevel,
+          features: guild.features
+        },
+        counts: {
+          roles: guild.roles.cache.size,
+          channels: guild.channels.cache.size,
+          ...channelCounts
+        },
+        invites
+      };
+    },
+    list_guild_channels: async (args: { requesterId?: string; guildId?: string; type?: string; limit?: number }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageChannels);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const limit = Math.max(1, Math.min(args.limit ?? 100, 200));
+      const typeKey = args.type ? args.type.toLowerCase() : "";
+      const filtered = Array.from(guild.channels.cache.values())
+        .filter((ch: any) => {
+          if (!typeKey) return true;
+          const typeName = String(ChannelType[ch.type as keyof typeof ChannelType] ?? "").toLowerCase();
+          return typeName === typeKey || typeName.replace("guild", "") === typeKey;
+        })
+        .slice(0, limit)
+        .map((ch: any) => ({
+          id: ch.id,
+          name: ch.name,
+          type: ChannelType[ch.type as keyof typeof ChannelType] ?? String(ch.type),
+          typeId: ch.type,
+          parentId: ch.parentId ?? null,
+          topic: "topic" in ch ? ch.topic ?? null : null,
+          nsfw: "nsfw" in ch ? Boolean(ch.nsfw) : false,
+          position: typeof ch.rawPosition === "number" ? ch.rawPosition : null
+        }));
+      return { channels: filtered };
+    },
+    search_guild_channels: async (args: { requesterId?: string; guildId?: string; query?: string; limit?: number }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.query) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageChannels);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const limit = Math.max(1, Math.min(args.limit ?? 50, 200));
+      const term = args.query.toLowerCase();
+      const matches = Array.from(guild.channels.cache.values())
+        .filter((ch: any) => String(ch.name || "").toLowerCase().includes(term))
+        .slice(0, limit)
+        .map((ch: any) => ({
+          id: ch.id,
+          name: ch.name,
+          type: ChannelType[ch.type as keyof typeof ChannelType] ?? String(ch.type),
+          typeId: ch.type,
+          parentId: ch.parentId ?? null,
+          topic: "topic" in ch ? ch.topic ?? null : null,
+          nsfw: "nsfw" in ch ? Boolean(ch.nsfw) : false,
+          position: typeof ch.rawPosition === "number" ? ch.rawPosition : null
+        }));
+      return { channels: matches };
+    },
+    get_channel_info: async (args: { requesterId?: string; guildId?: string; channelId?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.channelId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageChannels);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const channel = guild.channels.cache.get(args.channelId) as any;
+      if (!channel) return { error: "Channel not found" };
+      return {
+        channel: {
+          id: channel.id,
+          name: channel.name,
+          type: ChannelType[channel.type as keyof typeof ChannelType] ?? String(channel.type),
+          typeId: channel.type,
+          parentId: channel.parentId ?? null,
+          topic: "topic" in channel ? channel.topic ?? null : null,
+          nsfw: "nsfw" in channel ? Boolean(channel.nsfw) : false,
+          position: typeof channel.rawPosition === "number" ? channel.rawPosition : null,
+          rateLimitPerUser: "rateLimitPerUser" in channel ? channel.rateLimitPerUser ?? null : null,
+          bitrate: "bitrate" in channel ? channel.bitrate ?? null : null,
+          userLimit: "userLimit" in channel ? channel.userLimit ?? null : null
+        }
+      };
+    },
+    create_guild_channel: async (args: { requesterId?: string; guildId?: string; name: string; type: string; parentId?: string; topic?: string; nsfw?: boolean; rateLimitPerUser?: number; bitrate?: number; userLimit?: number; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.name || !args.type) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageChannels);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageChannels)) return { error: "Bot lacks ManageChannels permission" };
+      const typeKey = args.type.toLowerCase();
+      const typeMap: Record<string, ChannelType> = {
+        text: ChannelType.GuildText,
+        voice: ChannelType.GuildVoice,
+        category: ChannelType.GuildCategory,
+        announcement: ChannelType.GuildAnnouncement,
+        forum: ChannelType.GuildForum,
+        stage: ChannelType.GuildStageVoice
+      };
+      const channelType = typeMap[typeKey] as any;
+      if (!channelType) return { error: "Unsupported channel type" };
+      const channel = await guild.channels.create({
+        name: args.name,
+        type: channelType,
+        parent: args.parentId ?? null,
+        topic: args.topic,
+        nsfw: args.nsfw,
+        rateLimitPerUser: args.rateLimitPerUser,
+        bitrate: args.bitrate,
+        userLimit: args.userLimit,
+        reason: args.reason
+      });
+      return { channel: { id: channel.id, name: channel.name, type: channel.type } };
+    },
+    edit_guild_channel: async (args: { requesterId?: string; guildId?: string; channelId: string; name?: string; topic?: string; nsfw?: boolean; rateLimitPerUser?: number; parentId?: string; position?: number; userLimit?: number; bitrate?: number; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.channelId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageChannels);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageChannels)) return { error: "Bot lacks ManageChannels permission" };
+      const channel = guild.channels.cache.get(args.channelId);
+      if (!channel) return { error: "Channel not found" };
+      const updated = await channel.edit({
+        name: args.name,
+        topic: args.topic,
+        nsfw: args.nsfw,
+        rateLimitPerUser: args.rateLimitPerUser,
+        parent: args.parentId ?? undefined,
+        position: args.position,
+        userLimit: args.userLimit,
+        bitrate: args.bitrate,
+        reason: args.reason
+      });
+      return { channel: { id: updated.id, name: updated.name, type: updated.type } };
+    },
+    delete_guild_channel: async (args: { requesterId?: string; guildId?: string; channelId: string; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.channelId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageChannels);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageChannels)) return { error: "Bot lacks ManageChannels permission" };
+      const channel = guild.channels.cache.get(args.channelId);
+      if (!channel) return { error: "Channel not found" };
+      await channel.delete(args.reason);
+      return { success: true };
+    },
+    create_thread: async (args: { requesterId?: string; guildId?: string; channelId: string; name: string; type?: string; autoArchiveDuration?: number; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.channelId || !args.name) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const typeKey = (args.type ?? "public").toLowerCase();
+      const requiredPerm = typeKey === "private" ? PermissionFlagsBits.CreatePrivateThreads : PermissionFlagsBits.CreatePublicThreads;
+      const hasPerm = hasGuildPermission(member, requiredPerm);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const channel = guild.channels.cache.get(args.channelId) as any;
+      if (!channel || !channel.threads) return { error: "Channel does not support threads" };
+      const threadTypeMap: Record<string, ChannelType> = {
+        public: ChannelType.PublicThread,
+        private: ChannelType.PrivateThread,
+        announcement: ChannelType.AnnouncementThread
+      };
+      const threadType = threadTypeMap[typeKey];
+      if (!threadType) return { error: "Unsupported thread type" };
+      const thread = await channel.threads.create({
+        name: args.name,
+        autoArchiveDuration: args.autoArchiveDuration,
+        type: threadType,
+        reason: args.reason
+      });
+      return { thread: { id: thread.id, name: thread.name, type: thread.type } };
+    },
+    send_channel_message: async (args: { requesterId?: string; guildId?: string; channelId: string; content: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.channelId || !args.content) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const channel = guild.channels.cache.get(args.channelId) as any;
+      if (!channel || !channel.isTextBased?.()) return { error: "Channel not text-based" };
+      const perms = channel.permissionsFor(member);
+      const hasPerm = !!perms && perms.has(PermissionFlagsBits.SendMessages);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botPerms = channel.permissionsFor(guild.members.me);
+      if (!botPerms || !botPerms.has(PermissionFlagsBits.SendMessages)) return { error: "Bot lacks SendMessages permission" };
+      const sent = await channel.send({ content: args.content });
+      return { message: { id: sent.id, channelId: sent.channelId } };
+    },
+    send_channel_embed: async (args: { requesterId?: string; guildId?: string; channelId: string; embed: any; content?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.channelId || !args.embed) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const channel = guild.channels.cache.get(args.channelId) as any;
+      if (!channel || !channel.isTextBased?.()) return { error: "Channel not text-based" };
+      const perms = channel.permissionsFor(member);
+      const hasPerm = !!perms && perms.has(PermissionFlagsBits.SendMessages);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botPerms = channel.permissionsFor(guild.members.me);
+      if (!botPerms || !botPerms.has(PermissionFlagsBits.SendMessages)) return { error: "Bot lacks SendMessages permission" };
+      const embedBuilder = new EmbedBuilder();
+      if (args.embed.title) embedBuilder.setTitle(String(args.embed.title));
+      if (args.embed.description) embedBuilder.setDescription(String(args.embed.description));
+      if (args.embed.url) embedBuilder.setURL(String(args.embed.url));
+      if (args.embed.timestamp) embedBuilder.setTimestamp(new Date(args.embed.timestamp));
+      if (args.embed.footer?.text) embedBuilder.setFooter({ text: String(args.embed.footer.text), iconURL: args.embed.footer.icon_url ? String(args.embed.footer.icon_url) : undefined });
+      if (args.embed.thumbnail) embedBuilder.setThumbnail(String(args.embed.thumbnail));
+      if (args.embed.image) embedBuilder.setImage(String(args.embed.image));
+      if (args.embed.author?.name) embedBuilder.setAuthor({ name: String(args.embed.author.name), iconURL: args.embed.author.icon_url ? String(args.embed.author.icon_url) : undefined, url: args.embed.author.url ? String(args.embed.author.url) : undefined });
+      if (Array.isArray(args.embed.fields)) {
+        embedBuilder.addFields(args.embed.fields.map((f: any) => ({ name: String(f.name), value: String(f.value), inline: !!f.inline })));
+      }
+      if (args.embed.color !== undefined && args.embed.color !== null) {
+        if (typeof args.embed.color === "number") embedBuilder.setColor(args.embed.color);
+        if (typeof args.embed.color === "string") {
+          const hex = args.embed.color.startsWith("#") ? args.embed.color.slice(1) : args.embed.color;
+          const num = parseInt(hex, 16);
+          if (!Number.isNaN(num)) embedBuilder.setColor(num);
+        }
+      }
+      const sent = await channel.send({ content: args.content ?? undefined, embeds: [embedBuilder] });
+      return { message: { id: sent.id, channelId: sent.channelId } };
+    },
+    set_channel_permissions: async (args: { requesterId?: string; guildId?: string; channelId: string; targetId: string; allow?: string[]; deny?: string[] }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.channelId || !args.targetId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageChannels);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageChannels)) return { error: "Bot lacks ManageChannels permission" };
+      const channel = guild.channels.cache.get(args.channelId) as any;
+      if (!channel) return { error: "Channel not found" };
+      let allow: bigint | undefined;
+      let deny: bigint | undefined;
+      try {
+        if (args.allow && args.allow.length > 0) allow = PermissionsBitField.resolve(args.allow as any);
+        if (args.deny && args.deny.length > 0) deny = PermissionsBitField.resolve(args.deny as any);
+      } catch {
+        return { error: "Invalid permission names" };
+      }
+      await channel.permissionOverwrites.edit(args.targetId, { allow, deny });
+      return { success: true };
     },
     send_dm: async (args: { userId: string; content: string; }): Promise<any> => {
       if (!args.userId || !args.content) return { error: "Missing parameters" };
@@ -990,7 +1475,7 @@ const utils = {
         const homeGuild = await client.guilds.fetch(data.bot.home_guild);
         if (!homeGuild) return { error: "Support system is not properly configured" };
         const category = homeGuild.channels.cache.get(data.bot.support_category);
-        if (!category || category.type !== 4) return { error: "Support category not found" };
+        if (!category || category.type !== ChannelType.GuildCategory) return { error: "Support category not found" };
         let guildName = null;
         if (args.guildId) {
           const guild = client.guilds.cache.get(args.guildId);
@@ -1038,11 +1523,70 @@ const utils = {
         const channelName = `support-request-${ticketId}`;
         const ticketChannel = await homeGuild.channels.create({
           name: channelName,
-          type: 0,
+          type: ChannelType.GuildText,
           parent: data.bot.support_category,
           topic: `Support ticket #${ticketId} - User: ${user.tag} (${args.userId})`
         });
         await db.query("UPDATE support_tickets SET channel_id = ? WHERE id = ?", [ticketChannel.id, ticketId]);
+        const ticketEmbed = new EmbedBuilder()
+          .setColor("Purple")
+          .setTitle(`Ticket Information #${ticketId}`)
+          .setThumbnail(user.displayAvatarURL({ size: 256 }))
+          .addFields(
+            { name: "User", value: `${user.tag} (<@${user.id}>)\nID: ${user.id}`, inline: false },
+            { name: "Ticket ID", value: `#${ticketId}`, inline: true },
+            { name: "Status", value: "Open", inline: true },
+            { name: "Priority", value: "🟡 Medium", inline: true },
+            { name: "Category", value: "General", inline: true },
+            { name: "Assigned To", value: assignedStaff ? `<@${assignedStaff}>` : "Unassigned", inline: true },
+            { name: "Created At", value: `<t:${Math.floor(createdAt / 1000)}:F>`, inline: false },
+            { name: "Origin", value: args.guildId ? `Guild: ${guildName ?? "Unknown"} (${args.guildId})` : "Direct Message", inline: false },
+            { name: "Initial Message", value: args.initialMessage.length > 1024 ? args.initialMessage.substring(0, 1021) + "..." : args.initialMessage, inline: false }
+          )
+          .setFooter({ text: `User ID: ${user.id}` })
+          .setTimestamp();
+
+        const closeButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`close_ticket-${ticketId}-${args.userId}`)
+            .setLabel("Close Ticket")
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji("🔒")
+        );
+
+        const ticketMessage = await ticketChannel.send({
+          content: assignedStaff ? `<@${assignedStaff}> - New ticket assigned to you!` : `<@&${data.bot.home_guild}> - New unassigned ticket!`,
+          embeds: [ticketEmbed],
+          components: [closeButton]
+        });
+
+        const userCloseEmbed = new EmbedBuilder()
+          .setColor("Purple")
+          .setTitle("🎫 Support Ticket Created")
+          .setDescription(`Your support ticket #${ticketId} has been created!\n\nOur staff will respond to you soon. You can close this ticket at any time using the button below.`)
+          .addFields(
+            { name: "Ticket ID", value: `#${ticketId}`, inline: true },
+            { name: "Status", value: "Open", inline: true }
+          )
+          .setFooter({ text: "All messages you send here will be forwarded to staff" })
+          .setTimestamp();
+
+        const userCloseButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`close_ticket-${ticketId}-${args.userId}`)
+            .setLabel("Close Ticket")
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji("🔒")
+        );
+
+        try {
+          await user.send({ embeds: [userCloseEmbed], components: [userCloseButton] });
+        } catch (error) {
+          console.error("Failed to send close option to user:", error);
+        }
+
+        await db.query("UPDATE support_tickets SET message_id = ? WHERE id = ?", [ticketMessage.id, ticketId]);
+
         await db.query("INSERT INTO support_messages SET ?", [{
           ticket_id: ticketId,
           user_id: args.userId,
@@ -1052,16 +1596,42 @@ const utils = {
           is_staff: false,
           staff_rank: null
         }]);
-        try {
-          await user.send(`Your support ticket #${ticketId} has been created! Our staff will respond to you soon.`);
-        } catch (error) {
-          console.error("Failed to send ticket creation confirmation to user:", error);
-        }
-        return { success: true, ticketId, channelId: ticketChannel.id };
+
+        return { success: true, ticketId, channelId: ticketChannel.id, messageId: ticketMessage.id };
       } catch (error: any) {
         console.error("Support ticket creation error:", error);
         return { error: error.message ?? "Failed to create support ticket" };
       }
+    },
+    create_bug_report: async (args: { userId: string; title: string; description: string; steps?: string; expected?: string; actual?: string; severity?: string; guildId?: string }): Promise<any> => {
+      if (!args?.userId || !args.title || !args.description) return { error: "Missing parameters" };
+      const channelId = data.bot.bug_reports_channel;
+      if (!channelId) return { error: "Bug reports channel is not configured" };
+      const channel = await client.channels.fetch(channelId).catch(() => null) as TextChannel | null;
+      if (!channel || channel.type !== ChannelType.GuildText) return { error: "Bug reports channel not found" };
+
+      const trimField = (value?: string, fallback: string = "N/A") => {
+        if (!value || !value.trim()) return fallback;
+        return value.length > 1024 ? value.substring(0, 1021) + "..." : value;
+      };
+
+      const user = await client.users.fetch(args.userId).catch(() => null);
+      const embed = new EmbedBuilder()
+        .setColor("Orange")
+        .setTitle(`🐞 ${args.title}`)
+        .setDescription(trimField(args.description, "No description provided"))
+        .addFields(
+          { name: "Reporter", value: user ? `${user.tag} (<@${args.userId}>)` : args.userId, inline: true },
+          { name: "Severity", value: trimField(args.severity, "unspecified"), inline: true },
+          { name: "Guild", value: args.guildId ? args.guildId : "unknown", inline: true },
+          { name: "Steps to Reproduce", value: trimField(args.steps, "Not provided"), inline: false },
+          { name: "Expected", value: trimField(args.expected, "Not provided"), inline: false },
+          { name: "Actual", value: trimField(args.actual, "Not provided"), inline: false }
+        )
+        .setTimestamp();
+
+      const sent = await channel.send({ embeds: [embed] });
+      return { success: true, messageId: sent.id, channelId: sent.channelId };
     },
     get_ticket_details: async (args: { ticketId: number }): Promise<any> => {
       if (!args.ticketId) return { error: "Missing ticketId parameter" };
@@ -1098,20 +1668,179 @@ const utils = {
     },
     close_ticket: async (args: { requesterId?: string; ticketId: number }): Promise<any> => {
       if (!args?.requesterId || !args.ticketId) return { error: "Missing parameters" };
-      const ticket: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [args.ticketId]);
-      if (!ticket || !ticket[0]) return { error: "Ticket not found" };
-      if (ticket[0].user_id !== args.requesterId && !await utils.isStaff(args.requesterId)) {
+      const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [args.ticketId]);
+      if (!ticketData || !ticketData[0]) return { error: "Ticket not found" };
+      const ticket = ticketData[0];
+      if (ticket.user_id !== args.requesterId && !await utils.isStaff(args.requesterId)) {
         return { error: "Requester is not authorized to close this ticket" };
       }
-      await db.query("UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ?", [Date.now(), args.requesterId, args.ticketId]);
-      if (await utils.isStaff(args.requesterId)) {
-        await db.query("INSERT INTO staff_audit_log SET ?", [{
-          staff_id: args.requesterId,
-          action_type: "close_ticket",
-          target_id: String(args.ticketId),
-          created_at: Date.now()
-        }]);
+      if (ticket.status === "closed") return { error: "Ticket is already closed" };
+
+      const messages: any = await db.query("SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY timestamp ASC", [args.ticketId]);
+      const user = await client.users.fetch(ticket.user_id);
+      const closedAt = Date.now();
+
+      const durationMs = closedAt - Number(ticket.created_at || closedAt);
+      const hours = Math.floor(durationMs / 3600000);
+      const minutes = Math.floor((durationMs % 3600000) / 60000);
+      const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+
+      let textTranscript = `Support Ticket #${args.ticketId} - Transcript\n`;
+      textTranscript += `User: ${user.tag} (${user.id})\n`;
+      textTranscript += `Created: ${new Date(Number(ticket.created_at)).toISOString()}\n`;
+      textTranscript += `Closed: ${new Date(closedAt).toISOString()}\n`;
+      textTranscript += `Duration: ${durationText}\n`;
+      textTranscript += `Closed by: ${args.requesterId}\n`;
+      textTranscript += `Origin: ${ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message"}\n`;
+      textTranscript += `Initial Message: ${ticket.initial_message}\n`;
+      textTranscript += `\n${"=".repeat(50)}\n\n`;
+
+      for (const msg of messages) {
+        const timestamp = new Date(msg.timestamp).toISOString();
+        if (msg.is_staff) {
+          const rankTag = utils.getRankSuffix(msg.staff_rank);
+          textTranscript += `[${timestamp}] [${rankTag}] ${msg.username}: ${msg.content}\n`;
+        } else {
+          textTranscript += `[${timestamp}] ${msg.username}: ${msg.content}\n`;
+        }
       }
+
+      const htmlTemplate = await fs.readFile(path.join(process.cwd(), "transcript_placeholder.html"), "utf-8");
+      let messagesHtml = "";
+      for (const msg of messages) {
+        const timestamp = new Date(msg.timestamp).toLocaleString();
+        const initial = msg.username.charAt(0).toUpperCase();
+        if (msg.is_staff) {
+          const rankTag = utils.getRankSuffix(msg.staff_rank);
+          messagesHtml += `
+                            <div class="message">
+                                <div class="avatar">${initial}</div>
+                                <div class="message-content">
+                                    <div class="message-header">
+                                        <span class="username">${msg.username}</span>
+                                        <span class="staff-badge">${rankTag}</span>
+                                        <span class="timestamp">${timestamp}</span>
+                                    </div>
+                                    <div class="message-text">${msg.content}</div>
+                                </div>
+                            </div>`;
+        } else {
+          messagesHtml += `
+                            <div class="message">
+                                <div class="avatar">${initial}</div>
+                                <div class="message-content">
+                                    <div class="message-header">
+                                        <span class="username">${msg.username}</span>
+                                        <span class="timestamp">${timestamp}</span>
+                                    </div>
+                                    <div class="message-text">${msg.content}</div>
+                                </div>
+                            </div>`;
+        }
+      }
+
+      const htmlContent = htmlTemplate
+        .replace(/{ticketId}/g, String(args.ticketId))
+        .replace(/{username}/g, user.tag)
+        .replace(/{userId}/g, user.id)
+        .replace(/{status}/g, "Closed")
+        .replace(/{statusClass}/g, "status-closed")
+        .replace(/{createdAt}/g, new Date(Number(ticket.created_at)).toLocaleString())
+        .replace(/{closedAt}/g, new Date(closedAt).toLocaleString())
+        .replace(/{origin}/g, ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message")
+        .replace(/{initialMessage}/g, ticket.initial_message)
+        .replace(/{messages}/g, messagesHtml);
+
+      const textPath = path.join(process.cwd(), `transcript-${args.ticketId}.txt`);
+      const htmlPath = path.join(process.cwd(), `transcript-${args.ticketId}.html`);
+      await fs.writeFile(textPath, textTranscript);
+      await fs.writeFile(htmlPath, htmlContent);
+
+      const transcriptsChannel = await client.channels.fetch(data.bot.transcripts_channel) as TextChannel | null;
+      if (transcriptsChannel) {
+        const transcriptEmbed = new EmbedBuilder()
+          .setColor("Purple")
+          .setTitle(`🎫 Ticket #${args.ticketId} - Closed`)
+          .setDescription(`Ticket closed by ${args.requesterId}`)
+          .addFields(
+            { name: "User", value: `${user.tag} (${user.id})`, inline: true },
+            { name: "Messages", value: messages.length.toString(), inline: true },
+            { name: "Duration", value: durationText, inline: true }
+          )
+          .setTimestamp();
+
+        await transcriptsChannel.send({
+          embeds: [transcriptEmbed],
+          files: [
+            { attachment: textPath, name: `transcript-${args.ticketId}.txt` },
+            { attachment: htmlPath, name: `transcript-${args.ticketId}.html` }
+          ]
+        });
+      }
+
+      await db.query("UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ?", [closedAt, args.requesterId, args.ticketId]);
+
+      try {
+        const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel | null;
+        if (ticketChannel && ticket.message_id) {
+          const originalMessage = await ticketChannel.messages.fetch(ticket.message_id);
+          if (originalMessage?.embeds?.[0]) {
+            const updatedEmbed = EmbedBuilder.from(originalMessage.embeds[0])
+              .setColor("Red")
+              .setTitle(`🔒 Ticket #${args.ticketId} - CLOSED`)
+              .setFields(
+                originalMessage.embeds[0].fields.map(field => {
+                  if (field.name.toLowerCase().includes("status")) {
+                    return { name: field.name, value: "Closed", inline: field.inline };
+                  }
+                  return field;
+                })
+              );
+            await originalMessage.edit({ embeds: [updatedEmbed], components: [] });
+          }
+        }
+      } catch (error) {
+        console.error("Failed to update ticket embed:", error);
+      }
+
+      try {
+        const closedEmbed = new EmbedBuilder()
+          .setColor("Red")
+          .setTitle("🔒 Support Ticket Closed")
+          .setDescription(`Your support ticket #${args.ticketId} has been closed.`)
+          .addFields(
+            { name: "Duration", value: durationText, inline: true },
+            { name: "Messages", value: messages.length.toString(), inline: true }
+          )
+          .setFooter({ text: "Thank you for contacting support!" })
+          .setTimestamp();
+        await user.send({ embeds: [closedEmbed] });
+      } catch (error) {
+        console.error("Failed to notify user of ticket closure:", error);
+      }
+
+      const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel | null;
+      if (ticketChannel) {
+        const closedNoticeEmbed = new EmbedBuilder()
+          .setColor("Red")
+          .setTitle("🔒 Ticket Closed")
+          .setDescription(`This ticket has been closed.\n\nTranscripts have been saved and sent to <#${data.bot.transcripts_channel}>.\n\nYou can delete this channel using the button below.`)
+          .setTimestamp();
+
+        const deleteButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`delete_channel-${args.ticketId}`)
+            .setLabel("Delete Channel")
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji("🗑️")
+        );
+
+        await ticketChannel.send({ embeds: [closedNoticeEmbed], components: [deleteButton] });
+      }
+
+      await fs.unlink(textPath).catch(() => { });
+      await fs.unlink(htmlPath).catch(() => { });
+
       return { success: true };
     },
     add_ticket_message: async (args: { ticketId: number; userId: string; username: string; content: string; isStaff?: boolean }): Promise<any> => {

@@ -228,6 +228,156 @@ const functionDeclarations = {
             required: ["guildId", "memberId"]
         }
     },
+    list_guild_channels: {
+        name: "list_guild_channels",
+        description: "List channels in a guild. Requires ManageChannels permission in that guild and admin+ staff or owner.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING },
+                type: { type: SchemaType.STRING },
+                limit: { type: SchemaType.NUMBER }
+            },
+            required: ["guildId"]
+        }
+    },
+    search_guild_channels: {
+        name: "search_guild_channels",
+        description: "Search channels by name in a guild. Requires ManageChannels permission in that guild and admin+ staff or owner.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING },
+                query: { type: SchemaType.STRING },
+                limit: { type: SchemaType.NUMBER }
+            },
+            required: ["guildId", "query"]
+        }
+    },
+    get_channel_info: {
+        name: "get_channel_info",
+        description: "Get detailed channel info (including type) in a guild. Requires ManageChannels permission in that guild and admin+ staff or owner.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING },
+                channelId: { type: SchemaType.STRING }
+            },
+            required: ["guildId", "channelId"]
+        }
+    },
+    create_guild_channel: {
+        name: "create_guild_channel",
+        description: "Create a channel in a guild. Requires ManageChannels permission in that guild and admin+ staff or owner.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING },
+                name: { type: SchemaType.STRING },
+                type: { type: SchemaType.STRING },
+                parentId: { type: SchemaType.STRING },
+                topic: { type: SchemaType.STRING },
+                nsfw: { type: SchemaType.BOOLEAN },
+                rateLimitPerUser: { type: SchemaType.NUMBER },
+                bitrate: { type: SchemaType.NUMBER },
+                userLimit: { type: SchemaType.NUMBER },
+                reason: { type: SchemaType.STRING }
+            },
+            required: ["guildId", "name", "type"]
+        }
+    },
+    edit_guild_channel: {
+        name: "edit_guild_channel",
+        description: "Edit a channel's settings in a guild. Requires ManageChannels permission in that guild and admin+ staff or owner.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING },
+                channelId: { type: SchemaType.STRING },
+                name: { type: SchemaType.STRING },
+                topic: { type: SchemaType.STRING },
+                nsfw: { type: SchemaType.BOOLEAN },
+                rateLimitPerUser: { type: SchemaType.NUMBER },
+                parentId: { type: SchemaType.STRING },
+                position: { type: SchemaType.NUMBER },
+                userLimit: { type: SchemaType.NUMBER },
+                bitrate: { type: SchemaType.NUMBER },
+                reason: { type: SchemaType.STRING }
+            },
+            required: ["guildId", "channelId"]
+        }
+    },
+    delete_guild_channel: {
+        name: "delete_guild_channel",
+        description: "Delete a channel in a guild. Requires ManageChannels permission in that guild and admin+ staff or owner.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING },
+                channelId: { type: SchemaType.STRING },
+                reason: { type: SchemaType.STRING }
+            },
+            required: ["guildId", "channelId"]
+        }
+    },
+    create_thread: {
+        name: "create_thread",
+        description: "Create a thread inside a channel. Requires thread creation permission in that guild and admin+ staff or owner.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING },
+                channelId: { type: SchemaType.STRING },
+                name: { type: SchemaType.STRING },
+                type: { type: SchemaType.STRING },
+                autoArchiveDuration: { type: SchemaType.NUMBER },
+                reason: { type: SchemaType.STRING }
+            },
+            required: ["guildId", "channelId", "name"]
+        }
+    },
+    send_channel_message: {
+        name: "send_channel_message",
+        description: "Send a message to a specific channel. Requires SendMessages permission in that guild and admin+ staff or owner.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING },
+                channelId: { type: SchemaType.STRING },
+                content: { type: SchemaType.STRING }
+            },
+            required: ["guildId", "channelId", "content"]
+        }
+    },
+    send_channel_embed: {
+        name: "send_channel_embed",
+        description: "Send an embed message to a specific channel. Requires SendMessages permission in that guild and admin+ staff or owner.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING },
+                channelId: { type: SchemaType.STRING },
+                content: { type: SchemaType.STRING },
+                embed: { type: SchemaType.OBJECT }
+            },
+            required: ["guildId", "channelId", "embed"]
+        }
+    },
+    set_channel_permissions: {
+        name: "set_channel_permissions",
+        description: "Modify channel permission overwrites. Requires ManageChannels permission in that guild and admin+ staff or owner.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                guildId: { type: SchemaType.STRING },
+                channelId: { type: SchemaType.STRING },
+                targetId: { type: SchemaType.STRING },
+                allow: { type: SchemaType.ARRAY },
+                deny: { type: SchemaType.ARRAY }
+            },
+            required: ["guildId", "channelId", "targetId"]
+        }
+    },
     kick_member: {
         name: "kick_member",
         description: "Kicks a member from a guild. This action removes the member from the guild but does not ban them, allowing them to rejoin if they have an invite. This command is restricted to members with the appropriate permissions. First check if the user has the 'Kick Members' permission using the get_member_permissions function or if they have a role named 'Moderator' or 'Admin' using the get_member_roles function.",
@@ -251,6 +401,19 @@ const functionDeclarations = {
                 content: { type: SchemaType.STRING }
             },
             required: ["userId", "content"]
+        }
+    },
+    edit_msg: {
+        name: "edit_msg",
+        description: "Edit a message sent by the bot. This can be used to update information or correct mistakes in previously sent messages. Requires ManageMessages permission in that guild and admin+ staff or owner.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                messageId: { type: SchemaType.STRING },
+                channelId: { type: SchemaType.STRING },
+                content: { type: SchemaType.STRING }
+            },
+            required: ["messageId", "channelId", "content"]
         }
     },
     check_vip_status: {
@@ -638,6 +801,24 @@ const functionDeclarations = {
                 guildId: { type: SchemaType.STRING }
             },
             required: ["userId", "initialMessage"]
+        }
+    },
+    create_bug_report: {
+        name: "create_bug_report",
+        description: "Submit a bug report to the configured bug reports channel. Use this to file issues discovered by the user.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING },
+                title: { type: SchemaType.STRING },
+                description: { type: SchemaType.STRING },
+                steps: { type: SchemaType.STRING },
+                expected: { type: SchemaType.STRING },
+                actual: { type: SchemaType.STRING },
+                severity: { type: SchemaType.STRING },
+                guildId: { type: SchemaType.STRING }
+            },
+            required: ["userId", "title", "description"]
         }
     },
     get_ticket_details: {

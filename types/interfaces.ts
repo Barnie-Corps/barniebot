@@ -23,6 +23,7 @@ export interface DataType {
         home_guild: string;
         support_category: string;
         transcripts_channel: string;
+        bug_reports_channel: string;
         staff_ranks: StaffRank[];
         default_staff_ranks: string[];
     }

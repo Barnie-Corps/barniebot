@@ -32,6 +32,7 @@ const data: DataType = {
         home_guild: "772817759612174337",
         support_category: "1438707166159568991",
         transcripts_channel: "1438709707874373632",
+        bug_reports_channel: "1471366532280877199",
         staff_ranks: [],
         default_staff_ranks: [
             "Trial Support",

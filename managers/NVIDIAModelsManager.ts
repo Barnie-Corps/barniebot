@@ -164,11 +164,14 @@ export default class NVIDIAModelsManager {
     }
     private GetTaskBasedModel = (task: string): { name: string, hasReasoning: boolean, hasThinkMode: boolean } => {
         const base = { name: "deepseek-ai/deepseek-v3.1-terminus", hasReasoning: false, hasThinkMode: true };
+        const monitorSmall = { name: "meta/llama-3.1-8b-instruct", hasReasoning: false, hasThinkMode: false };
         const taskModels: { [key: string]: { name: string, hasReasoning: boolean, hasThinkMode: boolean } } = {
             "chat": base,
             "reasoning": base,
             "math": base,
-            "programming": base
+            "programming": base,
+            "monitor_small": monitorSmall,
+            "monitor_large": base
         };
         return taskModels[task] || base;
     }
@@ -188,28 +191,23 @@ export default class NVIDIAModelsManager {
                 "max_tokens": 4096,
                 "top_p": 0.95,
                 "temperature": 0.3
+            },
+            "monitor_small": {
+                "max_tokens": 256,
+                "top_p": 0.8,
+                "temperature": 0.2
+            },
+            "monitor_large": {
+                "max_tokens": 1024,
+                "top_p": 0.9,
+                "temperature": 0.5
             }
         };
         return taskConfigs[task] || { max_tokens: 1024, top_p: 0.9, temperature: 0.7 };
     };
-    /**
-     * Transcribes audio to text using NVIDIA Parakeet ASR model
-     * 
-     * @param audioBuffer - Audio data in WAV format (16-bit PCM, 16kHz, mono)
-     * @param timeoutMs - Request timeout in milliseconds (default: 15000)
-     * @param functionId - Your NVIDIA function ID from build.nvidia.com (optional but recommended)
-     * @returns Transcribed text
-     * 
-     * Note: If you don't provide a functionId, the model name will be used but this may not work
-     * for all accounts. Get your function ID from https://build.nvidia.com/nvidia/parakeet-1_1b-rnnt-multilingual-asr
-     */
     public GetSpeechToText = async (audioBuffer: Buffer, timeoutMs: number = 15000, functionId?: string): Promise<string> => {
         try {
-            // Load proto definition
             const protoPath = path.join(__dirname, "..", "protos", "riva_asr.proto");
-
-            // For now, we'll create a minimal inline proto since we don't have the full proto files
-            // This matches NVIDIA's Riva ASR API structure
             const fs = require("fs");
             const protoDir = path.join(__dirname, "..", "protos");
 
@@ -301,7 +299,6 @@ message WordInfo {
                 fs.writeFileSync(protoPath, protoContent);
             }
 
-            // Load the proto file
             const packageDefinition = protoLoader.loadSync(protoPath, {
                 keepCase: true,
                 longs: String,
@@ -313,29 +310,20 @@ message WordInfo {
             const protoDescriptor = grpc.loadPackageDefinition(packageDefinition) as any;
             const rivaPackage = protoDescriptor.nvidia.riva.asr;
 
-            // Create metadata with API key and optional function ID
             const metadata = new grpc.Metadata();
             metadata.add("authorization", `Bearer ${this.apiKey}`);
-
-            // Add function ID if provided (get this from build.nvidia.com)
             if (functionId) {
                 metadata.add("function-id", functionId);
             }
-
-            // Create SSL credentials
             const sslCreds = grpc.credentials.createSsl();
             const callCreds = grpc.credentials.createFromMetadataGenerator((params, callback) => {
                 callback(null, metadata);
             });
             const credentials = grpc.credentials.combineChannelCredentials(sslCreds, callCreds);
-
-            // Create gRPC client
             const client = new rivaPackage.RivaSpeechRecognition(
                 "grpc.nvcf.nvidia.com:443",
                 credentials
             );
-
-            // Prepare recognition config
             const request = {
                 config: {
                     encoding: "LINEAR_PCM",
@@ -343,13 +331,10 @@ message WordInfo {
                     language_code: "en-US",
                     max_alternatives: 1,
                     enable_automatic_punctuation: true,
-                    //model: "nvidia/parakeet-1_1b-rnnt-multilingual-asr",
                     "function-id": process.env.NVIDIA_STT_FUNCTION_ID || ""
                 },
                 audio: audioBuffer
             };
-
-            // Make the gRPC call with timeout
             return new Promise((resolve, reject) => {
                 const deadline = new Date(Date.now() + timeoutMs);
 
@@ -360,7 +345,6 @@ message WordInfo {
                         return;
                     }
 
-                    // Extract transcript
                     if (response?.results && response.results.length > 0) {
                         const alternatives = response.results[0].alternatives;
                         if (alternatives && alternatives.length > 0) {
@@ -387,15 +371,11 @@ message WordInfo {
         functionId?: string
     ): Promise<Buffer> => {
         try {
-            // Validate and pre-process text
             const raw = (text || "").toString().trim();
             if (!raw) {
                 throw new Error("Empty text provided for TTS");
             }
-
-            // Helper to split long text into <= 2000 char chunks (safe margin 1800)
-            // Prefer sentence boundaries, then words
-            const MAX_CHARS = 1800; // NVIDIA limit ~2000, keep margin
+            const MAX_CHARS = 1800;
             const sentences = raw
                 .replace(/\s+/g, " ")
                 .split(/(?<=[\.!?])\s+|\n+/g)
@@ -415,7 +395,6 @@ message WordInfo {
                     pushCurrent();
                     current = s;
                 } else {
-                    // Sentence is too long; split by words
                     const words = s.split(/\s+/g);
                     for (const w of words) {
                         if ((current + (current ? " " : "") + w).length <= MAX_CHARS) {
@@ -517,7 +496,6 @@ enum AudioEncoding {
                 credentials
             );
 
-            // Synthesize each chunk sequentially and concatenate raw PCM audio
             const synthOne = (part: string) => new Promise<Buffer>((resolve, reject) => {
                 const deadline = new Date(Date.now() + timeoutMs);
                 const request = {
@@ -543,10 +521,8 @@ enum AudioEncoding {
 
             const audioParts: Buffer[] = [];
             for (const [idx, part] of chunks.entries()) {
-                // Guard against accidental empty chunks
                 const t = (part || "").trim();
                 if (!t) continue;
-                // Synthesize chunk
                 const buf = await synthOne(t);
                 audioParts.push(buf);
             }
@@ -554,7 +530,6 @@ enum AudioEncoding {
             if (audioParts.length === 0) {
                 throw new Error("TTS returned no audio for provided text");
             }
-            // Concatenate raw PCM buffers (same format for all chunks)
             return Buffer.concat(audioParts as any);
 
         } catch (error) {
@@ -665,15 +640,13 @@ enum AudioEncoding {
             const arrayBuffer = await imgResp.arrayBuffer();
             const originalBuffer = Buffer.from(arrayBuffer);
 
-            // Resize image to fit within token limits (max 1280px, PNG for quality)
-            // Higher resolution and PNG format for better text/UI recognition
             const resizedBuffer = await sharp(originalBuffer)
                 .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
                 .png({ quality: 100, compressionLevel: 4 })
                 .toBuffer();
 
             const b64 = resizedBuffer.toString("base64");
-            const mime = "image/png"; // PNG for better quality
+            const mime = "image/png";
             console.log("[Vision] Resized image base64 length:", b64.length, "chars (~", Math.round(b64.length / 4), "tokens)");
             const payload = {
                 model: "meta/llama-4-maverick-17b-128e-instruct",
