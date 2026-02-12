@@ -28,6 +28,7 @@ By using BarnieBot, you acknowledge that you have read, understood, and agree to
 - Contractual necessity for delivering requested features
 - Consent for optional features like VIP subscriptions
 - Legal obligations for moderation and safety enforcement
+- Compliance with Discord's Terms of Service and community guidelines
 
 ## Information We Collect
 
