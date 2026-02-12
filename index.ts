@@ -262,7 +262,7 @@ client.on("messageCreate", async (message): Promise<any> => {
                     .setFields(
                         { name: "📡 Phase 1", value: "✅ Notice sent", inline: true },
                         { name: "📡 Phase 2", value: "✅ State saved", inline: true },
-                        { name: "📡 Phase 3", value: "⏳ Restart", inline: true }
+                        { name: "📡 Phase 3", value: "🔄 Restarting", inline: true }
                     );
                 await rebootMsg.edit({ embeds: [updated.toJSON()] });
             } catch (e) {
@@ -933,7 +933,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 try {
                     if (interaction.deferred || interaction.replied) await interaction.editReply(`${texts.error} (Failed to write log file)`);
                     else await interaction.reply({ content: `${texts.error} (Failed to write log file)`, ephemeral: true });
-                } catch { /* ignore */ }
+                } catch {}
             }
             Log.error("Slash command execution failed", new Error(`Error executing command ${cmd.data.name}`));
             console.error(err.stack, err);
@@ -949,18 +949,17 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
         const [event, ...args] = interaction.customId.trim().split("-");
         switch (event) {
             case "cancel_setup": {
-                // If the event is cancel_setup, cancel the setup
                 const [uid] = args;
                 let text = {
                     value: "Alright, I've cancelled the setup.",
                     not_author: "You're not the person who ran the command originally."
-                } // Texts for the cancel_setup event
-                if (Lang !== "en") {
-                    text = await utils.autoTranslate(text, "en", Lang); // Translate the texts to the user's language if it is not English
                 }
-                if (interaction.isRepliable() && uid !== interaction.user.id) return await interaction.reply({ content: text.not_author, ephemeral: true }); // Check if the user is the author of the original command and if not, reply with a message
-                if (interaction.isRepliable()) await interaction.deferUpdate(); // Defer the interaction if it is repliable
-                await interaction.message.edit({ components: [], content: text.value }); // Edit the message to remove the components and reply with a message
+                if (Lang !== "en") {
+                    text = await utils.autoTranslate(text, "en", Lang);
+                }
+                if (interaction.isRepliable() && uid !== interaction.user.id) return await interaction.reply({ content: text.not_author, ephemeral: true });
+                if (interaction.isRepliable()) await interaction.deferUpdate();
+                await interaction.message.edit({ components: [], content: text.value });
                 break;
             }
             case "continue_setup": {
@@ -1005,7 +1004,6 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                                 new ButtonBuilder().setCustomId("filtersetup_set_channel").setLabel("Set Channel").setStyle(ButtonStyle.Primary)
                             );
                         } else {
-                            // Skip step if logging disabled
                             state.step = 3;
                             return buildComponents();
                         }
@@ -1034,7 +1032,6 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     return rows;
                 };
                 const embed = new EmbedBuilder().setTitle("Filter Setup Wizard").setColor("Purple").setDescription(render());
-                // attach helpers to state for later cases
                 (state as any).render = render;
                 (state as any).buildComponents = buildComponents;
                 await interaction.message.edit({ embeds: [embed], components: buildComponents(), content: "" });
@@ -1065,7 +1062,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 const state = filterSetupSessions.get(sessionKey);
                 if (!state) { if (interaction.isRepliable()) await interaction.reply({ content: "Setup expired. Run /filter setup again.", ephemeral: true }); break; }
                 const now = Date.now();
-                if (now - state.createdAt > 10 * 60 * 1000) { // expire after 10m
+                if (now - state.createdAt > 10 * 60 * 1000) {
                     filterSetupSessions.delete(sessionKey);
                     if (interaction.isRepliable()) await interaction.reply({ content: "Setup expired. Run /filter setup again.", ephemeral: true });
                     break;
@@ -1088,14 +1085,13 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     });
                     collector.on("end", async () => {
                         state.awaitingChannelMention = false;
-                        state.step = 3; // advance to language selection
+                        state.step = 3;
                         const embed = new EmbedBuilder().setTitle("Filter Setup Wizard").setColor("Purple").setDescription((state as any).render());
                         await interaction.message.edit({ embeds: [embed], components: (state as any).buildComponents() });
                     });
-                    break; // wait for channel selection before advancing
+                    break;
                 }
                 if (interaction.customId === "filtersetup_finish") {
-                    // Persist to DB
                     const existingRows: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [state.guildId]);
                     if (!existingRows[0]) await db.query("INSERT INTO filter_configs SET ?", [{
                         enabled: state.values.enabled,
@@ -1118,7 +1114,6 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     break;
                 }
                 if (!state.awaitingChannelMention) {
-                    // Advance step if not waiting
                     if (state.step === 0) state.step = 1;
                     else if (state.step === 1) state.step = 2;
                     else if (state.step === 2) state.step = 3;
@@ -1130,7 +1125,6 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 break;
             }
             case "staffcases": {
-                // Format: staffcases-<action>-<authorId>-<targetUserId>-<page>
                 const [action, authorId, targetUserId, pageStr] = args;
                 if (authorId !== interaction.user.id) {
                     if (interaction.isRepliable()) await interaction.reply({ content: "You're not the requester of this view.", ephemeral: true });
@@ -1209,13 +1203,11 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 }
                 break;
             }
-            case "staffcases": // fallback
+            case "staffcases":
                 break;
             case "close_ticket": {
                 const [ticketIdStr, originalUserId] = args;
                 const ticketId = parseInt(ticketIdStr);
-
-                // Check if user is the ticket owner or staff
                 const isOwner = interaction.user.id === originalUserId;
                 const staffRank = await utils.getUserStaffRank(interaction.user.id);
                 const isStaff = staffRank !== null;
@@ -1238,7 +1230,6 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         return;
                     }
 
-                    // Show confirmation
                     if (interaction.isRepliable()) {
                         const confirmEmbed = new EmbedBuilder()
                             .setColor("Orange")
@@ -1293,17 +1284,12 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
 
                     if (interaction.isRepliable()) await interaction.update({ content: "🔄 Closing ticket and generating transcripts...", embeds: [], components: [] });
 
-                    // Generate transcript
                     const messages: any = await db.query("SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY timestamp ASC", [ticketId]);
                     const user = await client.users.fetch(ticket.user_id);
-
-                    // Calculate duration
                     const durationMs = Date.now() - ticket.created_at;
                     const hours = Math.floor(durationMs / 3600000);
                     const minutes = Math.floor((durationMs % 3600000) / 60000);
                     const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
-
-                    // Create text transcript
                     let textTranscript = `Support Ticket #${ticketId} - Transcript\n`;
                     textTranscript += `User: ${user.tag} (${user.id})\n`;
                     textTranscript += `Created: ${new Date(ticket.created_at).toISOString()}\n`;
@@ -1324,7 +1310,6 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         }
                     }
 
-                    // Create HTML transcript
                     const fs = await import("fs");
                     let htmlTemplate = fs.readFileSync("./transcript_placeholder.html", "utf-8");
 
@@ -1374,11 +1359,8 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         .replace(/{initialMessage}/g, ticket.initial_message)
                         .replace(/{messages}/g, messagesHtml);
 
-                    // Save transcripts to files
                     fs.writeFileSync(`./transcript-${ticketId}.txt`, textTranscript);
                     fs.writeFileSync(`./transcript-${ticketId}.html`, htmlTemplate);
-
-                    // Send transcripts to transcripts channel
                     const transcriptsChannel = await client.channels.fetch(data.bot.transcripts_channel) as TextChannel;
                     if (transcriptsChannel) {
                         const transcriptEmbed = new EmbedBuilder()
@@ -1401,11 +1383,8 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         });
                     }
 
-                    // Update ticket status
                     const closedAt = Date.now();
                     await db.query("UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ?", [closedAt, interaction.user.id, ticketId]);
-
-                    // Update the original embed in ticket channel
                     try {
                         const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel;
                         if (ticketChannel && ticket.message_id) {
@@ -1428,7 +1407,6 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         console.error("Failed to update ticket embed:", error);
                     }
 
-                    // Notify user
                     try {
                         const closedEmbed = new EmbedBuilder()
                             .setColor("Red")
@@ -1446,7 +1424,6 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         console.error("Failed to notify user of ticket closure:", error);
                     }
 
-                    // Send message in ticket channel with delete option
                     const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel;
                     if (ticketChannel) {
                         const closedNoticeEmbed = new EmbedBuilder()
@@ -1467,15 +1444,12 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         await ticketChannel.send({ embeds: [closedNoticeEmbed], components: [deleteButton] });
                     }
 
-                    // Clean up transcript files
                     fs.unlinkSync(`./transcript-${ticketId}.txt`);
                     fs.unlinkSync(`./transcript-${ticketId}.html`);
 
-                    // Update the confirmation message
                     try {
                         await interaction.editReply({ content: `✅ Ticket #${ticketId} has been closed successfully!` });
                     } catch (error) {
-                        // If edit fails, it's okay - the ticket is closed
                         console.log("Could not update confirmation message:", error);
                     }
 
@@ -1493,14 +1467,12 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 const [ticketIdStr] = args;
                 const ticketId = parseInt(ticketIdStr);
 
-                // Only staff can delete channels
                 const staffRank = await utils.getUserStaffRank(interaction.user.id);
                 if (!staffRank) {
                     if (interaction.isRepliable()) await interaction.reply({ content: "Only staff can delete ticket channels.", ephemeral: true });
                     return;
                 }
 
-                // Show confirmation
                 if (interaction.isRepliable()) {
                     const confirmEmbed = new EmbedBuilder()
                         .setColor("Orange")
