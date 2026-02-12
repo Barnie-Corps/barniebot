@@ -4,10 +4,13 @@
   
 	**Features & Systems:**
 	- Global Chat Network
-	- AI Integration (Google Gemini, NVIDIA models)
+	- AI Integration (NVIDIA NIM, DeepSeek, Llama safety/monitor, Vision, Riva ASR/TTS)
 	- RPG System (Account, Character, Equipment, Inventory, Shop, Trading, Combat, Admin Tools)
 	- Staff & Moderation System
+	- AI Monitor (Triaging, Review, Actions, Case Logs)
+	- AI Tooling & Function Calls (Discord, Database, Workspace, Logs, GitHub)
 	- Support Ticket System
+	- Support Transcripts (Text and HTML)
 	- Guild Customization (Filters, Custom Commands, Language, Webhooks)
 	- Content Filter System
 	- Custom Responses System
@@ -15,6 +18,7 @@
 	- VIP Subscription System
 	- Process Manager (Resilient Runner)
 	- Staff Hierarchy & Permissions
+	- Global Ban & Mute System
 	- Security & Privacy (Encryption, Audit Trail, Impersonation Protection)
 	- Database Integration (MySQL)
 	- Email Notification System (Gmail SMTP)
@@ -26,8 +30,9 @@
 	- Multi-language Support & Auto-Translation
 	- Logging System
 	- Audio Utilities
-	- Global Blacklist & Mute System
+	- Global Blacklist System
 	- Warning & Appeal System
+	- Warning Cleanup Scheduler
 	- Worker Thread Management
 	- Environment Configuration System
 	- Command Registration & Management

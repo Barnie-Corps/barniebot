@@ -1,73 +1,80 @@
 # BarnieBot Usage Policy
 
-Last Updated: November 8, 2025
+Last Updated: February 12, 2026
 
-## 1) Overview
-BarnieBot provides cross-guild global chat, AI features, moderation tooling, a comprehensive RPG system with account management, and support ticket workflow. By inviting or interacting with the bot you agree to this policy and Discord's Terms of Service.
+## 1) Scope
+BarnieBot operates inside Discord servers and DMs only. All use of the bot is subject to Discord's Terms of Service.
 
-## 2) Acceptable Use
-- Use the bot in communities you administer or have permission to configure.
-- Keep prompts and shared content lawful, safe, and respectful.
-- Disclose moderator actions transparently within your community where applicable.
-- Use RPG system features (account creation, trading, combat) in accordance with fair play principles.
-- Verify your RPG account with a legitimate email address you control.
-- Maintain security of your RPG account credentials; do not share passwords.
+## 2) Access and Permissions
+- You must have permission to configure the bot in a server.
+- `/ai chat` and `/ai voice` are VIP-only unless you are an owner.
+- `/ai monitor` configuration requires the Administrator permission.
+- Many actions are permission-checked against staff rank and Discord permissions.
+- Some AI tools are owner-only or restricted to staff/admins.
 
-## 3) Staff & Owner Controls
-- **Owners**: Discord IDs in the `OWNERS` environment variable can execute prefix commands (`b.shutdown`, `b.announce`, `b.eval`, `b.messages`, etc.). These are administrative tools for bot operators only.
-- **Staff Ranks** (Support → Owner): Manage global moderation via `/staff` and `/globalmod` commands. Chief of Moderation+ required for enforcement actions.
-- **Anti-Impersonation**: Do not fake staff suffixes like `[MOD]` or `[ADMIN]` in your username; they will be automatically stripped in global chat.
+## 3) Acceptable Use
+- Use the bot only for lawful, safe, and respectful activity.
+- Do not use the bot for harassment, scams, doxxing, or impersonation.
+- Do not attempt to bypass rate limits, spam protections, or staff permissions.
+- Do not attempt to exploit, probe, or reverse-engineer bot systems.
 
-## 4) Prohibited Activities
-- Harassment, hate speech, doxxing, or NSFW content distribution via global chat, AI features, or RPG system.
-- Rate limit evasion, worker pool abuse, or deliberate API throttling/flooding.
-- RPG system abuse including:
-  - Multi-accounting to circumvent single-session enforcement
-  - Trading exploits, gold duplication, or item manipulation
-  - Automated gameplay (botting, scripting)
-  - Account sharing or credential trading
-  - False verification information or email spoofing
-- Monetizing or redistributing BarnieBot's code or services without explicit permission.
-- Broadcasting decrypted global chat exports or personal data from `b.messages` without user consent (owner use only for moderation).
-- Attempting to social-engineer access to owner commands, staff ranks, or RPG admin privileges you do not hold.
-- Support ticket abuse (spam creation, false reports, harassment of staff).
+## 4) AI Features
+- `/ai ask` returns a single response to your question.
+- `/ai chat` starts a chat session in the current channel. You can stop it by saying `stop ai`, `ai stop`, `stop chat`, or `end ai`.
+- `/ai voice` requires you to be in a voice channel and processes your voice to generate a spoken response.
+- Safety checks may end a session when content is flagged as unsafe.
+- During AI chat, a single image attachment can be analyzed to describe the image.
+- AI tool calls can fetch Discord data, database records, URLs, GitHub repository content, logs, and files under `ai_workspace/` when allowed by permissions.
+- Tool usage is permission-checked. Owner-only tools are blocked for non-owners.
 
-## 5) Rate Limits & Behavior
-- Global chat and AI endpoints are rate-limited. Requests may be queued or dropped during spikes.
-- Translation workers and external services may throttle; delivery could be delayed.
-- Sessions for AI chat are ephemeral; data clears when the session ends or restarts.
+## 5) AI Monitor
+- AI monitor is configured per guild with `/ai monitor` and requires a logs channel.
+- It can analyze message create/update/delete/bulk delete, member add/remove/update, role create/update/delete, channel create/update/delete, invite create, webhook updates, and guild ban add/remove.
+- Alerts are posted to the configured logs channel with risk, summary, and recommended actions.
+- If `allow_actions` is enabled, it may delete messages, warn via DM, timeout, kick, or ban users.
+- If `allow_investigation_tools` is enabled, it may use safe tools to fetch URL text and retrieve Discord context or warning history.
+- Staff can mark cases as solved or run recommended actions from the alert.
 
-## 6) Data Handling Summary
-- Global messages are encrypted at rest. See `privacy.md` for full details.
-- RPG accounts store email addresses (verification only), encrypted passwords (AES-256-CBC), character data (stats, inventory, equipment), combat logs, and trading history.
-- Support tickets archive complete message transcripts with staff attribution and timestamps.
-- Warnings, mutes, and blacklist states are recorded for moderation and safety.
-- Staff actions are logged in a comprehensive audit trail with attribution, timestamps, and metadata.
-- AI session data is ephemeral; memories persist if user-added.
-- Minimal operational metadata (for example command usage) may be retained for diagnostics.
+## 6) Global Chat Network
+- Global chat relays messages across connected guilds using webhooks.
+- Links are sanitized for relay, and attachments are relayed as URLs when present.
+- Auto-translation is supported based on guild language settings.
+- Rate limits apply: 10 messages per 10 seconds, with a 60-second ratelimit when exceeded.
+- Blacklisted or muted users are ignored in global chat.
 
-## 7) Security & Reporting
-- Report vulnerabilities to: barniecorps@gmail.com.
-- Do not publicly disclose exploits prior to fix/mitigation.
-- BarnieBot may suspend features per-guild or per-user to maintain network health.
+## 7) Filters and Custom Responses
+- Filters can remove flagged messages and optionally log them to a configured channel.
+- Filtered content can be reposted via webhooks in a censored form.
+- Custom responses can reply to exact or regex matches in a guild.
 
-## 8) Enforcement
-- We may restrict features, remove the bot from a guild, or escalate to Discord Trust & Safety.
-- Global bans can be applied across the shared network for egregious violations.
-- RPG accounts may be frozen (temporary suspension) or banned (permanent) for rule violations, exploitation, or abuse.
-- Staff may modify character stats, remove items, or force logout accounts as corrective measures.
-- Support ticket privileges may be revoked for abuse or harassment.
-- Appeals for warnings and account actions can be submitted but are not guaranteed approval.
+## 8) Moderation and Staff Controls
+- Warnings, mutes, and bans are enforced by staff tools and permission checks.
+- Warning appeals can be submitted and reviewed by staff.
+- Staff actions are recorded in the audit log.
 
-## 9) Liability
-BarnieBot is provided “AS IS” with no warranties. We are not liable for indirect or consequential damages arising from bot usage.
+## 9) Support Tickets
+- `/support` creates a ticket and logs the initial message to the database.
+- Ticket channels are created in the configured home guild.
+- Ticket messages are stored in the support transcript database and in generated transcripts on close.
 
-## 10) Changes
-We may update this policy to reflect new features or requirements. Continued use after publication of changes constitutes acceptance.
+## 10) RPG System Rules
+- RPG accounts require email verification.
+- Do not multi-account, share accounts, or automate gameplay.
+- Exploits, duplication, or stat manipulation are not allowed.
+- Staff may freeze or ban RPG accounts for abuse.
 
-## 11) Contact
+## 11) Availability and Limits
+- The bot enforces rate limits and may temporarily block or ignore abuse patterns.
+- Some features have timeouts or may return temporary unavailability messages under heavy load.
+
+## 12) Enforcement and Appeals
+- Violations may result in warnings, mutes, bans, or removal from global chat.
+- AI monitor actions may apply when configured by guild administrators.
+- Warnings can be appealed and reviewed by staff.
+
+## 13) Contact
 - Email: barniecorps@gmail.com
 - GitHub: https://github.com/Barnie-Corps/barniebot
 
-© 2025 BarnieCorps. All rights reserved.
+© 2026 BarnieCorps. All rights reserved.
 
