@@ -803,6 +803,24 @@ const functionDeclarations = {
             required: ["userId", "initialMessage"]
         }
     },
+    create_bug_report: {
+        name: "create_bug_report",
+        description: "Submit a bug report to the configured bug reports channel. Use this to file issues discovered by the user.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING },
+                title: { type: SchemaType.STRING },
+                description: { type: SchemaType.STRING },
+                steps: { type: SchemaType.STRING },
+                expected: { type: SchemaType.STRING },
+                actual: { type: SchemaType.STRING },
+                severity: { type: SchemaType.STRING },
+                guildId: { type: SchemaType.STRING }
+            },
+            required: ["userId", "title", "description"]
+        }
+    },
     get_ticket_details: {
         name: "get_ticket_details",
         description: "Get detailed information about a specific support ticket by its ID.",

@@ -131,6 +131,30 @@ client.on("clientReady", async (): Promise<any> => {
 });
 
 const activeGuilds: Collection<string, number> = new Collection();
+const shutdownState = { inProgress: false, mode: "" };
+
+const updateEnvFlag = (key: string, value: string) => {
+    try {
+        const envPath = './.env';
+        const envContents = fs.existsSync(envPath) ? fs.readFileSync(envPath).toString() : "";
+        const line = `${key}=${value}`;
+        let updated = envContents;
+        if (updated.includes(`${key}=`)) {
+            updated = updated.replace(new RegExp(`${key}=.*`, "m"), line);
+        } else {
+            updated = updated.trim().length ? `${updated}\n${line}` : line;
+        }
+        fs.writeFileSync(envPath, updated);
+        process.env[key] = value;
+    } catch (e: any) {
+        Log.warn("Failed to update env flag", { component: "Shutdown", key, error: e?.message || String(e) });
+    }
+};
+
+const markShutdownMode = (mode: "shutdown" | "reboot") => {
+    updateEnvFlag("SAFELY_SHUTTED_DOWN", "1");
+    updateEnvFlag("REBOOTING", mode === "reboot" ? "1" : "0");
+};
 interface FilterSetupState {
     step: number;
     values: { enabled: boolean; logs_enabled: boolean; logs_channel: string; lang: string };
@@ -168,23 +192,52 @@ client.on("messageCreate", async (message): Promise<any> => {
     const [command, ...args] = message.content.slice(prefix.length).trim().split(" ");
     switch (command) {
         case "shutdown": {
+            if (shutdownState.inProgress) {
+                await message.reply("Shutdown already in progress.");
+                break;
+            }
+            shutdownState.inProgress = true;
+            shutdownState.mode = "shutdown";
             const shutdownEmbed = new EmbedBuilder()
                 .setColor("#E74C3C")
                 .setTitle("🔴 System Shutdown Initiated")
                 .setDescription("```ansi\n\u001b[1;31m[CRITICAL]\u001b[0m Graceful shutdown sequence started...\n```")
                 .addFields(
                     { name: "📡 Status", value: "Broadcasting shutdown notice...", inline: true },
-                    { name: "⏱️ ETA", value: "< 3 seconds", inline: true }
+                    { name: "⏱️ ETA", value: "< 5 seconds", inline: true }
                 )
                 .setFooter({ text: `Initiated by ${message.author.username}` })
                 .setTimestamp();
-            await message.reply({ embeds: [shutdownEmbed] });
-            await manager.announce("⚠️ System going offline for maintenance. Be back soon!", "en");
-            fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=0", "SAFELY_SHUTTED_DOWN=1"));
-            setTimeout(() => { client.destroy(); process.exit(0); }, 2000);
+            const shutdownMsg = await message.reply({ embeds: [shutdownEmbed] });
+            try {
+                await manager.announce("⚠️ System going offline for maintenance. Be back soon!", "en");
+            } catch (e) {
+                Log.warn("Failed to announce shutdown", { component: "Shutdown", error: (e as any)?.message || String(e) });
+            }
+            markShutdownMode("shutdown");
+            try {
+                const updated = EmbedBuilder.from(shutdownEmbed)
+                    .setDescription("```ansi\n\u001b[1;31m[CRITICAL]\u001b[0m Shutdown notice sent. Flushing and exiting...\n```")
+                    .setFields(
+                        { name: "📡 Status", value: "Notice sent", inline: true },
+                        { name: "⏱️ ETA", value: "< 5 seconds", inline: true }
+                    );
+                await shutdownMsg.edit({ embeds: [updated.toJSON()] });
+            } catch (e) {
+                Log.warn("Failed to update shutdown embed", { component: "Shutdown", error: (e as any)?.message || String(e) });
+            }
+            setTimeout(() => {
+                try { client.destroy(); } finally { process.exit(0); }
+            }, 4000);
             break;
         }
         case "reboot": {
+            if (shutdownState.inProgress) {
+                await message.reply("Shutdown already in progress.");
+                break;
+            }
+            shutdownState.inProgress = true;
+            shutdownState.mode = "reboot";
             const rebootEmbed = new EmbedBuilder()
                 .setColor("#F39C12")
                 .setTitle("🔄 System Reboot Sequence")
@@ -196,19 +249,28 @@ client.on("messageCreate", async (message): Promise<any> => {
                 )
                 .setFooter({ text: `Initiated by ${message.author.username} • ProcessManager will auto-restart` })
                 .setTimestamp();
-            await message.reply({ embeds: [rebootEmbed] });
-            await manager.announce("🔄 Quick restart incoming! Back in ~10 seconds.", "en");
+            const rebootMsg = await message.reply({ embeds: [rebootEmbed] });
             try {
-                const envContents = fs.readFileSync('./.env').toString();
-                let newEnv = envContents.includes("SAFELY_SHUTTED_DOWN=0") ? envContents.replace("SAFELY_SHUTTED_DOWN=0", "SAFELY_SHUTTED_DOWN=1") : envContents;
-                if (newEnv.includes("REBOOTING=0")) newEnv = newEnv.replace("REBOOTING=0", "REBOOTING=1");
-                else if (!newEnv.includes("REBOOTING=")) newEnv += "\nREBOOTING=1";
-                fs.writeFileSync('./.env', newEnv);
-                process.env.REBOOTING = "1";
+                await manager.announce("🔄 Quick restart incoming! Back in ~10 seconds.", "en");
             } catch (e) {
-                Log.warn("Failed to set reboot flag", { component: "Reboot", error: (e as any)?.message });
+                Log.warn("Failed to announce reboot", { component: "Reboot", error: (e as any)?.message || String(e) });
             }
-            setTimeout(() => { client.destroy(); process.exit(1); }, 1500);
+            markShutdownMode("reboot");
+            try {
+                const updated = EmbedBuilder.from(rebootEmbed)
+                    .setDescription("```ansi\n\u001b[1;33m[SYSTEM]\u001b[0m Notice sent. Restarting services...\n```")
+                    .setFields(
+                        { name: "📡 Phase 1", value: "✅ Notice sent", inline: true },
+                        { name: "📡 Phase 2", value: "✅ State saved", inline: true },
+                        { name: "📡 Phase 3", value: "⏳ Restart", inline: true }
+                    );
+                await rebootMsg.edit({ embeds: [updated.toJSON()] });
+            } catch (e) {
+                Log.warn("Failed to update reboot embed", { component: "Reboot", error: (e as any)?.message || String(e) });
+            }
+            setTimeout(() => {
+                try { client.destroy(); } finally { process.exit(1); }
+            }, 2500);
             break;
         }
         case "status": {

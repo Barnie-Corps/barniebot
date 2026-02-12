@@ -16,6 +16,7 @@ import client from "..";
 import * as fs from "fs";
 import * as path from "path";
 import { FunctionCall } from "@google/genai";
+import langs from "langs";
 import NVIDIAModels from "../NVIDIAModels";
 import { prepareAudioForASR, stereoToMono, resampleAudio } from "../utils/audioUtils";
 import { Writable, PassThrough } from "stream";
@@ -87,6 +88,11 @@ export default {
                         .setDescription("Allow the large model to use safe investigation tools for AI monitor")
                         .setRequired(false)
                 )
+                .addStringOption(o =>
+                    o.setName("alerts_language")
+                        .setDescription("Language code for AI monitor alerts (e.g., en, es, fr)")
+                        .setRequired(false)
+                )
         ),
     category: "AI",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
@@ -99,13 +105,18 @@ export default {
                 guild_only: "This command can only be used in a server.",
                 not_admin: "Administrator permission is required to configure AI monitoring.",
                 not_in_voice: "You must be in a voice channel to use this command.",
-                no_male_voice: "No male voice available for language: {lang}. Supported languages: en-US, es-US, fr-FR, de-DE, zh-CN",
+                no_male_voice_prefix: "No male voice available for language:",
+                no_male_voice_supported: "Supported languages: en-US, es-US, fr-FR, de-DE, zh-CN",
                 voice_processing_error: "Sorry, I encountered an error processing your voice.",
                 temporary_unavailable: "Temporary unavailable due to high demand. Please use the chat command.",
                 max_attachments: "You can only send up to 1 attachment per message.",
                 monitor_already_enabled: "AI monitor is already enabled for this guild.",
                 monitor_already_disabled: "AI monitor is already disabled for this guild.",
                 monitor_disabled: "AI monitor is disabled for this guild.",
+                invalid_language: "Invalid language code.",
+                language_too_long: "Language code cannot have more than 2 characters.",
+                logs_channel_required: "Please provide a text logs channel.",
+                invalid_action: "Invalid action.",
             },
             common: {
                 question: "Your question was:",
@@ -118,6 +129,17 @@ export default {
                 no_reasons: "No reason provided.",
                 reasoning: "Reasoning",
                 analyzing_image: "Analyzing the image you provided...",
+                enabled: "enabled",
+                disabled: "disabled",
+                not_set: "not set",
+                monitor_is: "AI monitor is",
+                logs_label: "Logs:",
+                auto_actions_label: "Auto actions:",
+                potential_label: "Potential analysis:",
+                tools_label: "Investigation tools:",
+                alerts_language_label: "Alerts language:",
+                monitor_enabled_label: "AI monitor enabled.",
+                monitor_disabled_label: "AI monitor disabled.",
             },
             voice: {
                 joining: "Joining voice channel and starting AI conversation...\n\nSay \"stop\" or \"end conversation\" to stop.\nVoice:",
@@ -140,6 +162,19 @@ export default {
         const reply = (content: any) => {
             return utils.safeInteractionRespond(interaction, content);
         }
+        const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> => {
+            let timer: NodeJS.Timeout | null = null;
+            try {
+                return await Promise.race([
+                    promise,
+                    new Promise<null>(resolve => {
+                        timer = setTimeout(() => resolve(null), timeoutMs);
+                    })
+                ]);
+            } finally {
+                if (timer) clearTimeout(timer);
+            }
+        };
         switch (subcmd) {
             case "ask": {
                 await reply(texts.common.thinking);
@@ -188,102 +223,107 @@ export default {
                 const collector = (interaction.channel as any).createMessageCollector({
                     filter: (m: { author: { id: string } }) => m.author.id === convoOwnerId || (addedUserId !== null && m.author.id === addedUserId)
                 });
+                let isWaitingForResponse = false;
                 await reply(`${texts.common.started_chat} \`stop ai, ai stop, stop chat, end ai\`\n${texts.common.can_take_time}`);
                 collector?.on("collect", async (message: Message): Promise<any> => {
-                    let isWaitingForResponse = false;
                     if (isWaitingForResponse) return;
-                    if (["stop ai", "ai stop", "stop chat", "end ai"].some(stop => message.content.toLowerCase().includes(stop))) {
-                        conversationEndedBy = message.author.id;
-                        if (conversationEndedBy === convoOwnerId) {
-                            await reply(texts.common.stopped_ai);
-                        } else {
-                            await reply(`${texts.common.stopped_ai} Ended by <@${conversationEndedBy}>.`);
-                        }
-                        await message.react("🛑");
-                        collector?.stop();
-                        isWaitingForResponse = false;
-                        return;
-                    }
-                    await (interaction.channel as TextChannel).sendTyping?.();
                     isWaitingForResponse = true;
-
-                    let imageDescription = "";
-                    if (message.attachments.size > 0) {
-                        if (message.attachments.size > 1) return await message.reply(texts.errors.max_attachments);
-                        const attachment = message.attachments.first();
-                        if (attachment) {
-                            const analyzingMsg = await message.reply(texts.common.analyzing_image);
-                            try {
-                                imageDescription = await NVIDIAModels.GetVisualDescription(attachment.url, message.id, lang);
-                                await analyzingMsg.delete().catch(() => { });
-                            } catch {
-                                await analyzingMsg.delete().catch(() => { });
+                    try {
+                        if (["stop ai", "ai stop", "stop chat", "end ai"].some(stop => message.content.toLowerCase().includes(stop))) {
+                            conversationEndedBy = message.author.id;
+                            if (conversationEndedBy === convoOwnerId) {
+                                await reply(texts.common.stopped_ai);
+                            } else {
+                                await reply(`${texts.common.stopped_ai} Ended by <@${conversationEndedBy}>.`);
                             }
-                        }
-                    }
-                    if (message.attachments.size > 0) await (interaction.channel as TextChannel).sendTyping?.();
-
-                    const speakerLabel = message.author.id === convoOwnerId
-                        ? `Speaker: Conversation owner (${message.author.username}, ${message.author.id})`
-                        : `Speaker: Added user (${message.author.username}, ${message.author.id})`;
-                    const payloadContent = message.attachments.size > 0
-                        ? `<image>${imageDescription || "No visual details detected."}</image>\n\n${message.content}`
-                        : message.content;
-                    const userContent = `${speakerLabel}\n${payloadContent}`;
-
-                    const safety = await NVIDIAModels.GetConversationSafety([
-                        { role: "user", content: userContent }
-                    ]);
-                    if (!safety.safe && !(await utils.getUserStaffRank(message.author.id))) {
-                        if (lang !== "en") {
-                            safety.reason = (await utils.translate(safety.reason || "", "en", lang)).text;
-                        }
-                        const reason = safety.reason ? `\n${texts.common.reasons}: ${safety.reason}` : "";
-                        await message.reply(`${texts.errors.unsafe_message}${reason}`);
-                        isWaitingForResponse = false;
-                        collector?.stop();
-                        return;
-                    }
-                    const response = await ai.GetResponse(interaction.user.id, userContent);
-                    if (response.text.length < 1 && !response.call) {
-                        console.log("No response from AI", response);
-                        isWaitingForResponse = false;
-                        return await message.reply(texts.errors.no_response);
-                    }
-                    const toolParse = utils.parseToolCalls(response.text);
-                    const toolCalls = toolParse.toolCalls;
-                    const cleanedResponseText = toolParse.cleanedText;
-                    if (response.text.length > 2000) {
-                        const filename = `./ai-response-${Date.now()}.md`;
-                        fs.writeFileSync(filename, cleanedResponseText || response.text, "utf-8");
-                        await message.reply({ content: texts.errors.long_response, files: [filename] });
-                        fs.unlinkSync(filename);
-                        isWaitingForResponse = false;
-                        return;
-                    }
-                    if (response.call) {
-                        if ((response.call as FunctionCall).name === "end_conversation") {
-                            await message.reply(`${texts.common.ai_left} ${(response.call as FunctionCall).args?.reason || "No reason provided."}`);
+                            await message.react("🛑");
                             collector?.stop();
                             return;
                         }
-                    }
-                    if (toolCalls.length > 0) {
-                        console.log(`AI requested ${toolCalls.length} tool calls:`, toolCalls.map(c => c.name));
-                        const toolLines = toolCalls.map(call => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
-                        const combined = cleanedResponseText ? `${cleanedResponseText}\n\n${toolLines}` : toolLines;
-                        const msg = await message.reply(combined);
-                        for (const call of toolCalls) {
-                            await ai.ExecuteFunction(interaction.user.id, call.name, call.args, msg);
+                        await (interaction.channel as TextChannel).sendTyping?.();
+
+                        let imageDescription = "";
+                        if (message.attachments.size > 0) {
+                            if (message.attachments.size > 1) return await message.reply(texts.errors.max_attachments);
+                            const attachment = message.attachments.first();
+                            if (attachment) {
+                                const analyzingMsg = await message.reply(texts.common.analyzing_image);
+                                try {
+                                    imageDescription = await NVIDIAModels.GetVisualDescription(attachment.url, message.id, lang);
+                                    await analyzingMsg.delete().catch(() => { });
+                                } catch {
+                                    await analyzingMsg.delete().catch(() => { });
+                                }
+                            }
                         }
-                        isWaitingForResponse = false;
-                        return;
-                    }
-                    const msg = await message.reply(response.call ? `Executing command ${(response.call as FunctionCall).name} ${data.bot.loadingEmoji.mention}` : cleanedResponseText || response.text);
-                    if (response.call) {
-                        const callName = (response.call as FunctionCall).name || "";
-                        const callArgs = (response.call as FunctionCall).args as any;
-                        await ai.ExecuteFunction(interaction.user.id, callName, callArgs, msg);
+                        if (message.attachments.size > 0) await (interaction.channel as TextChannel).sendTyping?.();
+
+                        const speakerLabel = message.author.id === convoOwnerId
+                            ? `Speaker: Conversation owner (${message.author.username}, ${message.author.id})`
+                            : `Speaker: Added user (${message.author.username}, ${message.author.id})`;
+                        const payloadContent = message.attachments.size > 0
+                            ? `<image>${imageDescription || "No visual details detected."}</image>\n\n${message.content}`
+                            : message.content;
+                        const userContent = `${speakerLabel}\n${payloadContent}`;
+
+                        const safety = await NVIDIAModels.GetConversationSafety([
+                            { role: "user", content: userContent }
+                        ]);
+                        if (!safety.safe && !(await utils.getUserStaffRank(message.author.id))) {
+                            if (lang !== "en") {
+                                safety.reason = (await utils.translate(safety.reason || "", "en", lang)).text;
+                            }
+                            const reason = safety.reason ? `\n${texts.common.reasons}: ${safety.reason}` : "";
+                            await message.reply(`${texts.errors.unsafe_message}${reason}`);
+                            collector?.stop();
+                            return;
+                        }
+                        const response = await withTimeout(ai.GetResponse(interaction.user.id, userContent), 25000);
+                        if (!response) {
+                            console.warn("AI response timeout");
+                            return await message.reply(texts.errors.no_response);
+                        }
+                        if (!response.text || (response.text.length < 1 && !response.call)) {
+                            console.log("No response from AI", response);
+                            return await message.reply(texts.errors.no_response);
+                        }
+                        const toolParse = utils.parseToolCalls(response.text);
+                        const toolCalls = toolParse.toolCalls;
+                        const cleanedResponseText = toolParse.cleanedText;
+                        if (response.text.length > 2000) {
+                            const filename = `./ai-response-${Date.now()}.md`;
+                            fs.writeFileSync(filename, cleanedResponseText || response.text, "utf-8");
+                            await message.reply({ content: texts.errors.long_response, files: [filename] });
+                            fs.unlinkSync(filename);
+                            return;
+                        }
+                        if (response.call) {
+                            if ((response.call as FunctionCall).name === "end_conversation") {
+                                await message.reply(`${texts.common.ai_left} ${(response.call as FunctionCall).args?.reason || "No reason provided."}`);
+                                collector?.stop();
+                                return;
+                            }
+                        }
+                        if (toolCalls.length > 0) {
+                            console.log(`AI requested ${toolCalls.length} tool calls:`, toolCalls.map(c => c.name));
+                            const toolLines = toolCalls.map(call => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
+                            const combined = cleanedResponseText ? `${cleanedResponseText}\n\n${toolLines}` : toolLines;
+                            const msg = await message.reply(combined);
+                            for (const call of toolCalls) {
+                                await ai.ExecuteFunction(interaction.user.id, call.name, call.args, msg);
+                            }
+                            return;
+                        }
+                        const msg = await message.reply(response.call ? `Executing command ${(response.call as FunctionCall).name} ${data.bot.loadingEmoji.mention}` : cleanedResponseText || response.text);
+                        if (response.call) {
+                            const callName = (response.call as FunctionCall).name || "";
+                            const callArgs = (response.call as FunctionCall).args as any;
+                            await ai.ExecuteFunction(interaction.user.id, callName, callArgs, msg);
+                        }
+                    } catch (error) {
+                        console.error("AI chat handling failed:", error);
+                        await message.reply(texts.errors.no_response);
+                    } finally {
                         isWaitingForResponse = false;
                     }
                 });
@@ -301,21 +341,36 @@ export default {
                 const allowActions = interaction.options.getBoolean("allow_actions") ?? false;
                 const analyzePotential = interaction.options.getBoolean("analyze_potential") ?? false;
                 const allowInvestigationTools = interaction.options.getBoolean("allow_investigation_tools") ?? false;
+                const alertsLanguageRaw = interaction.options.getString("alerts_language");
+                let alertsLanguage: string | null = null;
+                if (alertsLanguageRaw) {
+                    const normalized = alertsLanguageRaw.trim().toLowerCase();
+                    if (normalized.length > 2) return await reply(texts.errors.language_too_long);
+                    if (!langs.has(1, normalized) || ["ch", "br", "wa"].some(v => normalized === v)) {
+                        return await reply(texts.errors.invalid_language);
+                    }
+                    alertsLanguage = normalized;
+                }
                 const existing = await db.query("SELECT * FROM ai_monitor_configs WHERE guild_id = ?", [interaction.guildId]) as unknown as any[];
                 if (action === "status") {
                     if (!existing[0]) return await reply(texts.errors.monitor_disabled);
-                    const statusText = existing[0].enabled ? "enabled" : "disabled";
-                    const channelText = existing[0].logs_channel && existing[0].logs_channel !== "0" ? `<#${existing[0].logs_channel}>` : "not set";
-                    const actionsText = existing[0].allow_actions ? "enabled" : "disabled";
-                    const potentialText = existing[0].analyze_potentially ? "enabled" : "disabled";
-                    const toolsText = existing[0].allow_investigation_tools ? "enabled" : "disabled";
-                    return await reply(`AI monitor is ${statusText}. Logs: ${channelText}. Auto actions: ${actionsText}. Potential analysis: ${potentialText}. Investigation tools: ${toolsText}.`);
+                    const statusText = existing[0].enabled ? texts.common.enabled : texts.common.disabled;
+                    const channelText = existing[0].logs_channel && existing[0].logs_channel !== "0" ? `<#${existing[0].logs_channel}>` : texts.common.not_set;
+                    const actionsText = existing[0].allow_actions ? texts.common.enabled : texts.common.disabled;
+                    const potentialText = existing[0].analyze_potentially ? texts.common.enabled : texts.common.disabled;
+                    const toolsText = existing[0].allow_investigation_tools ? texts.common.enabled : texts.common.disabled;
+                    const languageText = typeof existing[0].monitor_language === "string" && existing[0].monitor_language.trim()
+                        ? existing[0].monitor_language.trim().toLowerCase()
+                        : "en";
+                    const statusMessage = `${texts.common.monitor_is} ${statusText}. ${texts.common.logs_label} ${channelText}. ${texts.common.auto_actions_label} ${actionsText}. ${texts.common.potential_label} ${potentialText}. ${texts.common.tools_label} ${toolsText}. ${texts.common.alerts_language_label} ${languageText}.`;
+                    return await reply(statusMessage);
                 }
                 if (action === "enable") {
-                    if (!logsChannel || logsChannel.type !== ChannelType.GuildText) return await reply("Please provide a text logs channel.");
+                    if (!logsChannel || logsChannel.type !== ChannelType.GuildText) return await reply(texts.errors.logs_channel_required);
                     const now = Date.now();
+                    const selectedLanguage = alertsLanguage ?? (existing[0]?.monitor_language ?? "en");
                     if (existing[0]) {
-                        await db.query("UPDATE ai_monitor_configs SET enabled = TRUE, logs_channel = ?, allow_actions = ?, analyze_potentially = ?, allow_investigation_tools = ?, updated_at = ? WHERE guild_id = ?", [logsChannel.id, allowActions, analyzePotential, allowInvestigationTools, now, interaction.guildId]);
+                        await db.query("UPDATE ai_monitor_configs SET enabled = TRUE, logs_channel = ?, allow_actions = ?, analyze_potentially = ?, allow_investigation_tools = ?, monitor_language = ?, updated_at = ? WHERE guild_id = ?", [logsChannel.id, allowActions, analyzePotential, allowInvestigationTools, selectedLanguage, now, interaction.guildId]);
                     } else {
                         await db.query("INSERT INTO ai_monitor_configs SET ?", [{
                             guild_id: interaction.guildId,
@@ -324,18 +379,20 @@ export default {
                             allow_actions: allowActions,
                             analyze_potentially: analyzePotential,
                             allow_investigation_tools: allowInvestigationTools,
+                            monitor_language: selectedLanguage,
                             created_at: now,
                             updated_at: now
                         }]);
                     }
-                    return await reply(`AI monitor enabled. Logs channel: <#${logsChannel.id}>. Auto actions: ${allowActions ? "enabled" : "disabled"}. Potential analysis: ${analyzePotential ? "enabled" : "disabled"}. Investigation tools: ${allowInvestigationTools ? "enabled" : "disabled"}.`);
+                    const enabledMessage = `${texts.common.monitor_enabled_label} ${texts.common.logs_label} <#${logsChannel.id}>. ${texts.common.auto_actions_label} ${allowActions ? texts.common.enabled : texts.common.disabled}. ${texts.common.potential_label} ${analyzePotential ? texts.common.enabled : texts.common.disabled}. ${texts.common.tools_label} ${allowInvestigationTools ? texts.common.enabled : texts.common.disabled}. ${texts.common.alerts_language_label} ${selectedLanguage}.`;
+                    return await reply(enabledMessage);
                 }
                 if (action === "disable") {
                     if (!existing[0]) return await reply(texts.errors.monitor_disabled);
                     await db.query("UPDATE ai_monitor_configs SET enabled = FALSE, updated_at = ? WHERE guild_id = ?", [Date.now(), interaction.guildId]);
-                    return await reply("AI monitor disabled.");
+                    return await reply(texts.common.monitor_disabled_label);
                 }
-                return await reply("Invalid action.");
+                return await reply(texts.errors.invalid_action);
             }
             case "voice": {
                 if (!interaction.guild) return await utils.safeInteractionRespond(interaction, texts.errors.guild_only);
@@ -352,7 +409,7 @@ export default {
                 const maleVoice = NVIDIAModels.GetBestMaleVoice(langCode);
 
                 if (!maleVoice) {
-                    return await reply(texts.errors.no_male_voice + langCode);
+                    return await reply(`${texts.errors.no_male_voice_prefix} ${langCode}. ${texts.errors.no_male_voice_supported}`);
                 }
 
                 await reply(texts.voice.joining + ` ${maleVoice}`);
