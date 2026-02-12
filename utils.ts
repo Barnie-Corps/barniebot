@@ -16,7 +16,7 @@ import * as vm from "vm";
 import { exec as execCallback } from "child_process";
 import { promisify, inspect, TextDecoder, TextEncoder } from "util";
 import * as mathjs from "mathjs";
-import { ChannelType, PermissionFlagsBits, PermissionsBitField, EmbedBuilder } from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, PermissionsBitField, EmbedBuilder, TextChannel } from "discord.js";
 import type { DiscordUser, UserLanguage, AIMemory } from "./types/interfaces";
 const TRANSLATE_WORKER_TYPE = "translate";
 const RATELIMIT_WORKER_TYPE = "ratelimit";
@@ -1475,7 +1475,7 @@ const utils = {
         const homeGuild = await client.guilds.fetch(data.bot.home_guild);
         if (!homeGuild) return { error: "Support system is not properly configured" };
         const category = homeGuild.channels.cache.get(data.bot.support_category);
-        if (!category || category.type !== 4) return { error: "Support category not found" };
+        if (!category || category.type !== ChannelType.GuildCategory) return { error: "Support category not found" };
         let guildName = null;
         if (args.guildId) {
           const guild = client.guilds.cache.get(args.guildId);
@@ -1523,11 +1523,70 @@ const utils = {
         const channelName = `support-request-${ticketId}`;
         const ticketChannel = await homeGuild.channels.create({
           name: channelName,
-          type: 0,
+          type: ChannelType.GuildText,
           parent: data.bot.support_category,
           topic: `Support ticket #${ticketId} - User: ${user.tag} (${args.userId})`
         });
         await db.query("UPDATE support_tickets SET channel_id = ? WHERE id = ?", [ticketChannel.id, ticketId]);
+        const ticketEmbed = new EmbedBuilder()
+          .setColor("Purple")
+          .setTitle(`Ticket Information #${ticketId}`)
+          .setThumbnail(user.displayAvatarURL({ size: 256 }))
+          .addFields(
+            { name: "User", value: `${user.tag} (<@${user.id}>)\nID: ${user.id}`, inline: false },
+            { name: "Ticket ID", value: `#${ticketId}`, inline: true },
+            { name: "Status", value: "Open", inline: true },
+            { name: "Priority", value: "🟡 Medium", inline: true },
+            { name: "Category", value: "General", inline: true },
+            { name: "Assigned To", value: assignedStaff ? `<@${assignedStaff}>` : "Unassigned", inline: true },
+            { name: "Created At", value: `<t:${Math.floor(createdAt / 1000)}:F>`, inline: false },
+            { name: "Origin", value: args.guildId ? `Guild: ${guildName ?? "Unknown"} (${args.guildId})` : "Direct Message", inline: false },
+            { name: "Initial Message", value: args.initialMessage.length > 1024 ? args.initialMessage.substring(0, 1021) + "..." : args.initialMessage, inline: false }
+          )
+          .setFooter({ text: `User ID: ${user.id}` })
+          .setTimestamp();
+
+        const closeButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`close_ticket-${ticketId}-${args.userId}`)
+            .setLabel("Close Ticket")
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji("🔒")
+        );
+
+        const ticketMessage = await ticketChannel.send({
+          content: assignedStaff ? `<@${assignedStaff}> - New ticket assigned to you!` : `<@&${data.bot.home_guild}> - New unassigned ticket!`,
+          embeds: [ticketEmbed],
+          components: [closeButton]
+        });
+
+        const userCloseEmbed = new EmbedBuilder()
+          .setColor("Purple")
+          .setTitle("🎫 Support Ticket Created")
+          .setDescription(`Your support ticket #${ticketId} has been created!\n\nOur staff will respond to you soon. You can close this ticket at any time using the button below.`)
+          .addFields(
+            { name: "Ticket ID", value: `#${ticketId}`, inline: true },
+            { name: "Status", value: "Open", inline: true }
+          )
+          .setFooter({ text: "All messages you send here will be forwarded to staff" })
+          .setTimestamp();
+
+        const userCloseButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`close_ticket-${ticketId}-${args.userId}`)
+            .setLabel("Close Ticket")
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji("🔒")
+        );
+
+        try {
+          await user.send({ embeds: [userCloseEmbed], components: [userCloseButton] });
+        } catch (error) {
+          console.error("Failed to send close option to user:", error);
+        }
+
+        await db.query("UPDATE support_tickets SET message_id = ? WHERE id = ?", [ticketMessage.id, ticketId]);
+
         await db.query("INSERT INTO support_messages SET ?", [{
           ticket_id: ticketId,
           user_id: args.userId,
@@ -1537,16 +1596,42 @@ const utils = {
           is_staff: false,
           staff_rank: null
         }]);
-        try {
-          await user.send(`Your support ticket #${ticketId} has been created! Our staff will respond to you soon.`);
-        } catch (error) {
-          console.error("Failed to send ticket creation confirmation to user:", error);
-        }
-        return { success: true, ticketId, channelId: ticketChannel.id };
+
+        return { success: true, ticketId, channelId: ticketChannel.id, messageId: ticketMessage.id };
       } catch (error: any) {
         console.error("Support ticket creation error:", error);
         return { error: error.message ?? "Failed to create support ticket" };
       }
+    },
+    create_bug_report: async (args: { userId: string; title: string; description: string; steps?: string; expected?: string; actual?: string; severity?: string; guildId?: string }): Promise<any> => {
+      if (!args?.userId || !args.title || !args.description) return { error: "Missing parameters" };
+      const channelId = data.bot.bug_reports_channel;
+      if (!channelId) return { error: "Bug reports channel is not configured" };
+      const channel = await client.channels.fetch(channelId).catch(() => null) as TextChannel | null;
+      if (!channel || channel.type !== ChannelType.GuildText) return { error: "Bug reports channel not found" };
+
+      const trimField = (value?: string, fallback: string = "N/A") => {
+        if (!value || !value.trim()) return fallback;
+        return value.length > 1024 ? value.substring(0, 1021) + "..." : value;
+      };
+
+      const user = await client.users.fetch(args.userId).catch(() => null);
+      const embed = new EmbedBuilder()
+        .setColor("Orange")
+        .setTitle(`🐞 ${args.title}`)
+        .setDescription(trimField(args.description, "No description provided"))
+        .addFields(
+          { name: "Reporter", value: user ? `${user.tag} (<@${args.userId}>)` : args.userId, inline: true },
+          { name: "Severity", value: trimField(args.severity, "unspecified"), inline: true },
+          { name: "Guild", value: args.guildId ? args.guildId : "unknown", inline: true },
+          { name: "Steps to Reproduce", value: trimField(args.steps, "Not provided"), inline: false },
+          { name: "Expected", value: trimField(args.expected, "Not provided"), inline: false },
+          { name: "Actual", value: trimField(args.actual, "Not provided"), inline: false }
+        )
+        .setTimestamp();
+
+      const sent = await channel.send({ embeds: [embed] });
+      return { success: true, messageId: sent.id, channelId: sent.channelId };
     },
     get_ticket_details: async (args: { ticketId: number }): Promise<any> => {
       if (!args.ticketId) return { error: "Missing ticketId parameter" };
@@ -1583,20 +1668,179 @@ const utils = {
     },
     close_ticket: async (args: { requesterId?: string; ticketId: number }): Promise<any> => {
       if (!args?.requesterId || !args.ticketId) return { error: "Missing parameters" };
-      const ticket: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [args.ticketId]);
-      if (!ticket || !ticket[0]) return { error: "Ticket not found" };
-      if (ticket[0].user_id !== args.requesterId && !await utils.isStaff(args.requesterId)) {
+      const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [args.ticketId]);
+      if (!ticketData || !ticketData[0]) return { error: "Ticket not found" };
+      const ticket = ticketData[0];
+      if (ticket.user_id !== args.requesterId && !await utils.isStaff(args.requesterId)) {
         return { error: "Requester is not authorized to close this ticket" };
       }
-      await db.query("UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ?", [Date.now(), args.requesterId, args.ticketId]);
-      if (await utils.isStaff(args.requesterId)) {
-        await db.query("INSERT INTO staff_audit_log SET ?", [{
-          staff_id: args.requesterId,
-          action_type: "close_ticket",
-          target_id: String(args.ticketId),
-          created_at: Date.now()
-        }]);
+      if (ticket.status === "closed") return { error: "Ticket is already closed" };
+
+      const messages: any = await db.query("SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY timestamp ASC", [args.ticketId]);
+      const user = await client.users.fetch(ticket.user_id);
+      const closedAt = Date.now();
+
+      const durationMs = closedAt - Number(ticket.created_at || closedAt);
+      const hours = Math.floor(durationMs / 3600000);
+      const minutes = Math.floor((durationMs % 3600000) / 60000);
+      const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+
+      let textTranscript = `Support Ticket #${args.ticketId} - Transcript\n`;
+      textTranscript += `User: ${user.tag} (${user.id})\n`;
+      textTranscript += `Created: ${new Date(Number(ticket.created_at)).toISOString()}\n`;
+      textTranscript += `Closed: ${new Date(closedAt).toISOString()}\n`;
+      textTranscript += `Duration: ${durationText}\n`;
+      textTranscript += `Closed by: ${args.requesterId}\n`;
+      textTranscript += `Origin: ${ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message"}\n`;
+      textTranscript += `Initial Message: ${ticket.initial_message}\n`;
+      textTranscript += `\n${"=".repeat(50)}\n\n`;
+
+      for (const msg of messages) {
+        const timestamp = new Date(msg.timestamp).toISOString();
+        if (msg.is_staff) {
+          const rankTag = utils.getRankSuffix(msg.staff_rank);
+          textTranscript += `[${timestamp}] [${rankTag}] ${msg.username}: ${msg.content}\n`;
+        } else {
+          textTranscript += `[${timestamp}] ${msg.username}: ${msg.content}\n`;
+        }
       }
+
+      const htmlTemplate = await fs.readFile(path.join(process.cwd(), "transcript_placeholder.html"), "utf-8");
+      let messagesHtml = "";
+      for (const msg of messages) {
+        const timestamp = new Date(msg.timestamp).toLocaleString();
+        const initial = msg.username.charAt(0).toUpperCase();
+        if (msg.is_staff) {
+          const rankTag = utils.getRankSuffix(msg.staff_rank);
+          messagesHtml += `
+                            <div class="message">
+                                <div class="avatar">${initial}</div>
+                                <div class="message-content">
+                                    <div class="message-header">
+                                        <span class="username">${msg.username}</span>
+                                        <span class="staff-badge">${rankTag}</span>
+                                        <span class="timestamp">${timestamp}</span>
+                                    </div>
+                                    <div class="message-text">${msg.content}</div>
+                                </div>
+                            </div>`;
+        } else {
+          messagesHtml += `
+                            <div class="message">
+                                <div class="avatar">${initial}</div>
+                                <div class="message-content">
+                                    <div class="message-header">
+                                        <span class="username">${msg.username}</span>
+                                        <span class="timestamp">${timestamp}</span>
+                                    </div>
+                                    <div class="message-text">${msg.content}</div>
+                                </div>
+                            </div>`;
+        }
+      }
+
+      const htmlContent = htmlTemplate
+        .replace(/{ticketId}/g, String(args.ticketId))
+        .replace(/{username}/g, user.tag)
+        .replace(/{userId}/g, user.id)
+        .replace(/{status}/g, "Closed")
+        .replace(/{statusClass}/g, "status-closed")
+        .replace(/{createdAt}/g, new Date(Number(ticket.created_at)).toLocaleString())
+        .replace(/{closedAt}/g, new Date(closedAt).toLocaleString())
+        .replace(/{origin}/g, ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message")
+        .replace(/{initialMessage}/g, ticket.initial_message)
+        .replace(/{messages}/g, messagesHtml);
+
+      const textPath = path.join(process.cwd(), `transcript-${args.ticketId}.txt`);
+      const htmlPath = path.join(process.cwd(), `transcript-${args.ticketId}.html`);
+      await fs.writeFile(textPath, textTranscript);
+      await fs.writeFile(htmlPath, htmlContent);
+
+      const transcriptsChannel = await client.channels.fetch(data.bot.transcripts_channel) as TextChannel | null;
+      if (transcriptsChannel) {
+        const transcriptEmbed = new EmbedBuilder()
+          .setColor("Purple")
+          .setTitle(`🎫 Ticket #${args.ticketId} - Closed`)
+          .setDescription(`Ticket closed by ${args.requesterId}`)
+          .addFields(
+            { name: "User", value: `${user.tag} (${user.id})`, inline: true },
+            { name: "Messages", value: messages.length.toString(), inline: true },
+            { name: "Duration", value: durationText, inline: true }
+          )
+          .setTimestamp();
+
+        await transcriptsChannel.send({
+          embeds: [transcriptEmbed],
+          files: [
+            { attachment: textPath, name: `transcript-${args.ticketId}.txt` },
+            { attachment: htmlPath, name: `transcript-${args.ticketId}.html` }
+          ]
+        });
+      }
+
+      await db.query("UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ?", [closedAt, args.requesterId, args.ticketId]);
+
+      try {
+        const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel | null;
+        if (ticketChannel && ticket.message_id) {
+          const originalMessage = await ticketChannel.messages.fetch(ticket.message_id);
+          if (originalMessage?.embeds?.[0]) {
+            const updatedEmbed = EmbedBuilder.from(originalMessage.embeds[0])
+              .setColor("Red")
+              .setTitle(`🔒 Ticket #${args.ticketId} - CLOSED`)
+              .setFields(
+                originalMessage.embeds[0].fields.map(field => {
+                  if (field.name.toLowerCase().includes("status")) {
+                    return { name: field.name, value: "Closed", inline: field.inline };
+                  }
+                  return field;
+                })
+              );
+            await originalMessage.edit({ embeds: [updatedEmbed], components: [] });
+          }
+        }
+      } catch (error) {
+        console.error("Failed to update ticket embed:", error);
+      }
+
+      try {
+        const closedEmbed = new EmbedBuilder()
+          .setColor("Red")
+          .setTitle("🔒 Support Ticket Closed")
+          .setDescription(`Your support ticket #${args.ticketId} has been closed.`)
+          .addFields(
+            { name: "Duration", value: durationText, inline: true },
+            { name: "Messages", value: messages.length.toString(), inline: true }
+          )
+          .setFooter({ text: "Thank you for contacting support!" })
+          .setTimestamp();
+        await user.send({ embeds: [closedEmbed] });
+      } catch (error) {
+        console.error("Failed to notify user of ticket closure:", error);
+      }
+
+      const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel | null;
+      if (ticketChannel) {
+        const closedNoticeEmbed = new EmbedBuilder()
+          .setColor("Red")
+          .setTitle("🔒 Ticket Closed")
+          .setDescription(`This ticket has been closed.\n\nTranscripts have been saved and sent to <#${data.bot.transcripts_channel}>.\n\nYou can delete this channel using the button below.`)
+          .setTimestamp();
+
+        const deleteButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`delete_channel-${args.ticketId}`)
+            .setLabel("Delete Channel")
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji("🗑️")
+        );
+
+        await ticketChannel.send({ embeds: [closedNoticeEmbed], components: [deleteButton] });
+      }
+
+      await fs.unlink(textPath).catch(() => { });
+      await fs.unlink(htmlPath).catch(() => { });
+
       return { success: true };
     },
     add_ticket_message: async (args: { ticketId: number; userId: string; username: string; content: string; isStaff?: boolean }): Promise<any> => {
