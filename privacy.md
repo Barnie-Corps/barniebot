@@ -1,6 +1,6 @@
 # BarnieBot Privacy Policy
 
-Last Updated: February 6, 2026
+Last Updated: February 12, 2026
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -574,6 +574,16 @@ When ticket closed, two formats generated:
 - Purpose: Debug function execution, audit privileged operations
 - Note: Full conversation NOT logged, only function metadata
 - Retention: 7 days
+
+**AI monitor** (per guild):
+- Configured with `/ai monitor` command
+- Analyzes various events (message create/update/delete, member join/leave/update, role/channel changes, invite creation, webhook updates, guild bans)
+- Message creation event is only analyzed if the 'analyze_potential' flag is set to true for the guild
+- Small model used for initial analysis to determine if content is potentially harmful or violates guidelines
+- If flagged as potential violation, case is derivated to a larger model for further analysis and potential action or investigation
+- Purpose: Proactive detection of harmful content, automated moderation assistance, pattern recognition, phishing detection, spam detection, harassment detection
+- Only data collected is the case information, which states: risk, message id, user id, guild id, channel id, and timestamp. No message content is stored in the database for this feature.
+- Retention: Cases retained indefin
 
 **Voice Conversation** (ephemeral):
 - Speech-to-text processing: Audio sent to NVIDIA Riva ASR, text returned
@@ -2054,7 +2064,7 @@ We may update this policy when:
 ### Effective Date
 The "Last Updated" date at the top of this policy indicates when the current version became effective.
 
-**Current Version Effective**: February 6, 2026
+**Current Version Effective**: February 12, 2026
 
 **Previous Versions**: We do not maintain a public archive of previous policy versions. Contact barniecorps@gmail.com if you need a previous version for legal or compliance purposes.
 
@@ -2069,7 +2079,8 @@ The "Last Updated" date at the top of this policy indicates when the current ver
 **Grace Period**: For material changes, we may provide a 30-day grace period before enforcement, announced with the change.
 
 ### Version History Summary
-- **February 6, 2026**: Minor change, removal of Google's Gemini references.
+- **February 12, 2026**: AI monitor privacy added
+- **February 6, 2026**: Gemini removal
 - **November 26, 2025**: Major expansion with comprehensive detail on all data practices, security measures, user rights, and third-party services
 - **November 19, 2025**: Previous version with core privacy information
 
@@ -2164,8 +2175,8 @@ By using BarnieBot, you acknowledge that you have read, understood, and agree to
 
 **Thank you for trusting BarnieBot with your data. We are committed to protecting your privacy and being transparent about our data practices.**
 
-**Last Updated**: February 6, 2026
-**Version**: 2.0
+**Last Updated**: February 12, 2026
+**Version**: 2.1
 
 © 2026 BarnieCorps. All rights reserved.
 
