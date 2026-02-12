@@ -1,6 +1,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, Client, EmbedBuilder, Guild, GuildMember, Invite, Message, PartialGuildMember, PermissionFlagsBits, TextChannel } from "discord.js";
 import db from "../mysql/database";
 import NVIDIAModels from "../NVIDIAModels";
+const AI_DEBUG = process.env.AI_DEBUG === "1";
 import Log from "../Log";
 import utils from "../utils";
 import { executeAiMonitorTool, getAiMonitorTools, type AIMonitorToolName } from "../AIMonitorFunctions";
@@ -521,11 +522,13 @@ export default class AiMonitorManager {
             }
             const toolPayload = [] as Array<{ functionResponse: { name: string; response: { result: any } } }>;
             for (const call of calls) {
-                console.log("[AI Monitor] tool call", {
-                    tool: call.name,
-                    eventType,
-                    guildId: data?.guild?.id ?? null
-                });
+                if (AI_DEBUG) {
+                    console.log("[AI Monitor] tool call", {
+                        tool: call.name,
+                        eventType,
+                        guildId: data?.guild?.id ?? null
+                    });
+                }
                 const toolResult = await executeAiMonitorTool(call.name as AIMonitorToolName, call.args, {
                     guildId: data?.guild?.id ?? null,
                     requesterId: "__ai_monitor__"
@@ -768,13 +771,15 @@ export default class AiMonitorManager {
         if (!this.canProcess(guild.id)) return;
         if (!config.logs_channel || config.logs_channel === "0") return;
 
-        console.log("[AI Monitor] analyze", {
-            eventType,
-            guildId: guild.id,
-            userId: context.userId ?? null,
-            channelId: context.channelId ?? null,
-            messageId: context.messageId ?? null
-        });
+        if (AI_DEBUG) {
+            console.log("[AI Monitor] analyze", {
+                eventType,
+                guildId: guild.id,
+                userId: context.userId ?? null,
+                channelId: context.channelId ?? null,
+                messageId: context.messageId ?? null
+            });
+        }
 
         const monitorLanguage = typeof config.monitor_language === "string" && config.monitor_language.trim()
             ? config.monitor_language.trim().toLowerCase()
@@ -787,11 +792,13 @@ export default class AiMonitorManager {
         const history = await this.getRecentHistory(guild.id, context.userId ?? null);
         if (history.length > 0) data.recent_cases = history;
 
-        console.log("[AI Monitor] large review", {
-            eventType,
-            guildId: guild.id,
-            allowInvestigationTools: config.allow_investigation_tools
-        });
+        if (AI_DEBUG) {
+            console.log("[AI Monitor] large review", {
+                eventType,
+                guildId: guild.id,
+                allowInvestigationTools: config.allow_investigation_tools
+            });
+        }
         const review = await this.reviewWithTools(eventType, data, config, monitorLanguage);
         if (!review.suspicious) return;
         const recommendedActions = this.normalizeRecommendedActions(review);

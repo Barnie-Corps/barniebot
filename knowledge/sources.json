@@ -1,0 +1,18 @@
+[
+  {
+    "id": "project_knowledge",
+    "title": "BarnieBot Project Knowledge",
+    "scope": "project",
+    "path": "knowledge/project_knowledge.md",
+    "access": "public",
+    "tags": ["project", "support", "operations", "ai", "moderation", "rpg"]
+  },
+  {
+    "id": "privacy_policy",
+    "title": "BarnieBot Privacy Policy",
+    "scope": "project",
+    "path": "privacy.md",
+    "access": "public",
+    "tags": ["policy", "privacy", "legal"]
+  }
+]

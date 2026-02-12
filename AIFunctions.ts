@@ -121,6 +121,41 @@ const functionDeclarations = {
             properties: {}
         }
     },
+    list_knowledge_sources: {
+        name: "list_knowledge_sources",
+        description: "List available knowledge sources for support and policy questions.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                requesterId: { type: SchemaType.STRING }
+            }
+        }
+    },
+    search_knowledge: {
+        name: "search_knowledge",
+        description: "Search local knowledge sources for support-related answers. Use this before answering support or policy questions.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                query: { type: SchemaType.STRING },
+                limit: { type: SchemaType.NUMBER },
+                requesterId: { type: SchemaType.STRING }
+            },
+            required: ["query"]
+        }
+    },
+    get_knowledge_source: {
+        name: "get_knowledge_source",
+        description: "Fetch a knowledge source by ID for full context.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                sourceId: { type: SchemaType.STRING },
+                requesterId: { type: SchemaType.STRING }
+            },
+            required: ["sourceId"]
+        }
+    },
     end_conversation: {
         name: "end_conversation",
         description: "Ends the current conversation and clears the user's history. This can be used when the user wants to start a new topic or reset the context. Also to follow the AI RULES.",

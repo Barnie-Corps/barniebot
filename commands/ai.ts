@@ -22,6 +22,8 @@ import { prepareAudioForASR, stereoToMono, resampleAudio } from "../utils/audioU
 import { Writable, PassThrough } from "stream";
 import prism from "prism-media";
 
+const AI_DEBUG = process.env.AI_DEBUG === "1";
+
 export default {
     data: new SlashCommandBuilder()
         .setName("ai")
@@ -283,30 +285,28 @@ export default {
                             console.warn("AI response timeout");
                             return await message.reply(texts.errors.no_response);
                         }
-                        if (!response.text || (response.text.length < 1 && !response.call)) {
-                            console.log("No response from AI", response);
+                        const structuredToolCalls = Array.isArray((response as any).toolCalls)
+                            ? (response as any).toolCalls
+                            : response.call ? [response.call] : [];
+                        const toolParse = utils.parseToolCalls(response.text);
+                        const toolCalls = structuredToolCalls.length ? structuredToolCalls : toolParse.toolCalls;
+                        const cleanedResponseText = toolParse.cleanedText;
+                        const hasToolCalls = toolCalls.length > 0;
+                        if (!response.text || (response.text.length < 1 && !hasToolCalls)) {
+                            if (AI_DEBUG) console.log("No response from AI", response);
                             return await message.reply(texts.errors.no_response);
                         }
-                        const toolParse = utils.parseToolCalls(response.text);
-                        const toolCalls = toolParse.toolCalls;
-                        const cleanedResponseText = toolParse.cleanedText;
-                        if (response.text.length > 2000) {
-                            const filename = `./ai-response-${Date.now()}.md`;
-                            fs.writeFileSync(filename, cleanedResponseText || response.text, "utf-8");
-                            await message.reply({ content: texts.errors.long_response, files: [filename] });
-                            fs.unlinkSync(filename);
-                            return;
-                        }
-                        if (response.call) {
-                            if ((response.call as FunctionCall).name === "end_conversation") {
-                                await message.reply(`${texts.common.ai_left} ${(response.call as FunctionCall).args?.reason || "No reason provided."}`);
+                        if (hasToolCalls) {
+                            const endCall = toolCalls.find((call: FunctionCall) => call.name === "end_conversation");
+                            if (endCall) {
+                                await message.reply(`${texts.common.ai_left} ${endCall.args?.reason || "No reason provided."}`);
                                 collector?.stop();
                                 return;
                             }
-                        }
-                        if (toolCalls.length > 0) {
-                            console.log(`AI requested ${toolCalls.length} tool calls:`, toolCalls.map(c => c.name));
-                            const toolLines = toolCalls.map(call => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
+                            if (AI_DEBUG) {
+                                console.log(`AI requested ${toolCalls.length} tool calls:`, toolCalls.map((call: FunctionCall) => call.name));
+                            }
+                            const toolLines = toolCalls.map((call: FunctionCall) => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
                             const combined = cleanedResponseText ? `${cleanedResponseText}\n\n${toolLines}` : toolLines;
                             const msg = await message.reply(combined);
                             for (const call of toolCalls) {
@@ -314,12 +314,14 @@ export default {
                             }
                             return;
                         }
-                        const msg = await message.reply(response.call ? `Executing command ${(response.call as FunctionCall).name} ${data.bot.loadingEmoji.mention}` : cleanedResponseText || response.text);
-                        if (response.call) {
-                            const callName = (response.call as FunctionCall).name || "";
-                            const callArgs = (response.call as FunctionCall).args as any;
-                            await ai.ExecuteFunction(interaction.user.id, callName, callArgs, msg);
+                        if (response.text.length > 2000) {
+                            const filename = `./ai-response-${Date.now()}.md`;
+                            fs.writeFileSync(filename, cleanedResponseText || response.text, "utf-8");
+                            await message.reply({ content: texts.errors.long_response, files: [filename] });
+                            fs.unlinkSync(filename);
+                            return;
                         }
+                        await message.reply(cleanedResponseText || response.text);
                     } catch (error) {
                         console.error("AI chat handling failed:", error);
                         await message.reply(texts.errors.no_response);

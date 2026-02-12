@@ -10,11 +10,14 @@ import path from "path";
 import data from "../data";
 import NVIDIAModels from "../NVIDIAModels";
 
+const AI_DEBUG = process.env.AI_DEBUG === "1";
+
 class AiManager extends EventEmitter {
     private ratelimits: Map<string, Ratelimit> = new Map();
     private chats: Map<string, NIMChatSession> = new Map();
     private voiceChats: Map<string, NIMChatSession> = new Map();
     private localFunctionHandlers: Map<string, Record<string, (args: any, message: Message) => Promise<any>>> = new Map();
+    private bootstrappedChats: Set<string> = new Set();
     constructor(private ratelimit: number, private max: number, private timeout: number) {
         Log.info("AiManager initialized", { component: "AiManager" });
         setInterval(() => this.ClearTimeouts(), 1000);
@@ -42,9 +45,14 @@ class AiManager extends EventEmitter {
                     }
                 }
             ]);
-            if (rsp.response.functionCalls()?.length) {
-                if (message) await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} ${data.bot.loadingEmoji.mention}`);
-                return this.ExecuteFunctionVoice(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
+            const followupCalls = rsp.response.functionCalls() ?? [];
+            if (followupCalls.length) {
+                let lastResult: any;
+                for (const call of followupCalls) {
+                    if (message) await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
+                    lastResult = await this.ExecuteFunctionVoice(id, call.name, call.args, message);
+                }
+                return lastResult;
             }
         }
         let preparedArgs: any = args;
@@ -96,11 +104,16 @@ class AiManager extends EventEmitter {
                 }
             }
         ]);
-        if (rsp.response.functionCalls()?.length) {
-            if (message) {
-                await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} ${data.bot.loadingEmoji.mention}`);
+        const followupCalls = rsp.response.functionCalls() ?? [];
+        if (followupCalls.length) {
+            let lastResult: any;
+            for (const call of followupCalls) {
+                if (message) {
+                    await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
+                }
+                lastResult = await this.ExecuteFunctionVoice(id, call.name, call.args, message);
             }
-            return this.ExecuteFunctionVoice(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
+            return lastResult;
         }
         reply = rsp.response.text();
         const toolParse = utils.parseToolCalls(reply);
@@ -175,6 +188,7 @@ class AiManager extends EventEmitter {
     public async GetResponse(id: string, text: string): Promise<any> {
         if (await this.RatelimitUser(id)) return "You are sending too many messages, please wait a few seconds before sending another message.";
         const chat = await this.GetChat(id, text);
+        await this.ensureToolBootstrap(id, chat);
         let response = await utils.getAiResponse(text, chat);
         return response;
     }
@@ -186,6 +200,7 @@ class AiManager extends EventEmitter {
     public async GetVoiceResponse(id: string, text: string): Promise<any> {
         if (await this.RatelimitUser(id)) return { text: "You are sending too many messages, please wait a few seconds before sending another message.", call: null };
         const chat = await this.GetVoiceChat(id);
+        await this.ensureToolBootstrap(id, chat);
         const response = await utils.getAiResponse(text, chat);
         return response;
     }
@@ -207,9 +222,14 @@ class AiManager extends EventEmitter {
                     }
                 }
             ]);
-            if (rsp.response.functionCalls()?.length) {
-                await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} ${data.bot.loadingEmoji.mention}`);
-                return this.ExecuteFunction(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message, Queue!.slice(1));
+            const followupCalls = rsp.response.functionCalls() ?? [];
+            if (followupCalls.length) {
+                let lastResult: any;
+                for (const call of followupCalls) {
+                    await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
+                    lastResult = await this.ExecuteFunction(id, call.name, call.args, message, Queue!.slice(1));
+                }
+                return lastResult;
             }
         }
         if (name === "send_email") {
@@ -248,13 +268,13 @@ class AiManager extends EventEmitter {
             let preparedArgs: any = args;
             if (["current_guild_info", "on_guild"].includes(name)) {
                 preparedArgs = message;
-                console.log(name, preparedArgs);
+                if (AI_DEBUG) console.log(name, preparedArgs);
             } else {
                 const isPlainObject = typeof args === "object" && args !== null && !Array.isArray(args);
                 if (isPlainObject) {
                     if (Object.keys(args).length === 0) {
                         preparedArgs = id;
-                        console.log(name, preparedArgs);
+                        if (AI_DEBUG) console.log(name, preparedArgs);
                     } else {
                         preparedArgs = {
                             ...args,
@@ -262,11 +282,11 @@ class AiManager extends EventEmitter {
                             guildId: message?.guild?.id ?? null,
                             channelId: message?.channel?.id ?? null
                         };
-                        console.log(name, preparedArgs);
+                        if (AI_DEBUG) console.log(name, preparedArgs);
                     }
                 } else if (preparedArgs === null || preparedArgs === undefined || preparedArgs === "") {
                     preparedArgs = id;
-                    console.log(name, preparedArgs);
+                    if (AI_DEBUG) console.log(name, preparedArgs);
                 }
             }
             try {
@@ -298,11 +318,16 @@ class AiManager extends EventEmitter {
                 }
             }
         ]);
-        if (rsp.response.functionCalls()?.length) {
-            if (message) {
-                await message.edit(`Executing command ${(rsp.response.functionCalls() as any)[0].name} ${data.bot.loadingEmoji.mention}`);
+        const followupCalls = rsp.response.functionCalls() ?? [];
+        if (followupCalls.length) {
+            let lastResult: any;
+            for (const call of followupCalls) {
+                if (message) {
+                    await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
+                }
+                lastResult = await this.ExecuteFunction(id, call.name, call.args, message);
             }
-            return this.ExecuteFunction(id, (rsp.response.functionCalls() as any)[0].name, (rsp.response.functionCalls() as any)[0].args, message);
+            return lastResult;
         }
         reply = rsp.response.text();
         const toolParse = utils.parseToolCalls(reply);
@@ -343,7 +368,10 @@ class AiManager extends EventEmitter {
             return;
         }
         if (message) {
-            const safeText = reply.length ? reply : ".";
+            const fallbackText = filesPayload.length > 0
+                ? `Attached file${filesPayload.length > 1 ? "s" : ""}.`
+                : ".";
+            const safeText = reply.length ? reply : fallbackText;
             if (filesPayload.length > 0) {
                 await message.edit({ content: safeText, files: filesPayload, attachments: [] });
             } else {
@@ -360,7 +388,7 @@ class AiManager extends EventEmitter {
                 maxTokens: 800,
                 temperature: 0.7,
                 topP: 0.8,
-                systemInstruction: "Before responding to any user message at the start of the conversation, call the tools get_user_data, get_memories, and fetch_ai_rules in that order. Do not include <think> tags in responses. Never emit tool call markup like <|tool_call_begin|> in text; only use the tool calling interface. If a tool call fails, respond without tool markup."
+                systemInstruction: "Before responding to any user message at the start of the conversation, call the tools get_user_data, get_memories, and fetch_ai_rules in that order. For support or policy questions, call search_knowledge first and cite source titles. Do not include <think> tags in responses. Never emit tool call markup like <|tool_call_begin|> in text; only use the tool calling interface. If a tool call fails, respond without tool markup."
             });
             this.chats.set(id, chat);
         }
@@ -374,7 +402,7 @@ class AiManager extends EventEmitter {
                 maxTokens: 256,
                 temperature: 0.7,
                 topP: 0.8,
-                systemInstruction: "You are the assistant's voice mode. Respond concisely (ideally 1–2 short sentences or tight bullets). Use the user's language. Avoid long explanations, code blocks, and heavy markdown unless explicitly requested. Before responding to any user message, call the tools get_user_data, get_memories, and fetch_ai_rules in that order. Do not include <think> tags in responses. Never emit tool call markup like <|tool_call_begin|> in text; only use the tool calling interface. If a tool call fails, respond without tool markup."
+                systemInstruction: "You are the assistant's voice mode. Respond concisely (ideally 1–2 short sentences or tight bullets). Use the user's language. Avoid long explanations, code blocks, and heavy markdown unless explicitly requested. Before responding to any user message, call the tools get_user_data, get_memories, and fetch_ai_rules in that order. For support or policy questions, call search_knowledge first. Do not include <think> tags in responses. Never emit tool call markup like <|tool_call_begin|> in text; only use the tool calling interface. If a tool call fails, respond without tool markup."
             });
             this.voiceChats.set(id, chat);
         }
@@ -389,6 +417,34 @@ class AiManager extends EventEmitter {
     public async ClearChat(id: string): Promise<void> {
         this.chats.delete(id);
         this.voiceChats.delete(id);
+        this.bootstrappedChats.delete(id);
+    }
+
+    private async ensureToolBootstrap(id: string, chat: NIMChatSession): Promise<void> {
+        if (this.bootstrappedChats.has(id)) return;
+        this.bootstrappedChats.add(id);
+        const toolResults: Array<{ name: string; result: any; args?: any }> = [];
+        try {
+            const userData = await utils.AIFunctions.get_user_data(id);
+            toolResults.push({ name: "get_user_data", result: userData, args: {} });
+        } catch (error: any) {
+            toolResults.push({ name: "get_user_data", result: { error: error?.message || String(error) }, args: {} });
+        }
+        try {
+            const memories = await utils.AIFunctions.get_memories({ userId: id });
+            toolResults.push({ name: "get_memories", result: memories, args: { userId: id } });
+        } catch (error: any) {
+            toolResults.push({ name: "get_memories", result: { error: error?.message || String(error) }, args: { userId: id } });
+        }
+        try {
+            const rules = await utils.AIFunctions.fetch_ai_rules();
+            toolResults.push({ name: "fetch_ai_rules", result: rules, args: {} });
+        } catch (error: any) {
+            toolResults.push({ name: "fetch_ai_rules", result: { error: error?.message || String(error) }, args: {} });
+        }
+        if (typeof chat.primeTools === "function") {
+            chat.primeTools(toolResults);
+        }
     }
 }
 export default AiManager;

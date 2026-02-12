@@ -22,17 +22,13 @@ const TRANSLATE_WORKER_TYPE = "translate";
 const RATELIMIT_WORKER_TYPE = "ratelimit";
 const TRANSLATE_WORKER_PATH = path.join(__dirname, "workers/translate.js");
 const RATELIMIT_WORKER_PATH = path.join(__dirname, "workers/ratelimit.js");
-// Dynamic pool size with sane caps; allow override via env TRANSLATE_WORKERS
-// Windows optimization: reduce pool size to avoid thread contention
 const TRANSLATE_WORKER_POOL_SIZE = (() => {
   const fromEnv = Number(process.env.TRANSLATE_WORKERS);
   if (!Number.isNaN(fromEnv) && fromEnv > 0) return Math.max(1, Math.min(16, fromEnv));
   const cores = Array.isArray(os.cpus()) ? os.cpus().length : 4;
   const isWindows = process.platform === "win32";
-  // Windows: more conservative pool size due to slower thread creation
   return isWindows ? Math.max(2, Math.min(4, cores)) : Math.max(2, Math.min(8, Math.ceil(cores / 2)));
 })();
-// Windows: increased timeout due to slower DNS resolution and connection setup
 const TRANSLATE_TIMEOUT = process.platform === "win32" ? 25000 : 15000;
 const TRANSLATE_CACHE_TTL = 300000;
 const TRANSLATE_CACHE_LIMIT = 500;
@@ -43,35 +39,47 @@ const CIRCUIT_BREAKER_TIMEOUT = 60000;
 const translationCache = new Map<string, { value: string; expires: number }>();
 const pendingTranslations = new Map<string, Promise<string>>();
 
-// Circuit breaker state
 let circuitBreakerFailures = 0;
 let circuitBreakerLastFailure = 0;
 let circuitBreakerOpen = false;
+const PROJECT_ROOT = process.cwd();
+const LOGS_ROOT = path.join(PROJECT_ROOT, "logs");
 const AI_WORKSPACE_ROOT = path.join(__dirname, "ai_workspace");
+const KNOWLEDGE_ROOT = path.join(PROJECT_ROOT, "knowledge");
+const KNOWLEDGE_SOURCES_PATH = path.join(KNOWLEDGE_ROOT, "sources.json");
+const KNOWLEDGE_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_WORKSPACE_SCAN_RESULTS = 50;
 const MAX_FILE_SIZE_FOR_SEARCH = 1024 * 1024;
 const MAX_ATTACHMENT_SIZE = 8 * 1024 * 1024; // 8MB, safe default for Discord without Nitro
-const PROJECT_ROOT = process.cwd();
-const LOGS_ROOT = path.join(PROJECT_ROOT, "logs");
 const MAX_PROJECT_SCAN_RESULTS = 200;
 const MAX_LOG_READ_LINES = 500;
 const execPromise = promisify(execCallback);
 const ALLOWED_SANDBOX_MODULES = new Map<string, unknown>([
   ["mathjs", mathjs]
 ]);
-// Create the initial pool and prewarm it to avoid cold-start latency after inactivity
+type KnowledgeSource = {
+  id: string;
+  title: string;
+  scope: "project";
+  path: string;
+  access?: "public" | "staff" | "owner";
+  tags?: string[];
+};
+type KnowledgeCache = {
+  loadedAt: number;
+  sources: KnowledgeSource[];
+  contents: Map<string, string>;
+};
+let knowledgeCache: KnowledgeCache | null = null;
 Workers.bulkCreateWorkers(TRANSLATE_WORKER_PATH, TRANSLATE_WORKER_TYPE, TRANSLATE_WORKER_POOL_SIZE);
-// Fire-and-forget warmup pings; ignore failures (workers will be recreated on-demand if needed)
 void (async () => {
   try {
     await Workers.prewarmType(TRANSLATE_WORKER_TYPE, TRANSLATE_WORKER_POOL_SIZE, 1500);
   } catch { }
 })();
-// Ensure at least one ratelimit worker exists and is prewarmed at startup to avoid cold starts
 Workers.bulkCreateWorkers(RATELIMIT_WORKER_PATH, RATELIMIT_WORKER_TYPE, 1);
 void (async () => { try { await Workers.prewarmType(RATELIMIT_WORKER_TYPE, 1, 1000); } catch { } })();
 
-// Small helper to process ratelimits via worker
 async function processRateLimitsWorker(users: Array<{ uid: string; time_left: number }>, limits: Array<{ uid: string; time_left: number; username: string }>, decrementMs = 1000) {
   let worker = Workers.getAvailableWorker(RATELIMIT_WORKER_TYPE);
   if (!worker) worker = Workers.createWorker(RATELIMIT_WORKER_PATH, RATELIMIT_WORKER_TYPE) ?? undefined;
@@ -108,8 +116,14 @@ const resolveLogsPath = (targetPath = ".") => {
   }
   return resolved;
 };
+const resolveKnowledgePath = (source: KnowledgeSource): string => {
+  return resolveProjectPath(source.path);
+};
 const ensureWorkspaceExists = async () => {
   await fs.mkdir(AI_WORKSPACE_ROOT, { recursive: true });
+};
+const ensureKnowledgeExists = async () => {
+  await fs.mkdir(KNOWLEDGE_ROOT, { recursive: true });
 };
 const safeStat = async (target: string) => {
   try {
@@ -168,6 +182,86 @@ const collectProjectSearchMatches = async (filePath: string, query: string, maxM
     }
   }
   return matches;
+};
+const loadKnowledgeSources = async (): Promise<KnowledgeSource[]> => {
+  await ensureKnowledgeExists();
+  const stats = await safeStat(KNOWLEDGE_SOURCES_PATH);
+  if (!stats || !stats.isFile()) return [];
+  const raw = await fs.readFile(KNOWLEDGE_SOURCES_PATH, "utf8");
+  const parsed = JSON.parse(raw);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((s: any) => s && typeof s.id === "string" && typeof s.path === "string");
+};
+const loadKnowledgeCache = async (): Promise<KnowledgeCache> => {
+  const now = Date.now();
+  if (knowledgeCache && now - knowledgeCache.loadedAt < KNOWLEDGE_CACHE_TTL_MS) return knowledgeCache;
+  const sources = await loadKnowledgeSources();
+  const contents = new Map<string, string>();
+  for (const source of sources) {
+    try {
+      const content = await fs.readFile(resolveKnowledgePath(source), "utf8");
+      contents.set(source.id, content);
+    } catch {
+      contents.set(source.id, "");
+    }
+  }
+  knowledgeCache = { loadedAt: now, sources, contents };
+  return knowledgeCache;
+};
+const chunkText = (content: string, maxChars = 1200, overlap = 150): string[] => {
+  if (!content) return [];
+  const paragraphs = content.split(/\n\s*\n/);
+  const chunks: string[] = [];
+  let current = "";
+  for (const para of paragraphs) {
+    const trimmed = para.trim();
+    if (!trimmed) continue;
+    const next = current ? `${current}\n\n${trimmed}` : trimmed;
+    if (next.length <= maxChars) {
+      current = next;
+      continue;
+    }
+    if (current) chunks.push(current);
+    if (trimmed.length <= maxChars) {
+      current = trimmed;
+    } else {
+      for (let i = 0; i < trimmed.length; i += maxChars - overlap) {
+        chunks.push(trimmed.slice(i, i + maxChars));
+      }
+      current = "";
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+};
+const scoreText = (text: string, terms: string[]): number => {
+  if (!text || terms.length === 0) return 0;
+  const lower = text.toLowerCase();
+  let score = 0;
+  for (const term of terms) {
+    let idx = lower.indexOf(term);
+    while (idx !== -1) {
+      score += 1;
+      idx = lower.indexOf(term, idx + term.length);
+    }
+  }
+  return score;
+};
+const buildSnippet = (text: string, term: string, radius = 120): string => {
+  const lower = text.toLowerCase();
+  const idx = lower.indexOf(term);
+  if (idx === -1) return text.slice(0, Math.min(text.length, 240));
+  const start = Math.max(0, idx - radius);
+  const end = Math.min(text.length, idx + term.length + radius);
+  return text.slice(start, end).trim();
+};
+const canAccessKnowledge = async (access: KnowledgeSource["access"], requesterId?: string) => {
+  if (!access || access === "public") return true;
+  if (!requesterId) return false;
+  if (isOwner(requesterId) === true) return true;
+  if (access === "owner") return false;
+  const rank = await utils.getUserStaffRank(requesterId);
+  return Boolean(rank);
 };
 const isOwner = (userId: string | undefined | null): boolean | string => {
   if (!userId) return "no valid userId provided";
@@ -325,6 +419,49 @@ const utils = {
   createArrows: (length: number): string => "^".repeat(length),
   parseToolCalls,
   AIFunctions: {
+    list_knowledge_sources: async (args: { requesterId?: string } = {}): Promise<any> => {
+      const cache = await loadKnowledgeCache();
+      const visible: KnowledgeSource[] = [];
+      for (const source of cache.sources) {
+        if (await canAccessKnowledge(source.access, args.requesterId)) visible.push(source);
+      }
+      return { sources: visible.map(s => ({ id: s.id, title: s.title, tags: s.tags ?? [], access: s.access ?? "public" })) };
+    },
+    search_knowledge: async (args: { query: string; limit?: number; requesterId?: string }): Promise<any> => {
+      if (!args?.query) return { error: "Missing query parameter" };
+      const cache = await loadKnowledgeCache();
+      const terms = args.query.toLowerCase().split(/\s+/g).filter(t => t.length >= 3).slice(0, 8);
+      const limit = Math.max(1, Math.min(args.limit ?? 5, 10));
+      const results: any[] = [];
+      for (const source of cache.sources) {
+        if (!(await canAccessKnowledge(source.access, args.requesterId))) continue;
+        const content = cache.contents.get(source.id) ?? "";
+        const chunks = chunkText(content);
+        for (const chunk of chunks) {
+          const score = scoreText(chunk, terms);
+          if (score <= 0) continue;
+          results.push({
+            sourceId: source.id,
+            title: source.title,
+            score,
+            snippet: buildSnippet(chunk, terms[0] ?? ""),
+            tags: source.tags ?? [],
+            access: source.access ?? "public"
+          });
+        }
+      }
+      results.sort((a, b) => b.score - a.score);
+      return { results: results.slice(0, limit) };
+    },
+    get_knowledge_source: async (args: { sourceId: string; requesterId?: string }): Promise<any> => {
+      if (!args?.sourceId) return { error: "Missing sourceId parameter" };
+      const cache = await loadKnowledgeCache();
+      const source = cache.sources.find(s => s.id === args.sourceId);
+      if (!source) return { error: "Source not found" };
+      if (!(await canAccessKnowledge(source.access, args.requesterId))) return { error: "Requester is not authorized" };
+      const content = cache.contents.get(source.id) ?? "";
+      return { source: { id: source.id, title: source.title, tags: source.tags ?? [], access: source.access ?? "public" }, content };
+    },
     get_user_data: async (id: string): Promise<{ error: string } | { user: DiscordUser; language: UserLanguage | string }> => {
       const user = await db.query("SELECT * FROM discord_users WHERE id = ?", [id]) as unknown as DiscordUser[];
       if (!user[0]) return { error: "User not found" };
@@ -2677,11 +2814,12 @@ const utils = {
       result = await chat.sendMessage(prompt);
     } catch (error: any) {
       console.error("Error getting AI response:", error, error.stack);
-      return { text: "Error: Could not get a response from the AI service. Please try again later.", call: null };
+      return { text: "Error: Could not get a response from the AI service. Please try again later.", call: null, toolCalls: [] };
     }
     const response = result.response;
     const text = response.text();
-    return { text, call: response.functionCalls()?.[0] ?? null };
+    const toolCalls = response.functionCalls() ?? [];
+    return { text, call: toolCalls[0] ?? null, toolCalls };
   },
   sendEmail: async (to: string, subject: string, text: string, html?: string) => {
     if (!to || !subject) throw new Error("Missing important data in utils.sendEmail");

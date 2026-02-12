@@ -20,6 +20,7 @@ export type NIMToolDefinition = {
 };
 export type NIMChatSession = {
     sendMessage: (input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>) => Promise<NIMChatResult>;
+    primeTools?: (toolResults: Array<{ name: string; result: any; args?: any }>) => void;
 };
 
 const stripThink = (text: string): string => {
@@ -55,6 +56,22 @@ class NIMChatSessionImpl implements NIMChatSession {
             tool_call_id: toolCallId ?? `call_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
             content: JSON.stringify(result ?? {})
         } as ChatCompletionMessageParam;
+    }
+    public primeTools(toolResults: Array<{ name: string; result: any; args?: any }>): void {
+        if (!toolResults.length) return;
+        const toolCalls = toolResults.map(result => ({
+            id: `call_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+            type: "function",
+            function: {
+                name: result.name,
+                arguments: JSON.stringify(result.args ?? {})
+            }
+        }));
+        this.messages.push({ role: "assistant", tool_calls: toolCalls } as ChatCompletionMessageParam);
+        this.lastToolCalls = toolCalls.map(call => ({ id: call.id, name: call.function?.name }));
+        for (const toolResult of toolResults) {
+            this.messages.push(this.createToolMessage(toolResult.name, toolResult.result));
+        }
     }
     public async sendMessage(input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>): Promise<NIMChatResult> {
         if (typeof input === "string") {
