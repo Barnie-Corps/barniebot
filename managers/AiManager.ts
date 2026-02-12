@@ -29,12 +29,13 @@ class AiManager extends EventEmitter {
     public clearLocalFunctionHandlers(id: string): void {
         this.localFunctionHandlers.delete(id);
     }
-    public async ExecuteFunctionVoice(id: string, name: string, args: any, message: Message | null): Promise<any> {
+    public async ExecuteFunctionVoice(id: string, name: string, args: any, message: Message | null, options?: { suppressProgress?: boolean }): Promise<any> {
+        const suppressProgress = options?.suppressProgress ?? false;
         if (await this.RatelimitUser(id)) return { error: "You are sending too many messages, please wait a few seconds before sending another message." };
         const chat = await this.GetVoiceChat(id);
         const func: any = utils.AIFunctions[name as keyof typeof utils.AIFunctions];
         if (!func) {
-            if (message) await message.edit(`The AI requested an unknown function, attempting to recover... ${data.bot.loadingEmoji.mention}`);
+            if (message && !suppressProgress) await message.edit(`The AI requested an unknown function, attempting to recover... ${data.bot.loadingEmoji.mention}`);
             const rsp = await chat.sendMessage([
                 {
                     functionResponse: {
@@ -49,8 +50,8 @@ class AiManager extends EventEmitter {
             if (followupCalls.length) {
                 let lastResult: any;
                 for (const call of followupCalls) {
-                    if (message) await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
-                    lastResult = await this.ExecuteFunctionVoice(id, call.name, call.args, message);
+                    if (message && !suppressProgress) await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
+                    lastResult = await this.ExecuteFunctionVoice(id, call.name, call.args, message, options);
                 }
                 return lastResult;
             }
@@ -108,10 +109,10 @@ class AiManager extends EventEmitter {
         if (followupCalls.length) {
             let lastResult: any;
             for (const call of followupCalls) {
-                if (message) {
+                if (message && !suppressProgress) {
                     await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
                 }
-                lastResult = await this.ExecuteFunctionVoice(id, call.name, call.args, message);
+                lastResult = await this.ExecuteFunctionVoice(id, call.name, call.args, message, options);
             }
             return lastResult;
         }
@@ -120,11 +121,11 @@ class AiManager extends EventEmitter {
         if (toolParse.toolCalls.length > 0) {
             const toolLines = toolParse.toolCalls.map(call => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
             const combined = toolParse.cleanedText ? `${toolParse.cleanedText}\n\n${toolLines}` : toolLines;
-            if (message) {
+            if (message && !suppressProgress) {
                 await message.edit(combined);
             }
             for (const call of toolParse.toolCalls) {
-                await this.ExecuteFunctionVoice(id, call.name, call.args, message);
+                await this.ExecuteFunctionVoice(id, call.name, call.args, message, options);
             }
             return combined;
         }
@@ -204,14 +205,17 @@ class AiManager extends EventEmitter {
         const response = await utils.getAiResponse(text, chat);
         return response;
     }
-    public async ExecuteFunction(id: string, name: string, args: any, message: Message, Queue?: NIMToolCall[]): Promise<any> {
+    public async ExecuteFunction(id: string, name: string, args: any, message: Message, Queue?: NIMToolCall[], options?: { suppressProgress?: boolean }): Promise<any> {
+        const suppressProgress = options?.suppressProgress ?? false;
         if (await this.RatelimitUser(id)) return { error: "You are sending too many messages, please wait a few seconds before sending another message." };
         const chat = await this.GetChat(id, "");
         const localHandlers = this.localFunctionHandlers.get(id);
         const localHandler = localHandlers ? localHandlers[name ?? Queue![0].name] : undefined;
         const func: any = localHandler ? null : utils.AIFunctions[name as keyof typeof utils.AIFunctions ?? Queue![0].name as keyof typeof utils.AIFunctions];
         if (!localHandler && !func) {
-            await message.edit(`The AI requested an unknown function, attempting to recover... ${data.bot.loadingEmoji.mention}`);
+            if (!suppressProgress) {
+                await message.edit(`The AI requested an unknown function, attempting to recover... ${data.bot.loadingEmoji.mention}`);
+            }
             const rsp = await chat.sendMessage([
                 {
                     functionResponse: {
@@ -226,8 +230,10 @@ class AiManager extends EventEmitter {
             if (followupCalls.length) {
                 let lastResult: any;
                 for (const call of followupCalls) {
-                    await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
-                    lastResult = await this.ExecuteFunction(id, call.name, call.args, message, Queue!.slice(1));
+                    if (!suppressProgress) {
+                        await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
+                    }
+                    lastResult = await this.ExecuteFunction(id, call.name, call.args, message, Queue!.slice(1), options);
                 }
                 return lastResult;
             }
@@ -322,10 +328,10 @@ class AiManager extends EventEmitter {
         if (followupCalls.length) {
             let lastResult: any;
             for (const call of followupCalls) {
-                if (message) {
+                if (message && !suppressProgress) {
                     await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
                 }
-                lastResult = await this.ExecuteFunction(id, call.name, call.args, message);
+                lastResult = await this.ExecuteFunction(id, call.name, call.args, message, undefined, options);
             }
             return lastResult;
         }
@@ -334,11 +340,11 @@ class AiManager extends EventEmitter {
         if (toolParse.toolCalls.length > 0) {
             const toolLines = toolParse.toolCalls.map(call => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
             const combined = toolParse.cleanedText ? `${toolParse.cleanedText}\n\n${toolLines}` : toolLines;
-            if (message) {
+            if (message && !suppressProgress) {
                 await message.edit(combined);
             }
             for (const call of toolParse.toolCalls) {
-                await this.ExecuteFunction(id, call.name, call.args, message);
+                await this.ExecuteFunction(id, call.name, call.args, message, undefined, options);
             }
             return combined;
         }

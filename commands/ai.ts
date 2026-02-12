@@ -123,6 +123,7 @@ export default {
             common: {
                 question: "Your question was:",
                 thinking: "💭 Thinking...",
+                processing: "Processing...",
                 started_chat: "The chat with the AI has started. You can say one of the following phrases to stop it:",
                 stopped_ai: "The chat with the AI has been disabled.",
                 can_take_time: "Remember that the AI's reply can take a bit of time. If you send multiple messages before getting a response or start flooding the chat, you'll lose access to this command indefinitely.",
@@ -229,6 +230,7 @@ export default {
                 await reply(`${texts.common.started_chat} \`stop ai, ai stop, stop chat, end ai\`\n${texts.common.can_take_time}`);
                 collector?.on("collect", async (message: Message): Promise<any> => {
                     if (isWaitingForResponse) return;
+                    if (message.content.startsWith("!")) return;
                     isWaitingForResponse = true;
                     try {
                         if (["stop ai", "ai stop", "stop chat", "end ai"].some(stop => message.content.toLowerCase().includes(stop))) {
@@ -292,7 +294,7 @@ export default {
                         const toolCalls = structuredToolCalls.length ? structuredToolCalls : toolParse.toolCalls;
                         const cleanedResponseText = toolParse.cleanedText;
                         const hasToolCalls = toolCalls.length > 0;
-                        if (!response.text || (response.text.length < 1 && !hasToolCalls)) {
+                        if ((!response.text || response.text.length < 1) && !hasToolCalls) {
                             if (AI_DEBUG) console.log("No response from AI", response);
                             return await message.reply(texts.errors.no_response);
                         }
@@ -306,11 +308,13 @@ export default {
                             if (AI_DEBUG) {
                                 console.log(`AI requested ${toolCalls.length} tool calls:`, toolCalls.map((call: FunctionCall) => call.name));
                             }
-                            const toolLines = toolCalls.map((call: FunctionCall) => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
-                            const combined = cleanedResponseText ? `${cleanedResponseText}\n\n${toolLines}` : toolLines;
+                            const toolLine = `${texts.common.processing} ${data.bot.loadingEmoji.mention}`;
+                            const combined = cleanedResponseText ? `${cleanedResponseText}\n\n${toolLine}` : toolLine;
                             const msg = await message.reply(combined);
-                            for (const call of toolCalls) {
-                                await ai.ExecuteFunction(interaction.user.id, call.name, call.args, msg);
+                            for (let i = 0; i < toolCalls.length; i++) {
+                                const call = toolCalls[i];
+                                const remaining = toolCalls.slice(i + 1);
+                                await ai.ExecuteFunction(interaction.user.id, call.name, call.args, msg, remaining, { suppressProgress: true });
                             }
                             return;
                         }
