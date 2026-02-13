@@ -184,9 +184,21 @@ export default class NVIDIAModelsManager {
         const monitorSmall = { name: "meta/llama-3.1-8b-instruct", hasReasoning: false, hasThinkMode: false };
         const taskModels: { [key: string]: { name: string, hasReasoning: boolean, hasThinkMode: boolean } } = {
             "chat": base,
-            "reasoning": base,
-            "math": base,
-            "programming": base,
+            "reasoning": {
+                name: "deepseek-ai/deepseek-v3.2",
+                hasReasoning: true,
+                hasThinkMode: false
+            },
+            "math": {
+                name: "qwen/qwq-32b",
+                hasReasoning: false,
+                hasThinkMode: false
+            },
+            "programming": {
+                name: "minimaxai/minimax-m2.1",
+                hasReasoning: false,
+                hasThinkMode: false
+            },
             "monitor_small": monitorSmall,
             "monitor_large": base
         };
@@ -687,13 +699,13 @@ enum AudioEncoding {
             });
             console.log("[Vision] Response status:", visionResp.status, visionResp.statusText);
             clearTimeout(timer);
-            
+
             if (!visionResp.ok) {
                 const errorText = await visionResp.text().catch(() => "");
                 console.error("[Vision] API error:", visionResp.status, errorText);
                 return "";
             }
-            
+
             const json: any = await visionResp.json();
             const result = String(json?.choices?.[0]?.message?.content || "").trim();
             console.log("[Vision] Result:", result.length, "chars -", result.substring(0, 100));
