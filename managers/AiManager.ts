@@ -11,6 +11,17 @@ import data from "../data";
 import NVIDIAModels from "../NVIDIAModels";
 
 const AI_DEBUG = process.env.AI_DEBUG === "1";
+const EMAIL_CONFIRM_TTL_MS = 15 * 60 * 1000;
+
+type PendingEmailRequest = {
+    token: string;
+    requesterId: string;
+    to: string;
+    subject: string;
+    body: string;
+    isHtml: boolean;
+    createdAt: number;
+};
 
 class AiManager extends EventEmitter {
     private ratelimits: Map<string, Ratelimit> = new Map();
@@ -18,10 +29,31 @@ class AiManager extends EventEmitter {
     private voiceChats: Map<string, NIMChatSession> = new Map();
     private localFunctionHandlers: Map<string, Record<string, (args: any, message: Message) => Promise<any>>> = new Map();
     private bootstrappedChats: Set<string> = new Set();
+    private pendingEmailRequests: Map<string, PendingEmailRequest> = new Map();
     constructor(private ratelimit: number, private max: number, private timeout: number) {
         Log.info("AiManager initialized", { component: "AiManager" });
         setInterval(() => this.ClearTimeouts(), 1000);
         super();
+    }
+    public createPendingEmailRequest(request: Omit<PendingEmailRequest, "token">): string {
+        const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+        this.pendingEmailRequests.set(token, { ...request, token });
+        return token;
+    }
+    public getPendingEmailRequest(token: string): PendingEmailRequest | null {
+        const request = this.pendingEmailRequests.get(token);
+        if (!request) return null;
+        if (Date.now() - request.createdAt > EMAIL_CONFIRM_TTL_MS) {
+            this.pendingEmailRequests.delete(token);
+            return null;
+        }
+        return request;
+    }
+    public consumePendingEmailRequest(token: string): PendingEmailRequest | null {
+        const request = this.getPendingEmailRequest(token);
+        if (!request) return null;
+        this.pendingEmailRequests.delete(token);
+        return request;
     }
     public setLocalFunctionHandlers(id: string, handlers: Record<string, (args: any, message: Message) => Promise<any>>): void {
         this.localFunctionHandlers.set(id, handlers);
@@ -68,8 +100,9 @@ class AiManager extends EventEmitter {
                     preparedArgs = {
                         ...args,
                         requesterId: id,
-                        guildId: message?.guild?.id ?? null,
-                        channelId: message?.channel?.id ?? null
+                        guildId: args.guildId ?? message?.guild?.id ?? null,
+                        channelId: args.channelId ?? message?.channel?.id ?? null,
+                        sourceGuildId: message?.guild?.id ?? null
                     };
                 }
             } else if (preparedArgs === null || preparedArgs === undefined || preparedArgs === "") {
@@ -191,6 +224,11 @@ class AiManager extends EventEmitter {
         const chat = await this.GetChat(id, text);
         await this.ensureToolBootstrap(id, chat);
         let response = await utils.getAiResponse(text, chat);
+        const hasToolCalls = Array.isArray(response?.toolCalls) ? response.toolCalls.length > 0 : Boolean(response?.call);
+        const hasText = typeof response?.text === "string" && response.text.trim().length > 0;
+        if (!hasText && !hasToolCalls) {
+            chat.addSystemMessage?.("You did not return a valid response. Always return a user-facing message or a tool call.");
+        }
         return response;
     }
     public async GetSingleResponse(id: string, text: string): Promise<string> {
@@ -205,64 +243,131 @@ class AiManager extends EventEmitter {
         const response = await utils.getAiResponse(text, chat);
         return response;
     }
-    public async ExecuteFunction(id: string, name: string, args: any, message: Message, Queue?: NIMToolCall[], options?: { suppressProgress?: boolean }): Promise<any> {
-        const suppressProgress = options?.suppressProgress ?? false;
-        if (await this.RatelimitUser(id)) return { error: "You are sending too many messages, please wait a few seconds before sending another message." };
-        const chat = await this.GetChat(id, "");
-        const localHandlers = this.localFunctionHandlers.get(id);
-        const localHandler = localHandlers ? localHandlers[name ?? Queue![0].name] : undefined;
-        const func: any = localHandler ? null : utils.AIFunctions[name as keyof typeof utils.AIFunctions ?? Queue![0].name as keyof typeof utils.AIFunctions];
-        if (!localHandler && !func) {
-            if (!suppressProgress) {
-                await message.edit(`The AI requested an unknown function, attempting to recover... ${data.bot.loadingEmoji.mention}`);
+    public async ExecuteFunction(id: string, name: string, args: any, message: Message, Queue?: NIMToolCall[], options?: { suppressProgress?: boolean; deferEdit?: boolean }): Promise<any> {
+        const suppressProgress = options?.suppressProgress ?? true;
+        const deferEdit = options?.deferEdit ?? false;
+        const startedAt = Date.now();
+        let status = "unknown";
+        try {
+            if (await this.RatelimitUser(id)) {
+                status = "ratelimited";
+                return { error: "You are sending too many messages, please wait a few seconds before sending another message." };
             }
-            const rsp = await chat.sendMessage([
-                {
-                    functionResponse: {
-                        name,
-                        response: {
-                            result: { error: "Unknown function" }
+            const chat = await this.GetChat(id, "");
+            const localHandlers = this.localFunctionHandlers.get(id);
+            const localHandler = localHandlers ? localHandlers[name ?? Queue![0].name] : undefined;
+            const func: any = localHandler ? null : utils.AIFunctions[name as keyof typeof utils.AIFunctions ?? Queue![0].name as keyof typeof utils.AIFunctions];
+            if (!localHandler && !func) {
+                if (!suppressProgress) {
+                    await message.edit(`The AI requested an unknown function, attempting to recover... ${data.bot.loadingEmoji.mention}`);
+                }
+                const rsp = await chat.sendMessage([
+                    {
+                        functionResponse: {
+                            name,
+                            response: {
+                                result: { error: "Unknown function" }
+                            }
                         }
                     }
-                }
-            ]);
-            const followupCalls = rsp.response.functionCalls() ?? [];
-            if (followupCalls.length) {
-                let lastResult: any;
-                for (const call of followupCalls) {
-                    if (!suppressProgress) {
-                        await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
+                ]);
+                const followupCalls = rsp.response.functionCalls() ?? [];
+                if (followupCalls.length) {
+                    let lastResult: any;
+                    for (let i = 0; i < followupCalls.length; i++) {
+                        const call = followupCalls[i];
+                        const childDeferEdit = deferEdit || i < followupCalls.length - 1;
+                        if (!suppressProgress) {
+                            await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
+                        }
+                        lastResult = await this.ExecuteFunction(id, call.name, call.args, message, Queue!.slice(1), { ...options, deferEdit: childDeferEdit });
                     }
-                    lastResult = await this.ExecuteFunction(id, call.name, call.args, message, Queue!.slice(1), options);
+                    status = "followup";
+                    return lastResult;
                 }
-                return lastResult;
+                status = "unknown_function";
             }
-        }
-        if (name === "send_email") {
-            const emailArgs = args as { to: string; subject: string; body: string };
-            const confirmRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-                new ButtonBuilder().setCustomId(`confirm_email_${Date.now()}`).setLabel("Confirm Send").setStyle(3),
-                new ButtonBuilder().setCustomId(`cancel_email_${Date.now()}`).setLabel("Cancel").setStyle(4)
-            )
-            await message.edit(`The AI requested to send an email, this action is not fully supported yet. ${data.bot.loadingEmoji.mention}`);
-            const rsp = await chat.sendMessage([
-                {
-                    functionResponse: {
-                        name,
-                        response: {
-                            result: { error: "Email support is not fully implemented yet" }
+            if (name === "send_email") {
+                const emailArgs = args as { to: string; subject: string; body: string };
+                const isHtml = typeof (args as any)?.isHtml === "boolean" ? Boolean((args as any).isHtml) : false;
+                const toRaw = String(emailArgs.to ?? "").trim();
+                const subject = String(emailArgs.subject ?? "").trim();
+                const body = String(emailArgs.body ?? "");
+                if (!toRaw || !subject || !body) {
+                    status = "invalid_args";
+                    return { error: "Missing email parameters" };
+                }
+                if (/[;,]/.test(toRaw)) {
+                    status = "invalid_args";
+                    return { error: "Only one recipient is allowed" };
+                }
+                const emailMatch = toRaw.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/i);
+                if (!emailMatch) {
+                    status = "invalid_args";
+                    return { error: "Invalid recipient address" };
+                }
+                const domain = toRaw.split("@")[1]?.toLowerCase() ?? "";
+                if (!domain) {
+                    status = "invalid_args";
+                    return { error: "Invalid recipient address" };
+                }
+                const owner = data.bot.owners.includes(id);
+                const staff = await utils.isStaff(id);
+                if (owner || staff) {
+                    try {
+                        if (isHtml) {
+                            await utils.sendEmail(toRaw, subject, "This email contains HTML content.", body);
+                        } else {
+                            await utils.sendEmail(toRaw, subject, body);
+                        }
+                        await chat.sendMessage([
+                            {
+                                functionResponse: {
+                                    name,
+                                    response: {
+                                        result: { success: true, sent: true }
+                                    }
+                                }
+                            }
+                        ]);
+                        status = "sent";
+                        return { success: true, sent: true };
+                    } catch (error: any) {
+                        status = "error";
+                        return { error: error?.message || "Failed to send email" };
+                    }
+                }
+                const token = this.createPendingEmailRequest({
+                    requesterId: id,
+                    to: toRaw,
+                    subject,
+                    body,
+                    isHtml,
+                    createdAt: Date.now()
+                });
+                const confirmRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+                    new ButtonBuilder().setCustomId(`confirm_email-${token}`).setLabel("Confirm Send").setStyle(3),
+                    new ButtonBuilder().setCustomId(`cancel_email-${token}`).setLabel("Cancel").setStyle(4)
+                );
+                await chat.sendMessage([
+                    {
+                        functionResponse: {
+                            name,
+                            response: {
+                                result: { pending: true, token }
+                            }
                         }
                     }
-                }
-            ]);
-            await message.edit({
-                content: `The AI is attempting to send an email with the following details:\n**To:** ${emailArgs.to}\n**Subject:** ${emailArgs.subject}\n**Body:**\n${emailArgs.body}\n\nPlease confirm to send the email or cancel to abort.`,
-                components: [confirmRow],
-                attachments: []
-            });
-            return;
-        }
-        let rawResult: any;
+                ]);
+                await message.edit({
+                    content: `The AI is attempting to send an email with the following details:\n**To:** ${toRaw}\n**Subject:** ${subject}\n**Body:**\n${body}\n\nOnly staff can confirm or cancel this email. Requested by <@${id}>.`,
+                    components: [confirmRow],
+                    attachments: []
+                });
+                status = "pending_confirmation";
+                return { pending: true, token };
+            }
+            let rawResult: any;
         if (localHandler) {
             try {
                 rawResult = await localHandler(args, message);
@@ -285,8 +390,9 @@ class AiManager extends EventEmitter {
                         preparedArgs = {
                             ...args,
                             requesterId: id,
-                            guildId: message?.guild?.id ?? null,
-                            channelId: message?.channel?.id ?? null
+                            guildId: args.guildId ?? message?.guild?.id ?? null,
+                            channelId: args.channelId ?? message?.channel?.id ?? null,
+                            sourceGuildId: message?.guild?.id ?? null
                         };
                         if (AI_DEBUG) console.log(name, preparedArgs);
                     }
@@ -327,12 +433,15 @@ class AiManager extends EventEmitter {
         const followupCalls = rsp.response.functionCalls() ?? [];
         if (followupCalls.length) {
             let lastResult: any;
-            for (const call of followupCalls) {
+            for (let i = 0; i < followupCalls.length; i++) {
+                const call = followupCalls[i];
+                const childDeferEdit = deferEdit || i < followupCalls.length - 1;
                 if (message && !suppressProgress) {
                     await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
                 }
-                lastResult = await this.ExecuteFunction(id, call.name, call.args, message, undefined, options);
+                lastResult = await this.ExecuteFunction(id, call.name, call.args, message, undefined, { ...options, deferEdit: childDeferEdit });
             }
+            status = "followup";
             return lastResult;
         }
         reply = rsp.response.text();
@@ -343,10 +452,16 @@ class AiManager extends EventEmitter {
             if (message && !suppressProgress) {
                 await message.edit(combined);
             }
-            for (const call of toolParse.toolCalls) {
-                await this.ExecuteFunction(id, call.name, call.args, message, undefined, options);
+            for (let i = 0; i < toolParse.toolCalls.length; i++) {
+                const call = toolParse.toolCalls[i];
+                const childDeferEdit = deferEdit || i < toolParse.toolCalls.length - 1;
+                await this.ExecuteFunction(id, call.name, call.args, message, undefined, { ...options, deferEdit: childDeferEdit });
             }
+            status = "followup";
             return combined;
+        }
+        if (!reply.trim()) {
+            chat.addSystemMessage?.("You did not return a valid response after tool execution. Always return a user-facing message or a tool call.");
         }
         const filesPayload = attachments.map(att => ({
             attachment: att.path,
@@ -371,9 +486,11 @@ class AiManager extends EventEmitter {
                     Log.warn("Failed to remove temporary AI response file", { error: String(error) });
                 }
             }
+            status = "sent_file";
             return;
         }
-        if (message) {
+        if (message && !deferEdit) {
+            if (!reply.length && filesPayload.length === 0) return reply;
             const fallbackText = filesPayload.length > 0
                 ? `Attached file${filesPayload.length > 1 ? "s" : ""}.`
                 : ".";
@@ -383,8 +500,14 @@ class AiManager extends EventEmitter {
             } else {
                 await message.edit(safeText);
             }
+            status = "edited";
+            return safeText;
         }
+            status = reply.trim() ? "ok" : "empty_reply";
         return reply;
+        } finally {
+            const _durationMs = Date.now() - startedAt;
+        }
     }
     private async GetChat(id: string, text: string): Promise<NIMChatSession> {
         let chat = this.chats.get(id);
@@ -418,6 +541,10 @@ class AiManager extends EventEmitter {
         this.ratelimits.forEach((ratelimit) => {
             if (Date.now() - ratelimit.time > this.timeout) this.ratelimits.delete(ratelimit.id);
         });
+        const now = Date.now();
+        for (const [token, request] of this.pendingEmailRequests.entries()) {
+            if (now - request.createdAt > EMAIL_CONFIRM_TTL_MS) this.pendingEmailRequests.delete(token);
+        }
     }
 
     public async ClearChat(id: string): Promise<void> {

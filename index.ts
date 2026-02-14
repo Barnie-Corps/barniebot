@@ -37,6 +37,7 @@ import { inspect } from "util";
 import langs from "langs";
 import NVIDIAModels from "./NVIDIAModels";
 import AiMonitorManager from "./managers/AiMonitorManager";
+import ai from "./ai";
 const manager = new ChatManager();
 const globalCommandsManager = new GlobalCommandsManager();
 process.on("uncaughtException", (err: any) => {
@@ -851,6 +852,29 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
     if (Lang !== "en") {
         texts = await utils.autoTranslate(texts, "en", Lang);
     }
+    if (interaction.isAutocomplete()) {
+        try {
+            if (interaction.commandName === "staff" && interaction.options.getSubcommand() === "set") {
+                const focused = interaction.options.getFocused(true);
+                if (focused.name === "rank") {
+                    const query = String(focused.value || "").toLowerCase();
+                    const executorRank = await utils.getUserStaffRank(interaction.user.id);
+                    const execIndex = utils.getStaffRankIndex(executorRank);
+                    const ranks = data.bot.staff_ranks
+                        .filter(r => utils.getStaffRankIndex(r.name) < execIndex)
+                        .map(r => r.name)
+                        .filter(name => name.toLowerCase().includes(query))
+                        .slice(0, 25)
+                        .map(name => ({ name, value: name }));
+                    await interaction.respond(ranks);
+                    return;
+                }
+            }
+        } catch (error) {
+            Log.warn("Autocomplete failed", { component: "Autocomplete", error: (error as any)?.message || String(error) });
+        }
+        return;
+    }
     if (interaction.isCommand()) {
         const cmd = data.bot.commands.get(interaction.commandName as string);
         if (!cmd) {
@@ -948,6 +972,43 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
         }
         const [event, ...args] = interaction.customId.trim().split("-");
         switch (event) {
+            case "confirm_email":
+            case "cancel_email": {
+                const [token] = args;
+                if (!token) return await interaction.reply({ content: "Invalid email request.", ephemeral: true });
+                const pending = ai.getPendingEmailRequest(token);
+                if (!pending) {
+                    if (interaction.isRepliable()) {
+                        await interaction.reply({ content: "Email request expired or not found.", ephemeral: true });
+                    }
+                    return;
+                }
+                const isOwner = data.bot.owners.includes(interaction.user.id);
+                const isStaff = await utils.isStaff(interaction.user.id);
+                const isRequester = interaction.user.id === pending.requesterId;
+                if (!isOwner && !isStaff && !(event === "cancel_email" && isRequester)) {
+                    return await interaction.reply({ content: texts.only_staff_email_send, ephemeral: true });
+                }
+                if (interaction.isRepliable()) await interaction.deferUpdate();
+                if (event === "cancel_email") {
+                    ai.consumePendingEmailRequest(token);
+                    await interaction.message.edit({ content: texts.email_send_cancelled, components: [] });
+                    return;
+                }
+                try {
+                    if (pending.isHtml) {
+                        await utils.sendEmail(pending.to, pending.subject, "This email contains HTML content.", pending.body);
+                    } else {
+                        await utils.sendEmail(pending.to, pending.subject, pending.body);
+                    }
+                    ai.consumePendingEmailRequest(token);
+                    await interaction.message.edit({ content: texts.email_send_confirmed, components: [] });
+                } catch (error: any) {
+                    ai.consumePendingEmailRequest(token);
+                    await interaction.message.edit({ content: `Failed to send email: ${error?.message || "Unknown error"}`, components: [] });
+                }
+                break;
+            }
             case "cancel_setup": {
                 const [uid] = args;
                 let text = {

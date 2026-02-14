@@ -21,6 +21,7 @@ export type NIMToolDefinition = {
 export type NIMChatSession = {
     sendMessage: (input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>) => Promise<NIMChatResult>;
     primeTools?: (toolResults: Array<{ name: string; result: any; args?: any }>) => void;
+    addSystemMessage?: (content: string) => void;
 };
 
 const stripThink = (text: string): string => {
@@ -72,6 +73,10 @@ class NIMChatSessionImpl implements NIMChatSession {
         for (const toolResult of toolResults) {
             this.messages.push(this.createToolMessage(toolResult.name, toolResult.result));
         }
+    }
+    public addSystemMessage(content: string): void {
+        if (!content || !content.trim()) return;
+        this.messages.push({ role: "system", content: content.trim() });
     }
     public async sendMessage(input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>): Promise<NIMChatResult> {
         if (typeof input === "string") {
@@ -220,6 +225,11 @@ export default class NVIDIAModelsManager {
                 "max_tokens": 4096,
                 "top_p": 0.95,
                 "temperature": 0.3
+            },
+            "programming": {
+                "max_tokens": 2048,
+                "top_p": 0.9,
+                "temperature": 0.35
             },
             "monitor_small": {
                 "max_tokens": 256,

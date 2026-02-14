@@ -9,12 +9,10 @@ import figlet from 'figlet';
 
 const LOG_DIR = path.join(__dirname, '..', 'logs');
 
-// Create logs directory if it doesn't exist
 if (!fs.existsSync(LOG_DIR)) {
     fs.mkdirSync(LOG_DIR, { recursive: true });
 }
 
-// Use static figures since it's an ESM module
 const logSymbols = {
     error: '✖',
     warning: '⚠',
@@ -24,7 +22,6 @@ const logSymbols = {
     play: '▶'
 };
 
-// Custom colors using chalk
 const unknownColors = {
     primary: chalk.hex('#FF4B91'),
     secondary: chalk.hex('#FFB3B3'),
@@ -38,7 +35,6 @@ interface LogMeta {
     [key: string]: any;
 }
 
-// Add success level to winston
 const levels = {
     error: 0,
     warn: 1,
@@ -144,7 +140,6 @@ export default class LogManager {
         return LogManager.instance;
     }
 
-    // Instance methods
     public info(message: string, meta: LogMeta = {}): void {
         this.logger.info(message, meta);
     }
@@ -191,7 +186,6 @@ export default class LogManager {
         });
     }
 
-    // Static methods that use the instance
     public static info(message: string, meta: LogMeta = {}): void {
         LogManager.getInstance().info(message, meta);
     }

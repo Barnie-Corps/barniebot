@@ -654,7 +654,7 @@ const functionDeclarations = {
     },
     send_email: {
         name: "send_email",
-        description: "Sends an email to a specified recipient. This can be used to communicate important information or notifications via email. This function requires the recipient's email address, subject, and body content of the email which can be plain text or HTML. Be advised using this will not ensure the email is sent, it still requires athorization from the staff.",
+        description: "Sends an email to a specified recipient. Requires staff authorization; staff/owners can send immediately, others require staff confirmation. Only one recipient is allowed and some domains are blocked. Body can be plain text or HTML.",
         parameters: {
             type: SchemaType.OBJECT,
             properties: {
@@ -1195,6 +1195,28 @@ const functionDeclarations = {
             }
         }
     },
+    is_staff: {
+        name: "is_staff",
+        description: "Check whether a user is staff and return their staff rank (if any).",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
+    },
+    get_user_staff_rank: {
+        name: "get_user_staff_rank",
+        description: "Get a user's staff rank, or null if they are not staff.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                userId: { type: SchemaType.STRING }
+            },
+            required: ["userId"]
+        }
+    },
     check_vip_expiration: {
         name: "check_vip_expiration",
         description: "Check VIP status expiration date and days remaining for a user.",
@@ -1367,6 +1389,17 @@ const functionDeclarations = {
             properties: {
                 userId: { type: SchemaType.STRING }
             }
+        }
+    },
+    generate_code: {
+        name: "generate_code",
+        description: "Generate code for the provided prompt using the programming-optimized model. Use for creating files, snippets, or structured outputs when the user requests code. This does not automatically create files in the workspace nor attaches the code to the conversation, it only generates the code text which can then be used with other functions to save or share.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                prompt: { type: SchemaType.STRING, description: "Clear instructions for the code to produce." }
+            },
+            required: ["prompt"]
         }
     },
     get_current_datetime: {

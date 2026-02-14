@@ -123,7 +123,6 @@ export default {
             common: {
                 question: "Your question was:",
                 thinking: "💭 Thinking...",
-                processing: "Processing...",
                 started_chat: "The chat with the AI has started. You can say one of the following phrases to stop it:",
                 stopped_ai: "The chat with the AI has been disabled.",
                 can_take_time: "Remember that the AI's reply can take a bit of time. If you send multiple messages before getting a response or start flooding the chat, you'll lose access to this command indefinitely.",
@@ -196,7 +195,7 @@ export default {
                 break;
             }
             case "chat": {
-                if (!await utils.isVIP(interaction.user.id) && !data.bot.owners.includes(interaction.user.id)) return await reply(texts.errors.not_vip);
+                if (!await utils.isVIP(interaction.user.id) && !data.bot.owners.includes(interaction.user.id) && !utils.isStaff(interaction.user.id)) return await reply(texts.errors.not_vip);
                 const convoOwnerId = interaction.user.id;
                 let addedUserId: string | null = null;
                 let conversationEndedBy: string | null = null;
@@ -308,13 +307,18 @@ export default {
                             if (AI_DEBUG) {
                                 console.log(`AI requested ${toolCalls.length} tool calls:`, toolCalls.map((call: FunctionCall) => call.name));
                             }
-                            const toolLine = `${texts.common.processing} ${data.bot.loadingEmoji.mention}`;
+                            const toolLine = `Processing... ${data.bot.loadingEmoji.mention}`;
                             const combined = cleanedResponseText ? `${cleanedResponseText}\n\n${toolLine}` : toolLine;
                             const msg = await message.reply(combined);
+                            let lastResult: any = null;
                             for (let i = 0; i < toolCalls.length; i++) {
                                 const call = toolCalls[i];
                                 const remaining = toolCalls.slice(i + 1);
-                                await ai.ExecuteFunction(interaction.user.id, call.name, call.args, msg, remaining, { suppressProgress: true });
+                                const deferEdit = i < toolCalls.length - 1;
+                                lastResult = await ai.ExecuteFunction(interaction.user.id, call.name, call.args, msg, remaining, { suppressProgress: true, deferEdit });
+                            }
+                            if (typeof lastResult === "string" && !lastResult.trim()) {
+                                await msg.edit(texts.errors.no_response);
                             }
                             return;
                         }

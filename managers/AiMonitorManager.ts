@@ -43,6 +43,14 @@ export default class AiMonitorManager {
     private rateLimits = new Map<string, { windowStart: number; count: number }>();
     private joinBurst = new Map<string, { windowStart: number; count: number }>();
     private recentAlertedMessages = new Map<string, number>();
+    private raidBurst = new Map<string, {
+        windowStart: number;
+        total: number;
+        byUser: Map<string, number>;
+        byContent: Map<string, number>;
+        byDomain: Map<string, number>;
+    }>();
+    private recentRaidAlerts = new Map<string, number>();
     private logLabelCache = new Map<string, {
         title: string;
         fields: {
@@ -427,6 +435,99 @@ export default class AiMonitorManager {
             hasNonAscii,
             urlDomains: allDomains
         };
+    }
+
+    private updateRaidBurst(guildId: string, userId: string, contentKey: string, domains: string[]) {
+        const now = Date.now();
+        const windowMs = 15000;
+        const entry = this.raidBurst.get(guildId);
+        if (!entry || now - entry.windowStart > windowMs) {
+            const fresh = {
+                windowStart: now,
+                total: 0,
+                byUser: new Map<string, number>(),
+                byContent: new Map<string, number>(),
+                byDomain: new Map<string, number>()
+            };
+            this.raidBurst.set(guildId, fresh);
+        }
+        const state = this.raidBurst.get(guildId)!;
+        state.total += 1;
+        state.byUser.set(userId, (state.byUser.get(userId) ?? 0) + 1);
+        if (contentKey) state.byContent.set(contentKey, (state.byContent.get(contentKey) ?? 0) + 1);
+        for (const domain of domains) {
+            state.byDomain.set(domain, (state.byDomain.get(domain) ?? 0) + 1);
+        }
+        return state;
+    }
+
+    private detectRaidSignals(message: Message, contentKey: string, domains: string[]) {
+        const guildId = message.guild?.id;
+        if (!guildId) return { triggered: false, reason: "" };
+        const state = this.updateRaidBurst(guildId, message.author.id, contentKey, domains);
+        const userCount = state.byUser.get(message.author.id) ?? 0;
+        const contentCount = contentKey ? (state.byContent.get(contentKey) ?? 0) : 0;
+        const domainCount = domains.length ? Math.max(...domains.map(d => state.byDomain.get(d) ?? 0)) : 0;
+
+        const reasons: string[] = [];
+        if (userCount >= 6) reasons.push(`user burst (${userCount}/15s)`);
+        if (contentCount >= 5) reasons.push(`repeated content (${contentCount}/15s)`);
+        if (domainCount >= 6) reasons.push(`repeated domain (${domainCount}/15s)`);
+        if (state.total >= 30) reasons.push(`high message volume (${state.total}/15s)`);
+
+        const triggered = reasons.length >= 2 || state.total >= 40;
+        return { triggered, reason: reasons.join(", ") };
+    }
+
+    private isRaidAlertRecent(guildId: string): boolean {
+        const now = Date.now();
+        const ttl = 60000;
+        const last = this.recentRaidAlerts.get(guildId);
+        if (!last || now - last > ttl) return false;
+        return true;
+    }
+
+    private markRaidAlert(guildId: string) {
+        this.recentRaidAlerts.set(guildId, Date.now());
+    }
+
+    private async handleRaidAlert(guild: Guild, config: MonitorConfig, context: {
+        userId?: string | null;
+        channelId?: string | null;
+        messageId?: string | null;
+    }, reason: string) {
+        const summary = "raid-like burst detected";
+        const caseId = await this.createCase({
+            guildId: guild.id,
+            eventType: "raid_detected",
+            userId: context.userId ?? null,
+            channelId: context.channelId ?? null,
+            messageId: context.messageId ?? null,
+            summary,
+            risk: "high",
+            recommended_action: "notify",
+            recommended_actions: ["notify"],
+            action_payload: { reason },
+            allow_actions: config.allow_actions,
+            auto_action_taken: false,
+            reason,
+            confidence: 0.6
+        });
+
+        await this.sendLog(config, guild, {
+            caseId,
+            eventType: "raid_detected",
+            summary,
+            reason,
+            risk: "high",
+            recommended_actions: ["notify"],
+            userId: context.userId ?? null,
+            channelId: context.channelId ?? null,
+            messageId: context.messageId ?? null,
+            autoAction: null,
+            confidence: 0.6,
+            language: config.monitor_language
+        });
     }
 
     private async getRecentHistory(guildId: string, userId?: string | null) {
@@ -878,6 +979,17 @@ export default class AiMonitorManager {
         const config = await this.getConfig(message.guild.id);
         if (!config || !config.enabled) return;
         const signals = this.buildMessageSignals(message);
+        const contentKey = message.content.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 140);
+        const raid = this.detectRaidSignals(message, contentKey, signals.urlDomains || []);
+        if (raid.triggered && !this.isRaidAlertRecent(message.guild.id)) {
+            this.markRaidAlert(message.guild.id);
+            await this.handleRaidAlert(message.guild, config, {
+                userId: message.author.id,
+                channelId: message.channelId,
+                messageId: message.id
+            }, raid.reason || "raid-like burst detected");
+            return;
+        }
         const accountAgeDays = this.getAccountAgeDays(message.author);
         const lowAgeSignal = accountAgeDays !== null && accountAgeDays < 3 && (signals.scamSignal || signals.keywordSignal || signals.obfuscatedLink);
         if (!config.analyze_potentially) {

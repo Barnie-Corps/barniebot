@@ -6,6 +6,7 @@ import StaffRanksManager from "./managers/StaffRanksManager";
 import path from "path";
 import db from "./mysql/database";
 import type { NIMChatSession } from "./managers/NVIDIAModelsManager";
+import NVIDIAModels from "./NVIDIAModels";
 import * as nodemailer from "nodemailer";
 import * as os from "os";
 import Log from "./Log";
@@ -281,11 +282,34 @@ const truncate = (value: string, limit = 4000): string => {
 };
 const parseToolCalls = (content: string): { cleanedText: string; toolCalls: Array<{ name: string; args: any }> } => {
   const toolCalls: Array<{ name: string; args: any }> = [];
-  const beginTokens = ["<|tool_call_begin|>", "|tool_call_begin|"];
-  const sepTokens = ["<|tool_sep|>", "|tool_sep|"];
-  const endTokens = ["<|tool_call_end|>", "|tool_call_end|"];
-  const callsBeginTokens = ["<|tool_calls_begin|>", "|tool_calls_begin|"];
-  const callsEndTokens = ["<|tool_calls_end|>", "|tool_calls_end|"];
+  const beginTokens = [
+    "<|tool_call_begin|>",
+    "|tool_call_begin|",
+    "<tool_call_begin>",
+    "<tool_call>",
+    "<|tool_call|>"
+  ];
+  const sepTokens = ["<|tool_sep|>", "|tool_sep|", "<tool_sep>"];
+  const endTokens = [
+    "<|tool_call_end|>",
+    "|tool_call_end|",
+    "<tool_call_end>",
+    "</tool_call>",
+    "</tool_call_end>"
+  ];
+  const callsBeginTokens = [
+    "<|tool_calls_begin|>",
+    "|tool_calls_begin|",
+    "<tool_calls_begin>",
+    "<|tool_calls|>"
+  ];
+  const callsEndTokens = [
+    "<|tool_calls_end|>",
+    "|tool_calls_end|",
+    "<tool_calls_end>",
+    "</tool_calls>",
+    "</tool_calls_end>"
+  ];
   const ranges: Array<{ start: number; end: number }> = [];
   let cursor = 0;
   const tryParseArgs = (raw: string) => {
@@ -531,6 +555,19 @@ const utils = {
         return { error: error?.name === "AbortError" ? "Request timed out" : "Failed to fetch URL" };
       } finally {
         clearTimeout(timer);
+      }
+    },
+    generate_code: async (args: { prompt: string }): Promise<{ code?: string; reasoning?: string; error?: string }> => {
+      const prompt = args?.prompt?.trim();
+      if (!prompt) return { error: "Missing prompt parameter" };
+      try {
+        const response = await NVIDIAModels.GetModelChatResponse([
+          { role: "user", content: prompt }
+        ], 30000, "programming", false);
+        return { code: response.content, reasoning: response.reasoning };
+      } catch (error: any) {
+        Log.error("Failed to generate code", error instanceof Error ? error : new Error(String(error)));
+        return { error: "Failed to generate code" };
       }
     },
     retrieve_owners: (): string[] => {
@@ -953,37 +990,61 @@ const utils = {
       });
       return { thread: { id: thread.id, name: thread.name, type: thread.type } };
     },
-    send_channel_message: async (args: { requesterId?: string; guildId?: string; channelId: string; content: string }): Promise<any> => {
+    send_channel_message: async (args: { requesterId?: string; guildId?: string; channelId: string; content: string; sourceGuildId?: string | null }): Promise<any> => {
       if (!args?.requesterId || !args.guildId || !args.channelId || !args.content) return { error: "Missing parameters" };
       const owner = isOwner(args.requesterId) === true;
       const adminStaff = await isAdminStaffUser(args.requesterId);
-      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
-      if (guildInfo.error) return { error: guildInfo.error };
-      const guild = guildInfo.guild as any;
-      const member = guildInfo.member as any;
+      const staff = await utils.isStaff(args.requesterId);
+      const isCrossGuild = !args.sourceGuildId || args.sourceGuildId !== args.guildId;
+      if (isCrossGuild && !owner && !staff) return { error: "Requester is not authorized to message outside the current guild" };
+      let guild: any = null;
+      let member: any = null;
+      if (!isCrossGuild) {
+        const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+        if (guildInfo.error) return { error: guildInfo.error };
+        guild = guildInfo.guild as any;
+        member = guildInfo.member as any;
+      } else {
+        guild = await client.guilds.fetch(args.guildId).catch(() => null);
+        if (!guild) return { error: "Guild not found" };
+      }
       const channel = guild.channels.cache.get(args.channelId) as any;
       if (!channel || !channel.isTextBased?.()) return { error: "Channel not text-based" };
-      const perms = channel.permissionsFor(member);
-      const hasPerm = !!perms && perms.has(PermissionFlagsBits.SendMessages);
-      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      if (!isCrossGuild) {
+        const perms = channel.permissionsFor(member);
+        const hasPerm = !!perms && perms.has(PermissionFlagsBits.SendMessages);
+        if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      }
       const botPerms = channel.permissionsFor(guild.members.me);
       if (!botPerms || !botPerms.has(PermissionFlagsBits.SendMessages)) return { error: "Bot lacks SendMessages permission" };
       const sent = await channel.send({ content: args.content });
       return { message: { id: sent.id, channelId: sent.channelId } };
     },
-    send_channel_embed: async (args: { requesterId?: string; guildId?: string; channelId: string; embed: any; content?: string }): Promise<any> => {
+    send_channel_embed: async (args: { requesterId?: string; guildId?: string; channelId: string; embed: any; content?: string; sourceGuildId?: string | null }): Promise<any> => {
       if (!args?.requesterId || !args.guildId || !args.channelId || !args.embed) return { error: "Missing parameters" };
       const owner = isOwner(args.requesterId) === true;
       const adminStaff = await isAdminStaffUser(args.requesterId);
-      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
-      if (guildInfo.error) return { error: guildInfo.error };
-      const guild = guildInfo.guild as any;
-      const member = guildInfo.member as any;
+      const staff = await utils.isStaff(args.requesterId);
+      const isCrossGuild = !args.sourceGuildId || args.sourceGuildId !== args.guildId;
+      if (isCrossGuild && !owner && !staff) return { error: "Requester is not authorized to message outside the current guild" };
+      let guild: any = null;
+      let member: any = null;
+      if (!isCrossGuild) {
+        const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+        if (guildInfo.error) return { error: guildInfo.error };
+        guild = guildInfo.guild as any;
+        member = guildInfo.member as any;
+      } else {
+        guild = await client.guilds.fetch(args.guildId).catch(() => null);
+        if (!guild) return { error: "Guild not found" };
+      }
       const channel = guild.channels.cache.get(args.channelId) as any;
       if (!channel || !channel.isTextBased?.()) return { error: "Channel not text-based" };
-      const perms = channel.permissionsFor(member);
-      const hasPerm = !!perms && perms.has(PermissionFlagsBits.SendMessages);
-      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      if (!isCrossGuild) {
+        const perms = channel.permissionsFor(member);
+        const hasPerm = !!perms && perms.has(PermissionFlagsBits.SendMessages);
+        if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      }
       const botPerms = channel.permissionsFor(guild.members.me);
       if (!botPerms || !botPerms.has(PermissionFlagsBits.SendMessages)) return { error: "Bot lacks SendMessages permission" };
       const embedBuilder = new EmbedBuilder();
@@ -2261,6 +2322,16 @@ const utils = {
       }));
       return { ranks };
     },
+    is_staff: async (args: { userId: string }): Promise<any> => {
+      if (!args?.userId) return { error: "Missing userId parameter" };
+      const rank = await utils.getUserStaffRank(args.userId);
+      return { isStaff: rank !== null, rank };
+    },
+    get_user_staff_rank: async (args: { userId: string }): Promise<any> => {
+      if (!args?.userId) return { error: "Missing userId parameter" };
+      const rank = await utils.getUserStaffRank(args.userId);
+      return { rank };
+    },
     check_vip_expiration: async (args: { userId: string }): Promise<any> => {
       if (!args.userId) return { error: "Missing userId parameter" };
       const vip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [args.userId]);
@@ -2381,12 +2452,25 @@ const utils = {
       if (!stats || !stats.isDirectory()) return { error: "Logs directory not found" };
       const limit = Math.max(1, Math.min(args.maxResults ?? 100, 500));
       const items = await fs.readdir(LOGS_ROOT, { withFileTypes: true });
-      const files = items
+      const fileStats = await Promise.all(items
         .filter(item => item.isFile())
+        .map(async item => {
+          const fullPath = path.join(LOGS_ROOT, item.name);
+          const stat = await safeStat(fullPath);
+          return {
+            name: item.name,
+            mtime: stat?.mtime?.getTime?.() ?? 0,
+            size: stat?.size ?? 0
+          };
+        }));
+      const files = fileStats
+        .sort((a, b) => b.mtime - a.mtime)
         .slice(0, limit)
         .map(item => ({
           path: item.name,
-          name: item.name
+          name: item.name,
+          size: item.size,
+          modified: item.mtime ? new Date(item.mtime).toISOString() : null
         }));
       return { files };
     },
@@ -2874,8 +2958,19 @@ const utils = {
     }
     const response = result.response;
     const text = response.text();
-    const toolCalls = response.functionCalls() ?? [];
-    return { text, call: toolCalls[0] ?? null, toolCalls };
+    const toolParse = parseToolCalls(text);
+    const structuredCalls = response.functionCalls() ?? [];
+    const callMap = new Map<string, { name: string; args: any }>();
+    for (const call of structuredCalls) {
+      callMap.set(`${call.name}:${JSON.stringify(call.args ?? {})}`, call);
+    }
+    for (const call of toolParse.toolCalls) {
+      const key = `${call.name}:${JSON.stringify(call.args ?? {})}`;
+      if (!callMap.has(key)) callMap.set(key, call);
+    }
+    const mergedCalls = Array.from(callMap.values());
+    const cleanedText = toolParse.cleanedText || text;
+    return { text: cleanedText, call: mergedCalls[0] ?? null, toolCalls: mergedCalls };
   },
   sendEmail: async (to: string, subject: string, text: string, html?: string) => {
     if (!to || !subject) throw new Error("Missing important data in utils.sendEmail");

@@ -28,7 +28,7 @@ export default {
         .addSubcommand(s => s.setName("set")
             .setDescription("Set a user's staff rank")
             .addUserOption(o => o.setName("user").setDescription("User").setRequired(true))
-            .addStringOption(o => o.setName("rank").setDescription("Rank to assign (blank to remove)")
+            .addStringOption(o => o.setName("rank").setDescription("Rank to assign (blank to remove)").setAutocomplete(true)
             .addChoices(...data.bot.staff_ranks.map(r => ({ name: r.name, value: r.name })))
         ))
         .addSubcommand(s => s.setName("info")
