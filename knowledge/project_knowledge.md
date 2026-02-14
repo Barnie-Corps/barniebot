@@ -14,7 +14,7 @@ BarnieBot is a multi-system Discord bot: global chat networking, AI chat/voice/v
 ## Core Systems
 
 ### AI
-- Commands: `/ai ask`, `/ai chat` (VIP), `/ai voice` (VIP), `/ai monitor` (admin-only).
+- Commands: `/ai ask`, `/ai chat` (VIP / Staff), `/ai voice` (VIP / Staff), `/ai monitor` (admin-only, VIP guilds [VIP REQUIREMENT NOT IMPLEMENTED YET]).
 - Models: NVIDIA NIM for chat, safety, vision, and Riva ASR/TTS.
 - AI tools: DB queries, Discord lookups, logs, workspace/project file operations, and support workflows.
 - Safety: content safety model blocks unsafe content; AI Monitor can investigate and alert on suspicious activity.
@@ -30,7 +30,7 @@ Read-only tools exist for:
 These tools are intended to support configuration checks without changing state.
 
 ### AI Monitor
-- Configured per guild with `/ai monitor` (requires Admin and logs channel).
+- Configured per guild with `/ai monitor` (requires Admin and logs channel, [VIP REQUIREMENT NOT IMPLEMENTED YET]).
 - Can analyze message create/update/delete and member/role/channel/invite/webhook events.
 - Optional investigation tools and optional auto-actions (delete, warn, timeout, kick, ban).
 - Alerts are posted to the configured logs channel.
