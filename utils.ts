@@ -17,7 +17,7 @@ import * as vm from "vm";
 import { exec as execCallback } from "child_process";
 import { promisify, inspect, TextDecoder, TextEncoder } from "util";
 import * as mathjs from "mathjs";
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, PermissionsBitField, EmbedBuilder, TextChannel } from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, PermissionsBitField, EmbedBuilder, TextChannel, GuildScheduledEvent } from "discord.js";
 import type { DiscordUser, UserLanguage, AIMemory } from "./types/interfaces";
 const TRANSLATE_WORKER_TYPE = "translate";
 const RATELIMIT_WORKER_TYPE = "ratelimit";
@@ -887,13 +887,14 @@ const utils = {
       const adminStaff = await isAdminStaffUser(args.requesterId);
       const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
       if (guildInfo.error) return { error: guildInfo.error };
-      const guild = guildInfo.guild as any;
+      const guild = client.guilds.cache.get(args.guildId)!;
       const member = guildInfo.member as any;
       const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageChannels);
       if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
       const botMember = guild.members.me;
       if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageChannels)) return { error: "Bot lacks ManageChannels permission" };
       const typeKey = args.type.toLowerCase();
+      console.log("Creating channel with type key:", typeKey);
       const typeMap: Record<string, ChannelType> = {
         text: ChannelType.GuildText,
         voice: ChannelType.GuildVoice,
@@ -903,10 +904,11 @@ const utils = {
         stage: ChannelType.GuildStageVoice
       };
       const channelType = typeMap[typeKey] as any;
-      if (!channelType) return { error: "Unsupported channel type" };
+      console.log("Resolved channel type:", channelType);
+      if (!channelType && args.type !== "text") { console.log("Unsupported channel type:", args.type); return { error: "Unsupported channel type" }; }
       const channel = await guild.channels.create({
         name: args.name,
-        type: channelType,
+        type: typeMap[typeKey] as any,
         parent: args.parentId ?? null,
         topic: args.topic,
         nsfw: args.nsfw,
@@ -915,6 +917,7 @@ const utils = {
         userLimit: args.userLimit,
         reason: args.reason
       });
+      console.log("Created channel:", channel.id);
       return { channel: { id: channel.id, name: channel.name, type: channel.type } };
     },
     edit_guild_channel: async (args: { requesterId?: string; guildId?: string; channelId: string; name?: string; topic?: string; nsfw?: boolean; rateLimitPerUser?: number; parentId?: string; position?: number; userLimit?: number; bitrate?: number; reason?: string }): Promise<any> => {
@@ -989,6 +992,23 @@ const utils = {
         reason: args.reason
       });
       return { thread: { id: thread.id, name: thread.name, type: thread.type } };
+    },
+    send_email: async (args: { to: string; subject: string; content: string, isHtml: boolean }): Promise<any> => {
+      if (!args.to || !args.subject || !args.content) return { error: "Missing parameters" };
+      try {
+        await (args.isHtml ? utils.sendEmail(args.to, args.subject, "", args.content) : utils.sendEmail(args.to, args.subject, args.content));
+        return { success: true };
+      }
+      catch (error: any) {
+        return { error: "Failed to send email" };
+      }
+    },
+    get_current_channel_info: async (message: any): Promise<any> => {
+      if (!message.guild || !message.channel) return { error: "Not in a guild channel" };
+      const channel = message.channel as any;
+      return {
+        channel: {  id: channel.id, name: channel.name, type: ChannelType[channel.type as keyof typeof ChannelType] ?? String(channel.type) }
+      };
     },
     send_channel_message: async (args: { requesterId?: string; guildId?: string; channelId: string; content: string; sourceGuildId?: string | null }): Promise<any> => {
       if (!args?.requesterId || !args.guildId || !args.channelId || !args.content) return { error: "Missing parameters" };
@@ -1130,6 +1150,430 @@ const utils = {
         return { isVip: true, user: foundVip[0] };
       }
       return { isVip: false };
+    },
+    // === ROLE MANAGEMENT FUNCTIONS ===
+    list_guild_roles: async (args: { requesterId?: string; guildId?: string; limit?: number }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageRoles);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const limit = Math.max(1, Math.min(args.limit ?? 250, 250));
+      const roles = Array.from(guild.roles.cache.values())
+        .slice(0, limit)
+        .map((role: any) => ({
+          id: role.id,
+          name: role.name,
+          color: role.color,
+          position: role.position,
+          hoist: role.hoist,
+          mentionable: role.mentionable,
+          managed: role.managed,
+          permissions: role.permissions.toArray()
+        }));
+      return { roles };
+    },
+    get_role_info: async (args: { requesterId?: string; guildId?: string; roleId?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.roleId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageRoles);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const role = guild.roles.cache.get(args.roleId);
+      if (!role) return { error: "Role not found" };
+      return {
+        role: {
+          id: role.id,
+          name: role.name,
+          color: role.color,
+          position: role.position,
+          hoist: role.hoist,
+          mentionable: role.mentionable,
+          managed: role.managed,
+          permissions: role.permissions.toArray(),
+          createdAt: role.createdTimestamp
+        }
+      };
+    },
+    create_role: async (args: { requesterId?: string; guildId?: string; name: string; color?: string; hoist?: boolean; mentionable?: boolean; permissions?: string[]; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.name) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = client.guilds.cache.get(args.guildId)!;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageRoles);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageRoles)) return { error: "Bot lacks ManageRoles permission" };
+      let color: number | undefined;
+      if (args.color) {
+        const hex = args.color.startsWith("#") ? args.color.slice(1) : args.color;
+        const num = parseInt(hex, 16);
+        if (!Number.isNaN(num)) color = num;
+      }
+      let permissions: bigint | undefined;
+      if (args.permissions && args.permissions.length > 0) {
+        try {
+          permissions = PermissionsBitField.resolve(args.permissions as any);
+        } catch {
+          return { error: "Invalid permission names" };
+        }
+      }
+      const role = await guild.roles.create({
+        name: args.name,
+        color,
+        hoist: args.hoist,
+        mentionable: args.mentionable,
+        permissions,
+        reason: args.reason
+      });
+      return { role: { id: role.id, name: role.name, color: role.color } };
+    },
+    edit_role: async (args: { requesterId?: string; guildId?: string; roleId: string; name?: string; color?: string; hoist?: boolean; mentionable?: boolean; permissions?: string[]; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.roleId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageRoles);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageRoles)) return { error: "Bot lacks ManageRoles permission" };
+      const role = guild.roles.cache.get(args.roleId);
+      if (!role) return { error: "Role not found" };
+      let color: number | undefined;
+      if (args.color) {
+        const hex = args.color.startsWith("#") ? args.color.slice(1) : args.color;
+        const num = parseInt(hex, 16);
+        if (!Number.isNaN(num)) color = num;
+      }
+      let permissions: bigint | undefined;
+      if (args.permissions && args.permissions.length > 0) {
+        try {
+          permissions = PermissionsBitField.resolve(args.permissions as any);
+        } catch {
+          return { error: "Invalid permission names" };
+        }
+      }
+      const updated = await role.edit({
+        name: args.name,
+        color,
+        hoist: args.hoist,
+        mentionable: args.mentionable,
+        permissions,
+        reason: args.reason
+      });
+      return { role: { id: updated.id, name: updated.name, color: updated.color } };
+    },
+    delete_role: async (args: { requesterId?: string; guildId?: string; roleId: string; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.roleId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageRoles);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageRoles)) return { error: "Bot lacks ManageRoles permission" };
+      const role = guild.roles.cache.get(args.roleId);
+      if (!role) return { error: "Role not found" };
+      if (role.managed) return { error: "Cannot delete managed roles" };
+      await role.delete(args.reason);
+      return { success: true };
+    },
+    add_role_to_member: async (args: { requesterId?: string; guildId?: string; memberId: string; roleId: string; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.memberId || !args.roleId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageRoles);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageRoles)) return { error: "Bot lacks ManageRoles permission" };
+      const targetMember = await guild.members.fetch(args.memberId).catch(() => null);
+      if (!targetMember) return { error: "Member not found" };
+      const role = guild.roles.cache.get(args.roleId);
+      if (!role) return { error: "Role not found" };
+      await targetMember.roles.add(role, args.reason);
+      return { success: true };
+    },
+    remove_role_from_member: async (args: { requesterId?: string; guildId?: string; memberId: string; roleId: string; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.memberId || !args.roleId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageRoles);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageRoles)) return { error: "Bot lacks ManageRoles permission" };
+      const targetMember = await guild.members.fetch(args.memberId).catch(() => null);
+      if (!targetMember) return { error: "Member not found" };
+      const role = guild.roles.cache.get(args.roleId);
+      if (!role) return { error: "Role not found" };
+      await targetMember.roles.remove(role, args.reason);
+      return { success: true };
+    },
+    get_role_members: async (args: { requesterId?: string; guildId?: string; roleId: string; limit?: number }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.roleId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageRoles);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const role = guild.roles.cache.get(args.roleId);
+      if (!role) return { error: "Role not found" };
+      const limit = Math.max(1, Math.min(args.limit ?? 100, 500));
+      const members = Array.from(role.members.values())
+        .slice(0, limit)
+        .map((m: any) => ({
+          id: m.id,
+          username: m.user.username,
+          tag: m.user.tag,
+          joinedAt: m.joinedTimestamp,
+          nickname: m.nickname ?? null
+        }));
+      return { members, count: role.members.size };
+    },
+    // === MEMBER MANAGEMENT FUNCTIONS ===
+    list_guild_members: async (args: { requesterId?: string; guildId?: string; limit?: number }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.KickMembers) || hasGuildPermission(member, PermissionFlagsBits.ManageGuild);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const limit = Math.max(1, Math.min(args.limit ?? 100, 1000));
+      await guild.members.fetch({ limit });
+      const members = Array.from(guild.members.cache.values())
+        .slice(0, limit)
+        .map((m: any) => ({
+          id: m.id,
+          username: m.user.username,
+          tag: m.user.tag,
+          joinedAt: m.joinedTimestamp,
+          nickname: m.nickname ?? null,
+          bot: m.user.bot
+        }));
+      return { members };
+    },
+    search_guild_members: async (args: { requesterId?: string; guildId?: string; query?: string; limit?: number }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.query) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.KickMembers) || hasGuildPermission(member, PermissionFlagsBits.ManageGuild);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const limit = Math.max(1, Math.min(args.limit ?? 50, 200));
+      const term = args.query.toLowerCase();
+      await guild.members.fetch({ query: args.query, limit });
+      const matches = Array.from(guild.members.cache.values())
+        .filter((m: any) => 
+          m.user.username.toLowerCase().includes(term) || 
+          m.user.tag.toLowerCase().includes(term) ||
+          (m.nickname && m.nickname.toLowerCase().includes(term))
+        )
+        .slice(0, limit)
+        .map((m: any) => ({
+          id: m.id,
+          username: m.user.username,
+          tag: m.user.tag,
+          joinedAt: m.joinedTimestamp,
+          nickname: m.nickname ?? null,
+          bot: m.user.bot
+        }));
+      return { members: matches };
+    },
+    get_member_info: async (args: { requesterId?: string; guildId?: string; memberId?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.memberId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.KickMembers) || hasGuildPermission(member, PermissionFlagsBits.ManageGuild);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const targetMember = await guild.members.fetch(args.memberId).catch(() => null);
+      if (!targetMember) return { error: "Member not found" };
+      return {
+        member: {
+          id: targetMember.id,
+          username: targetMember.user.username,
+          tag: targetMember.user.tag,
+          discriminator: targetMember.user.discriminator,
+          avatar: targetMember.user.displayAvatarURL(),
+          bot: targetMember.user.bot,
+          joinedAt: targetMember.joinedTimestamp,
+          createdAt: targetMember.user.createdTimestamp,
+          nickname: targetMember.nickname ?? null,
+          roles: targetMember.roles.cache.map((r: any) => ({ id: r.id, name: r.name })),
+          permissions: targetMember.permissions?.toArray?.() ?? [],
+          communicationDisabledUntil: targetMember.communicationDisabledUntilTimestamp ?? null,
+          pending: targetMember.pending ?? false
+        }
+      };
+    },
+    ban_member: async (args: { requesterId?: string; guildId?: string; memberId: string; reason?: string; deleteMessageSeconds?: number }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.memberId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.BanMembers);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.BanMembers)) return { error: "Bot lacks BanMembers permission" };
+      try {
+        await guild.members.ban(args.memberId, {
+          reason: args.reason ?? "No reason provided",
+          deleteMessageSeconds: args.deleteMessageSeconds ?? 0
+        });
+        return { success: true };
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to ban member" };
+      }
+    },
+    unban_member: async (args: { requesterId?: string; guildId?: string; userId: string; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.userId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.BanMembers);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.BanMembers)) return { error: "Bot lacks BanMembers permission" };
+      try {
+        await guild.members.unban(args.userId, args.reason ?? "No reason provided");
+        return { success: true };
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to unban user" };
+      }
+    },
+    timeout_member: async (args: { requesterId?: string; guildId?: string; memberId: string; durationMs: number; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.memberId || !args.durationMs) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ModerateMembers);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ModerateMembers)) return { error: "Bot lacks ModerateMembers permission" };
+      const targetMember = await guild.members.fetch(args.memberId).catch(() => null);
+      if (!targetMember) return { error: "Member not found" };
+      const maxTimeout = 28 * 24 * 60 * 60 * 1000; // 28 days
+      const duration = Math.min(args.durationMs, maxTimeout);
+      try {
+        await targetMember.timeout(duration, args.reason ?? "No reason provided");
+        return { success: true, until: Date.now() + duration };
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to timeout member" };
+      }
+    },
+    remove_timeout_member: async (args: { requesterId?: string; guildId?: string; memberId: string; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.memberId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ModerateMembers);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ModerateMembers)) return { error: "Bot lacks ModerateMembers permission" };
+      const targetMember = await guild.members.fetch(args.memberId).catch(() => null);
+      if (!targetMember) return { error: "Member not found" };
+      try {
+        await targetMember.timeout(null, args.reason ?? "Timeout removed");
+        return { success: true };
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to remove timeout" };
+      }
+    },
+    set_member_nickname: async (args: { requesterId?: string; guildId?: string; memberId: string; nickname?: string; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.memberId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageNicknames);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageNicknames)) return { error: "Bot lacks ManageNicknames permission" };
+      const targetMember = await guild.members.fetch(args.memberId).catch(() => null);
+      if (!targetMember) return { error: "Member not found" };
+      try {
+        await targetMember.setNickname(args.nickname ?? null, args.reason ?? "Nickname changed");
+        return { success: true };
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to set nickname" };
+      }
+    },
+    move_member_voice: async (args: { requesterId?: string; guildId?: string; memberId: string; channelId: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.memberId || !args.channelId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.MoveMembers);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.MoveMembers)) return { error: "Bot lacks MoveMembers permission" };
+      const targetMember = await guild.members.fetch(args.memberId).catch(() => null);
+      if (!targetMember) return { error: "Member not found" };
+      if (!targetMember.voice.channel) return { error: "Member is not in a voice channel" };
+      const targetChannel = guild.channels.cache.get(args.channelId);
+      if (!targetChannel) return { error: "Target channel not found" };
+      if (targetChannel.type !== ChannelType.GuildVoice && targetChannel.type !== ChannelType.GuildStageVoice) {
+        return { error: "Target channel is not a voice channel" };
+      }
+      try {
+        await targetMember.voice.setChannel(targetChannel);
+        return { success: true };
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to move member" };
+      }
     },
     list_workspace_files: async (args: { path?: string; recursive?: boolean } = {}): Promise<any> => {
       await ensureWorkspaceExists();

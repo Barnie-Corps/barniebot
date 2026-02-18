@@ -38,6 +38,11 @@
             "You must keep the content of the direct messages appropriate and respectful.",
             "You must not send unsolicited direct messages to users. Always ensure that the user has consented to receive direct messages from you before sending any.",
             "If a user asks you to send a direct message to another user, you must ensure that the content of the message is appropriate and does not contain any offensive language or harmful content. Always check the requester permissions before sending the message and if the requester is not a bot staff or a guild admin (when the target is in the same guild) you must refuse to send the message and respond with 'I'm sorry, you don't have permission to send direct messages through me.'"
+        ],
+        "send_email": [
+            "You must keep the content of the emails appropriate and respectful.",
+            "You must not send unsolicited emails to users. Always ensure that the user has consented to receive emails from you before sending any.",
+            "If a user asks you to send an email to another user, you must ensure that the content of the email is appropriate and does not contain any offensive language or harmful content. Always check the requester permissions before sending the email and if the requester is not a bot staff or an owner you must refuse to send the email and respond with 'I'm sorry, you don't have permission to send emails through me.'"
         ]
     },
     "allowed_js_modules": [

@@ -281,7 +281,7 @@ export default {
                             collector?.stop();
                             return;
                         }
-                        const response = await withTimeout(ai.GetResponse(interaction.user.id, userContent), 25000);
+                        const response = await withTimeout(ai.GetResponse(interaction.user.id, userContent), 50000);
                         if (!response) {
                             console.warn("AI response timeout");
                             return await message.reply(texts.errors.no_response);
@@ -332,6 +332,7 @@ export default {
                         await message.reply(cleanedResponseText || response.text);
                     } catch (error) {
                         console.error("AI chat handling failed:", error);
+                        isWaitingForResponse = false;
                         await message.reply(texts.errors.no_response);
                     } finally {
                         isWaitingForResponse = false;

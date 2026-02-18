@@ -11,17 +11,6 @@ import data from "../data";
 import NVIDIAModels from "../NVIDIAModels";
 
 const AI_DEBUG = process.env.AI_DEBUG === "1";
-const EMAIL_CONFIRM_TTL_MS = 15 * 60 * 1000;
-
-type PendingEmailRequest = {
-    token: string;
-    requesterId: string;
-    to: string;
-    subject: string;
-    body: string;
-    isHtml: boolean;
-    createdAt: number;
-};
 
 class AiManager extends EventEmitter {
     private ratelimits: Map<string, Ratelimit> = new Map();
@@ -29,31 +18,10 @@ class AiManager extends EventEmitter {
     private voiceChats: Map<string, NIMChatSession> = new Map();
     private localFunctionHandlers: Map<string, Record<string, (args: any, message: Message) => Promise<any>>> = new Map();
     private bootstrappedChats: Set<string> = new Set();
-    private pendingEmailRequests: Map<string, PendingEmailRequest> = new Map();
     constructor(private ratelimit: number, private max: number, private timeout: number) {
         Log.info("AiManager initialized", { component: "AiManager" });
         setInterval(() => this.ClearTimeouts(), 1000);
         super();
-    }
-    public createPendingEmailRequest(request: Omit<PendingEmailRequest, "token">): string {
-        const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-        this.pendingEmailRequests.set(token, { ...request, token });
-        return token;
-    }
-    public getPendingEmailRequest(token: string): PendingEmailRequest | null {
-        const request = this.pendingEmailRequests.get(token);
-        if (!request) return null;
-        if (Date.now() - request.createdAt > EMAIL_CONFIRM_TTL_MS) {
-            this.pendingEmailRequests.delete(token);
-            return null;
-        }
-        return request;
-    }
-    public consumePendingEmailRequest(token: string): PendingEmailRequest | null {
-        const request = this.getPendingEmailRequest(token);
-        if (!request) return null;
-        this.pendingEmailRequests.delete(token);
-        return request;
     }
     public setLocalFunctionHandlers(id: string, handlers: Record<string, (args: any, message: Message) => Promise<any>>): void {
         this.localFunctionHandlers.set(id, handlers);
@@ -287,224 +255,144 @@ class AiManager extends EventEmitter {
                 }
                 status = "unknown_function";
             }
-            if (name === "send_email") {
-                const emailArgs = args as { to: string; subject: string; body: string };
-                const isHtml = typeof (args as any)?.isHtml === "boolean" ? Boolean((args as any).isHtml) : false;
-                const toRaw = String(emailArgs.to ?? "").trim();
-                const subject = String(emailArgs.subject ?? "").trim();
-                const body = String(emailArgs.body ?? "");
-                if (!toRaw || !subject || !body) {
-                    status = "invalid_args";
-                    return { error: "Missing email parameters" };
-                }
-                if (/[;,]/.test(toRaw)) {
-                    status = "invalid_args";
-                    return { error: "Only one recipient is allowed" };
-                }
-                const emailMatch = toRaw.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/i);
-                if (!emailMatch) {
-                    status = "invalid_args";
-                    return { error: "Invalid recipient address" };
-                }
-                const domain = toRaw.split("@")[1]?.toLowerCase() ?? "";
-                if (!domain) {
-                    status = "invalid_args";
-                    return { error: "Invalid recipient address" };
-                }
-                const owner = data.bot.owners.includes(id);
-                const staff = await utils.isStaff(id);
-                if (owner || staff) {
-                    try {
-                        if (isHtml) {
-                            await utils.sendEmail(toRaw, subject, "This email contains HTML content.", body);
-                        } else {
-                            await utils.sendEmail(toRaw, subject, body);
-                        }
-                        await chat.sendMessage([
-                            {
-                                functionResponse: {
-                                    name,
-                                    response: {
-                                        result: { success: true, sent: true }
-                                    }
-                                }
-                            }
-                        ]);
-                        status = "sent";
-                        return { success: true, sent: true };
-                    } catch (error: any) {
-                        status = "error";
-                        return { error: error?.message || "Failed to send email" };
-                    }
-                }
-                const token = this.createPendingEmailRequest({
-                    requesterId: id,
-                    to: toRaw,
-                    subject,
-                    body,
-                    isHtml,
-                    createdAt: Date.now()
-                });
-                const confirmRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-                    new ButtonBuilder().setCustomId(`confirm_email-${token}`).setLabel("Confirm Send").setStyle(3),
-                    new ButtonBuilder().setCustomId(`cancel_email-${token}`).setLabel("Cancel").setStyle(4)
-                );
-                await chat.sendMessage([
-                    {
-                        functionResponse: {
-                            name,
-                            response: {
-                                result: { pending: true, token }
-                            }
-                        }
-                    }
-                ]);
-                await message.edit({
-                    content: `The AI is attempting to send an email with the following details:\n**To:** ${toRaw}\n**Subject:** ${subject}\n**Body:**\n${body}\n\nOnly staff can confirm or cancel this email. Requested by <@${id}>.`,
-                    components: [confirmRow],
-                    attachments: []
-                });
-                status = "pending_confirmation";
-                return { pending: true, token };
-            }
             let rawResult: any;
-        if (localHandler) {
-            try {
-                rawResult = await localHandler(args, message);
-            } catch (error: any) {
-                Log.error(`AI function ${name} threw an exception`, error instanceof Error ? error : new Error(String(error)));
-                rawResult = { error: error instanceof Error ? error.message : String(error) };
-            }
-        } else {
-            let preparedArgs: any = args;
-            if (["current_guild_info", "on_guild"].includes(name)) {
-                preparedArgs = message;
-                if (AI_DEBUG) console.log(name, preparedArgs);
+            if (localHandler) {
+                try {
+                    rawResult = await localHandler(args, message);
+                } catch (error: any) {
+                    Log.error(`AI function ${name} threw an exception`, error instanceof Error ? error : new Error(String(error)));
+                    rawResult = { error: error instanceof Error ? error.message : String(error) };
+                }
             } else {
-                const isPlainObject = typeof args === "object" && args !== null && !Array.isArray(args);
-                if (isPlainObject) {
-                    if (Object.keys(args).length === 0) {
+                let preparedArgs: any = args;
+                if (["current_guild_info", "on_guild", "current_channel_info"].includes(name)) {
+                    preparedArgs = message;
+                    if (AI_DEBUG) console.log(name, preparedArgs);
+                } else {
+                    const isPlainObject = typeof args === "object" && args !== null && !Array.isArray(args);
+                    if (isPlainObject) {
+                        if (Object.keys(args).length === 0) {
+                            preparedArgs = id;
+                            if (AI_DEBUG) console.log(name, preparedArgs);
+                        } else {
+                            preparedArgs = {
+                                ...args,
+                                requesterId: id,
+                                guildId: args.guildId ?? message?.guild?.id ?? null,
+                                channelId: args.channelId ?? message?.channel?.id ?? null,
+                                sourceGuildId: message?.guild?.id ?? null
+                            };
+                            if (AI_DEBUG) console.log(name, preparedArgs);
+                        }
+                    } else if (preparedArgs === null || preparedArgs === undefined || preparedArgs === "") {
                         preparedArgs = id;
                         if (AI_DEBUG) console.log(name, preparedArgs);
-                    } else {
-                        preparedArgs = {
-                            ...args,
-                            requesterId: id,
-                            guildId: args.guildId ?? message?.guild?.id ?? null,
-                            channelId: args.channelId ?? message?.channel?.id ?? null,
-                            sourceGuildId: message?.guild?.id ?? null
-                        };
-                        if (AI_DEBUG) console.log(name, preparedArgs);
-                    }
-                } else if (preparedArgs === null || preparedArgs === undefined || preparedArgs === "") {
-                    preparedArgs = id;
-                    if (AI_DEBUG) console.log(name, preparedArgs);
-                }
-            }
-            try {
-                rawResult = await func(preparedArgs);
-            } catch (error: any) {
-                Log.error(`AI function ${name} threw an exception`, error instanceof Error ? error : new Error(String(error)));
-                rawResult = { error: error instanceof Error ? error.message : String(error) };
-            }
-        }
-        let attachments: Array<{ path: string; name?: string }> = [];
-        let sanitizedResult = rawResult;
-        if (rawResult && typeof rawResult === "object" && !Array.isArray(rawResult)) {
-            const { __attachments, ...rest } = rawResult as any;
-            if (Array.isArray(__attachments)) {
-                attachments = __attachments
-                    .filter((item: any) => item && typeof item.path === "string")
-                    .map((item: any) => ({ path: item.path, name: item.name }));
-            }
-            sanitizedResult = rest;
-        }
-        let reply = "";
-        const rsp = await chat.sendMessage([
-            {
-                functionResponse: {
-                    name,
-                    response: {
-                        result: sanitizedResult
                     }
                 }
-            }
-        ]);
-        const followupCalls = rsp.response.functionCalls() ?? [];
-        if (followupCalls.length) {
-            let lastResult: any;
-            for (let i = 0; i < followupCalls.length; i++) {
-                const call = followupCalls[i];
-                const childDeferEdit = deferEdit || i < followupCalls.length - 1;
-                if (message && !suppressProgress) {
-                    await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
-                }
-                lastResult = await this.ExecuteFunction(id, call.name, call.args, message, undefined, { ...options, deferEdit: childDeferEdit });
-            }
-            status = "followup";
-            return lastResult;
-        }
-        reply = rsp.response.text();
-        const toolParse = utils.parseToolCalls(reply);
-        if (toolParse.toolCalls.length > 0) {
-            const toolLines = toolParse.toolCalls.map(call => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
-            const combined = toolParse.cleanedText ? `${toolParse.cleanedText}\n\n${toolLines}` : toolLines;
-            if (message && !suppressProgress) {
-                await message.edit(combined);
-            }
-            for (let i = 0; i < toolParse.toolCalls.length; i++) {
-                const call = toolParse.toolCalls[i];
-                const childDeferEdit = deferEdit || i < toolParse.toolCalls.length - 1;
-                await this.ExecuteFunction(id, call.name, call.args, message, undefined, { ...options, deferEdit: childDeferEdit });
-            }
-            status = "followup";
-            return combined;
-        }
-        if (!reply.trim()) {
-            chat.addSystemMessage?.("You did not return a valid response after tool execution. Always return a user-facing message or a tool call.");
-        }
-        const filesPayload = attachments.map(att => ({
-            attachment: att.path,
-            name: att.name ?? path.basename(att.path)
-        }));
-        if (reply.length > 2000) {
-            const filename = `./ai-response-${Date.now()}.md`;
-            fs.writeFileSync(filename, reply);
-            filesPayload.push({ attachment: filename, name: path.basename(filename) });
-            try {
-                if (message) {
-                    await message.edit({
-                        content: "The response from the AI was too long, so it has been sent as a file.",
-                        files: filesPayload,
-                        attachments: []
-                    });
-                }
-            } finally {
                 try {
-                    fs.unlinkSync(filename);
-                } catch (error) {
-                    Log.warn("Failed to remove temporary AI response file", { error: String(error) });
+                    rawResult = await func(preparedArgs);
+                } catch (error: any) {
+                    Log.error(`AI function ${name} threw an exception`, error instanceof Error ? error : new Error(String(error)));
+                    rawResult = { error: error instanceof Error ? error.message : String(error) };
                 }
             }
-            status = "sent_file";
-            return;
-        }
-        if (message && !deferEdit) {
-            if (!reply.length && filesPayload.length === 0) return reply;
-            const fallbackText = filesPayload.length > 0
-                ? `Attached file${filesPayload.length > 1 ? "s" : ""}.`
-                : ".";
-            const safeText = reply.length ? reply : fallbackText;
-            if (filesPayload.length > 0) {
-                await message.edit({ content: safeText, files: filesPayload, attachments: [] });
-            } else {
-                await message.edit(safeText);
+            let attachments: Array<{ path: string; name?: string }> = [];
+            let sanitizedResult = rawResult;
+            if (rawResult && typeof rawResult === "object" && !Array.isArray(rawResult)) {
+                const { __attachments, ...rest } = rawResult as any;
+                if (Array.isArray(__attachments)) {
+                    attachments = __attachments
+                        .filter((item: any) => item && typeof item.path === "string")
+                        .map((item: any) => ({ path: item.path, name: item.name }));
+                }
+                sanitizedResult = rest;
             }
-            status = "edited";
-            return safeText;
-        }
+            let reply = "";
+            const rsp = await chat.sendMessage([
+                {
+                    functionResponse: {
+                        name,
+                        response: {
+                            result: sanitizedResult
+                        }
+                    }
+                }
+            ]);
+            const followupCalls = rsp.response.functionCalls() ?? [];
+            if (followupCalls.length) {
+                let lastResult: any;
+                for (let i = 0; i < followupCalls.length; i++) {
+                    const call = followupCalls[i];
+                    const childDeferEdit = deferEdit || i < followupCalls.length - 1;
+                    if (message && !suppressProgress) {
+                        await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
+                    }
+                    lastResult = await this.ExecuteFunction(id, call.name, call.args, message, undefined, { ...options, deferEdit: childDeferEdit });
+                }
+                status = "followup";
+                return lastResult;
+            }
+            reply = rsp.response.text();
+            const toolParse = utils.parseToolCalls(reply);
+            if (toolParse.toolCalls.length > 0) {
+                const toolLines = toolParse.toolCalls.map(call => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
+                const combined = toolParse.cleanedText ? `${toolParse.cleanedText}\n\n${toolLines}` : toolLines;
+                if (message && !suppressProgress) {
+                    await message.edit(combined);
+                }
+                for (let i = 0; i < toolParse.toolCalls.length; i++) {
+                    const call = toolParse.toolCalls[i];
+                    const childDeferEdit = deferEdit || i < toolParse.toolCalls.length - 1;
+                    await this.ExecuteFunction(id, call.name, call.args, message, undefined, { ...options, deferEdit: childDeferEdit });
+                }
+                status = "followup";
+                return combined;
+            }
+            if (!reply.trim()) {
+                chat.addSystemMessage?.("You did not return a valid response after tool execution. Always return a user-facing message or a tool call.");
+            }
+            const filesPayload = attachments.map(att => ({
+                attachment: att.path,
+                name: att.name ?? path.basename(att.path)
+            }));
+            if (reply.length > 2000) {
+                const filename = `./ai-response-${Date.now()}.md`;
+                fs.writeFileSync(filename, reply);
+                filesPayload.push({ attachment: filename, name: path.basename(filename) });
+                try {
+                    if (message) {
+                        await message.edit({
+                            content: "The response from the AI was too long, so it has been sent as a file.",
+                            files: filesPayload,
+                            attachments: []
+                        });
+                    }
+                } finally {
+                    try {
+                        fs.unlinkSync(filename);
+                    } catch (error) {
+                        Log.warn("Failed to remove temporary AI response file", { error: String(error) });
+                    }
+                }
+                status = "sent_file";
+                return;
+            }
+            if (message && !deferEdit) {
+                if (!reply.length && filesPayload.length === 0) return reply;
+                const fallbackText = filesPayload.length > 0
+                    ? `Attached file${filesPayload.length > 1 ? "s" : ""}.`
+                    : ".";
+                const safeText = reply.length ? reply : fallbackText;
+                if (filesPayload.length > 0) {
+                    await message.edit({ content: safeText, files: filesPayload, attachments: [] });
+                } else {
+                    await message.edit(safeText);
+                }
+                status = "edited";
+                return safeText;
+            }
             status = reply.trim() ? "ok" : "empty_reply";
-        return reply;
+            return reply;
         } finally {
             const _durationMs = Date.now() - startedAt;
         }
@@ -541,10 +429,6 @@ class AiManager extends EventEmitter {
         this.ratelimits.forEach((ratelimit) => {
             if (Date.now() - ratelimit.time > this.timeout) this.ratelimits.delete(ratelimit.id);
         });
-        const now = Date.now();
-        for (const [token, request] of this.pendingEmailRequests.entries()) {
-            if (now - request.createdAt > EMAIL_CONFIRM_TTL_MS) this.pendingEmailRequests.delete(token);
-        }
     }
 
     public async ClearChat(id: string): Promise<void> {

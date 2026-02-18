@@ -972,43 +972,6 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
         }
         const [event, ...args] = interaction.customId.trim().split("-");
         switch (event) {
-            case "confirm_email":
-            case "cancel_email": {
-                const [token] = args;
-                if (!token) return await interaction.reply({ content: "Invalid email request.", ephemeral: true });
-                const pending = ai.getPendingEmailRequest(token);
-                if (!pending) {
-                    if (interaction.isRepliable()) {
-                        await interaction.reply({ content: "Email request expired or not found.", ephemeral: true });
-                    }
-                    return;
-                }
-                const isOwner = data.bot.owners.includes(interaction.user.id);
-                const isStaff = await utils.isStaff(interaction.user.id);
-                const isRequester = interaction.user.id === pending.requesterId;
-                if (!isOwner && !isStaff && !(event === "cancel_email" && isRequester)) {
-                    return await interaction.reply({ content: texts.only_staff_email_send, ephemeral: true });
-                }
-                if (interaction.isRepliable()) await interaction.deferUpdate();
-                if (event === "cancel_email") {
-                    ai.consumePendingEmailRequest(token);
-                    await interaction.message.edit({ content: texts.email_send_cancelled, components: [] });
-                    return;
-                }
-                try {
-                    if (pending.isHtml) {
-                        await utils.sendEmail(pending.to, pending.subject, "This email contains HTML content.", pending.body);
-                    } else {
-                        await utils.sendEmail(pending.to, pending.subject, pending.body);
-                    }
-                    ai.consumePendingEmailRequest(token);
-                    await interaction.message.edit({ content: texts.email_send_confirmed, components: [] });
-                } catch (error: any) {
-                    ai.consumePendingEmailRequest(token);
-                    await interaction.message.edit({ content: `Failed to send email: ${error?.message || "Unknown error"}`, components: [] });
-                }
-                break;
-            }
             case "cancel_setup": {
                 const [uid] = args;
                 let text = {
