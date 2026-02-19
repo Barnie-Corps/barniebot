@@ -124,7 +124,7 @@ export default class WorkerManager extends EventEmitter {
 
     public postMessage(id: string, message: any): string {
         const worker = this.getWorker(id);
-        if (!worker) throw new Error("Unknown worker");
+        if (!worker) throw new Error(`Worker ${id} not found`);
         const messageId = this.GenerateID(this.IDLength);
         this.reservations.delete(id);
         this.clearKeepAliveTimer(id);
@@ -134,7 +134,22 @@ export default class WorkerManager extends EventEmitter {
         return messageId;
     }
 
+    public sendMessage(id: string, message: any, timeout?: number): Promise<any> {
+        const messageId = this.postMessage(id, message);
+        return this.awaitResponse(id, messageId, timeout).then(response => response.message);
+    }
+
+    public async sendMessageToType(type: string, message: any, timeout?: number, acquireTimeout?: number): Promise<any> {
+        const worker = await this.AwaitAvailableWorker(type, acquireTimeout);
+        return this.sendMessage(worker.id, message, timeout);
+    }
+
     public awaitResponse(id: string, message: any, timeout?: number): Promise<{ id: string; message: any }> {
+        const worker = this.getWorker(id);
+        if (!worker) {
+            return Promise.reject(new Error(`Worker ${id} not found`));
+        }
+        
         return new Promise((resolve, reject) => {
             const responseMap = this.pendingResponses.get(id) ?? new Map();
             const pending: PendingResponse = { resolve, reject };
@@ -144,8 +159,11 @@ export default class WorkerManager extends EventEmitter {
                 pending.timeoutHandle = setTimeout(() => {
                     this.removePending(id, String(message));
                     this.recordFailure(id);
-                    this.terminateWorker(id);
-                    reject(new Error("Worker response timed out"));
+                    reject(new Error(`Worker ${id} response timed out after ${timeout}ms`));
+                    const failures = this.metrics.get(id)?.failures ?? 0;
+                    if (failures >= 3) {
+                        this.terminateWorker(id);
+                    }
                 }, timeout);
             }
         });
@@ -172,8 +190,7 @@ export default class WorkerManager extends EventEmitter {
 
     public async pingWorker(id: string, timeout = 2000): Promise<number> {
         const start = Date.now();
-        const message = this.postMessage(id, "ping");
-        await this.awaitResponse(id, message, timeout);
+        await this.sendMessage(id, "ping", timeout);
         const latency = Date.now() - start;
         const stats = this.metrics.get(id) ?? { failures: 0 };
         stats.lastPingMs = latency;
@@ -184,11 +201,77 @@ export default class WorkerManager extends EventEmitter {
         return latency;
     }
 
+    public getWorkerHealth(id: string): { healthy: boolean; avgPingMs?: number; lastPingMs?: number; failures: number; lastActiveMs?: number } | null {
+        const worker = this.getWorker(id);
+        if (!worker) return null;
+        const stats = this.metrics.get(id) ?? { failures: 0 };
+        const lastActiveMs = stats.lastActiveAt ? Date.now() - stats.lastActiveAt : undefined;
+        return {
+            healthy: stats.failures < 3 && (lastActiveMs === undefined || lastActiveMs < 120000),
+            avgPingMs: stats.avgPingMs,
+            lastPingMs: stats.lastPingMs,
+            failures: stats.failures,
+            lastActiveMs
+        };
+    }
+
+    public getTypeHealth(type: string): { total: number; healthy: number; unhealthy: number; avgPingMs?: number } {
+        const workers = this.byType.get(type);
+        if (!workers) return { total: 0, healthy: 0, unhealthy: 0 };
+        let healthy = 0;
+        let unhealthy = 0;
+        let totalPing = 0;
+        let pingCount = 0;
+        for (const id of workers.values()) {
+            const health = this.getWorkerHealth(id);
+            if (health) {
+                if (health.healthy) healthy++;
+                else unhealthy++;
+                if (health.avgPingMs) {
+                    totalPing += health.avgPingMs;
+                    pingCount++;
+                }
+            }
+        }
+        return {
+            total: workers.size,
+            healthy,
+            unhealthy,
+            avgPingMs: pingCount > 0 ? +(totalPing / pingCount).toFixed(2) : undefined
+        };
+    }
+
     public async prewarmType(type: string, minWorkers = 1, timeout = 2000): Promise<void> {
         const pool = this.availableByType.get(type);
-        if (!pool || pool.size < Math.max(1, minWorkers)) return;
-        const ids = Array.from(pool.values());
+        const targetCount = Math.max(1, minWorkers);
+        if (!pool || pool.size < targetCount) return;
+        const ids = Array.from(pool.values()).slice(0, targetCount);
         await Promise.allSettled(ids.map(id => this.pingWorker(id, timeout)));
+    }
+
+    public async cleanupUnhealthyWorkers(type?: string): Promise<number> {
+        let terminated = 0;
+        const typesToCheck = type ? [type] : Array.from(this.byType.keys());
+        for (const t of typesToCheck) {
+            const workers = this.byType.get(t);
+            if (!workers) continue;
+            for (const id of Array.from(workers.values())) {
+                const health = this.getWorkerHealth(id);
+                if (health && !health.healthy) {
+                    this.terminateWorker(id);
+                    terminated++;
+                }
+            }
+        }
+        return terminated;
+    }
+
+    public ensureMinWorkers(path: string, type: string, minCount: number, options?: WorkerOptions, data?: any): number {
+        const current = this.getTypeCount(type);
+        if (current >= minCount) return 0;
+        const toCreate = minCount - current;
+        const created = this.bulkCreateWorkers(path, type, toCreate, options, data);
+        return created.length;
     }
 
     public get cache() {
@@ -380,7 +463,14 @@ export default class WorkerManager extends EventEmitter {
         if (!pending) return;
         this.removePending(id, String(messageId));
         try {
-            pending.resolve({ id, message });
+            if (message.type === "error") {
+                const error = new Error(message.error || "Worker returned error");
+                (error as any).workerStack = message.stack;
+                (error as any).workerData = message;
+                pending.reject(error);
+            } else {
+                pending.resolve({ id, message });
+            }
         } catch (error) {
             Log.warn(`Failed to resolve pending response for worker ${id}`, { workerId: id, error: error instanceof Error ? error.message : String(error) });
         }

@@ -85,9 +85,7 @@ async function processRateLimitsWorker(users: Array<{ uid: string; time_left: nu
   let worker = Workers.getAvailableWorker(RATELIMIT_WORKER_TYPE);
   if (!worker) worker = Workers.createWorker(RATELIMIT_WORKER_PATH, RATELIMIT_WORKER_TYPE) ?? undefined;
   if (!worker) worker = await Workers.AwaitAvailableWorker(RATELIMIT_WORKER_TYPE, 2000);
-  const msgId = Workers.postMessage(worker.id, { type: "process", users, limits, decrement: decrementMs });
-  const response = await Workers.awaitResponse(worker.id, msgId, 2000);
-  return response.message;
+  return await Workers.sendMessage(worker.id, { type: "process", users, limits, decrement: decrementMs }, 2000);
 }
 const trimTranslationCache = () => {
   while (translationCache.size > TRANSLATE_CACHE_LIMIT) {
