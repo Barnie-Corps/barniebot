@@ -24,7 +24,7 @@ type TriageResult = {
     confidence: number;
 };
 
-type ActionType = "notify" | "warn" | "timeout" | "kick" | "ban" | "delete_message";
+type ActionType = "notify" | "warn" | "timeout" | "kick" | "ban" | "delete_message" | "delete_and_warn" | "delete_and_timeout" | "delete_and_kick" | "delete_and_ban";
 
 type ReviewResult = {
     suspicious: boolean;
@@ -569,7 +569,7 @@ export default class AiMonitorManager {
         const normalizedLanguage = typeof language === "string" && language.trim() ? language.trim().toLowerCase() : "en";
         const prompt = JSON.stringify({
             role: "review",
-            instructions: `Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 2 from [\"notify\",\"warn\",\"timeout\",\"kick\",\"ban\",\"delete_message\"]), warning_message(optional string for warn action), action_duration_ms(optional number), delete_message(optional boolean), confidence(number 0-1). Use recent_cases only as context; do not recommend punitive actions if the current content appears benign. If current content is benign, set suspicious=false, risk=low, recommended_actions=[\"notify\"]. Use language: ${normalizedLanguage} for summary, reason, and warning_message.`,
+            instructions: `Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 3 from [\"notify\",\"warn\",\"timeout\",\"kick\",\"ban\",\"delete_message\",\"delete_and_warn\",\"delete_and_timeout\",\"delete_and_kick\",\"delete_and_ban\"]), warning_message(optional string for warn action), action_duration_ms(optional number), delete_message(optional boolean), confidence(number 0-1). Use recent_cases only as context; do not recommend punitive actions if the current content appears benign. If current content is benign, set suspicious=false, risk=low, recommended_actions=[\"notify\"]. Use language: ${normalizedLanguage} for summary, reason, and warning_message.`,
             eventType,
             data
         });
@@ -595,7 +595,7 @@ export default class AiMonitorManager {
         const normalizedLanguage = typeof language === "string" && language.trim() ? language.trim().toLowerCase() : "en";
         const prompt = JSON.stringify({
             role: "review",
-            instructions: `Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 2 from [\"notify\",\"warn\",\"timeout\",\"kick\",\"ban\",\"delete_message\"]), warning_message(optional string for warn action), action_duration_ms(optional number), delete_message(optional boolean), confidence(number 0-1). Use tools only when needed. Use recent_cases only as context; do not recommend punitive actions if the current content appears benign. If current content is benign, set suspicious=false, risk=low, recommended_actions=[\"notify\"]. Use language: ${normalizedLanguage} for summary, reason, and warning_message.`,
+            instructions: `Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 3 from [\"notify\",\"warn\",\"timeout\",\"kick\",\"ban\",\"delete_message\",\"delete_and_warn\",\"delete_and_timeout\",\"delete_and_kick\",\"delete_and_ban\"]), warning_message(optional string for warn action), action_duration_ms(optional number), delete_message(optional boolean), confidence(number 0-1). Use tools only when needed. Use recent_cases only as context; do not recommend punitive actions if the current content appears benign. If current content is benign, set suspicious=false, risk=low, recommended_actions=[\"notify\"]. Use language: ${normalizedLanguage} for summary, reason, and warning_message.`,
             eventType,
             data
         });
@@ -655,9 +655,14 @@ export default class AiMonitorManager {
     }
 
     private normalizeRecommendedActions(review: ReviewResult): ActionType[] {
-        const allowList: ActionType[] = ["notify", "warn", "timeout", "kick", "ban", "delete_message"];
+        const allowList: ActionType[] = ["notify", "warn", "timeout", "kick", "ban", "delete_message", "delete_and_warn", "delete_and_timeout", "delete_and_kick", "delete_and_ban"];
         const list = Array.isArray(review.recommended_actions) ? review.recommended_actions : (review.recommended_action ? [review.recommended_action] : []);
-        const filtered = list.filter(action => allowList.includes(action)).slice(0, 2);
+        const seen = new Set<string>();
+        const filtered = list.filter(action => allowList.includes(action)).filter(action => {
+            if (seen.has(action)) return false;
+            seen.add(action);
+            return true;
+        }).slice(0, 3);
         return filtered.length > 0 ? filtered : ["notify"];
     }
 
@@ -729,6 +734,7 @@ export default class AiMonitorManager {
         userId?: string | null;
         channelId?: string | null;
         messageId?: string | null;
+        messageContent?: string | null;
         autoAction?: string | null;
         confidence?: number | null;
         language?: string | null;
@@ -756,6 +762,10 @@ export default class AiMonitorManager {
             const link = `https://discord.com/channels/${guild.id}/${payload.channelId}/${payload.messageId}`;
             embed.addFields({ name: labels.fields.messageLabel, value: link, inline: false });
         }
+        if ((payload.eventType === "message_create" || payload.eventType === "message_delete") && payload.messageContent) {
+            const trimmed = payload.messageContent.length > 1000 ? `${payload.messageContent.slice(0, 997)}...` : payload.messageContent;
+            embed.addFields({ name: "Content", value: trimmed, inline: false });
+        }
         if (payload.autoAction) embed.addFields({ name: labels.fields.autoActionLabel, value: payload.autoAction, inline: false });
         if (payload.confidence !== null && payload.confidence !== undefined) embed.addFields({ name: labels.fields.confidenceLabel, value: payload.confidence.toFixed(2), inline: true });
 
@@ -782,13 +792,25 @@ export default class AiMonitorManager {
     }): Promise<{ ok: boolean; detail: string }>{
         const reason = context.reason || "AI Monitor";
         try {
-            if (action === "delete_message" && context.channelId && context.messageId) {
+            const deleteMessage = async () => {
+                if (!context.channelId || !context.messageId) return { ok: false, detail: "Message not found" };
                 const channel = guild.channels.cache.get(context.channelId) as TextChannel | undefined;
                 if (!channel) return { ok: false, detail: "Channel not found" };
                 const msg = await channel.messages.fetch(context.messageId).catch(() => null);
                 if (!msg) return { ok: false, detail: "Message not found" };
                 await msg.delete();
+                this.markAlertedMessage(context.messageId);
                 return { ok: true, detail: "Message deleted" };
+            };
+            if (action.startsWith("delete_and_")) {
+                const next = action.replace("delete_and_", "");
+                const deleteResult = await deleteMessage();
+                if (!deleteResult.ok) return deleteResult;
+                if (!["warn", "timeout", "kick", "ban"].includes(next)) return { ok: false, detail: "Unknown action" };
+                return await this.executeAction(guild, next, context);
+            }
+            if (action === "delete_message") {
+                return await deleteMessage();
             }
             if (!context.userId) return { ok: false, detail: "User not found" };
             const member = await guild.members.fetch(context.userId).catch(() => null);
@@ -902,7 +924,10 @@ export default class AiMonitorManager {
         }
         const review = await this.reviewWithTools(eventType, data, config, monitorLanguage);
         if (!review.suspicious) return;
-        const recommendedActions = this.normalizeRecommendedActions(review);
+        let recommendedActions = this.normalizeRecommendedActions(review);
+        if (review.delete_message && !recommendedActions.includes("delete_message")) {
+            recommendedActions = ["delete_message", ...recommendedActions].slice(0, 3) as ActionType[];
+        }
 
         if (eventType === "message_create" && context.messageId) {
             this.markAlertedMessage(context.messageId);
@@ -918,14 +943,15 @@ export default class AiMonitorManager {
             deleteMessage: Boolean(review.delete_message),
             recommended_actions: recommendedActions
         };
+        const messageContent = data?.message?.content ?? data?.extra?.content ?? null;
 
         let autoAction: string | null = null;
         let autoActionTaken = false;
 
         if (config.allow_actions) {
             const results: string[] = [];
-            for (const action of recommendedActions) {
-                if (action === "notify") continue;
+            const actionable = recommendedActions.filter(action => action !== "notify").slice(0, 3);
+            for (const action of actionable) {
                 const actionResult = await this.executeAction(guild, action, {
                     userId: actionPayload.userId,
                     channelId: actionPayload.channelId,
@@ -967,6 +993,7 @@ export default class AiMonitorManager {
             userId: context.userId,
             channelId: context.channelId,
             messageId: context.messageId,
+            messageContent,
             autoAction,
             confidence: review.confidence ?? triage.confidence,
             language: monitorLanguage
@@ -1379,14 +1406,17 @@ export default class AiMonitorManager {
         const [event, caseId] = interaction.customId.split("-");
         if (!caseId) return false;
         if (event !== "aimon_action" && event !== "aimon_solve") return false;
+        if (!interaction.deferred && !interaction.replied) {
+            await interaction.deferReply({ ephemeral: true });
+        }
         const rows = await db.query("SELECT * FROM ai_monitor_cases WHERE case_id = ?", [caseId]) as unknown as any[];
         if (!rows || !rows[0]) {
-            await interaction.reply({ content: "Case not found.", ephemeral: true });
+            await interaction.editReply({ content: "Case not found." });
             return true;
         }
         const record = rows[0];
         if (!interaction.inGuild() || interaction.guildId !== record.guild_id) {
-            await interaction.reply({ content: "Invalid guild.", ephemeral: true });
+            await interaction.editReply({ content: "Invalid guild." });
             return true;
         }
         const config = await this.getConfig(record.guild_id);
@@ -1394,12 +1424,16 @@ export default class AiMonitorManager {
         if (event === "aimon_solve") {
             await this.markCase(caseId, "solved", interaction.user.id);
             await this.disableButtons(interaction, labelConfig.buttons);
-            await interaction.reply({ content: "Marked as solved.", ephemeral: true });
+            await interaction.editReply({ content: "Marked as solved." });
+            return true;
+        }
+        if (config && !config.allow_actions) {
+            await interaction.editReply({ content: "Auto actions are disabled for this guild." });
             return true;
         }
         const guild = this.client.guilds.cache.get(record.guild_id);
         if (!guild) {
-            await interaction.reply({ content: "Guild not found.", ephemeral: true });
+            await interaction.editReply({ content: "Guild not found." });
             return true;
         }
         const payload = record.action_payload ? JSON.parse(record.action_payload) : {};
@@ -1408,11 +1442,11 @@ export default class AiMonitorManager {
             : (record.recommended_action ? [record.recommended_action] : ["notify"]);
         const actionable = actions.filter((a: ActionType) => a !== "notify");
         if (actionable.length === 0) {
-            await interaction.reply({ content: "No action recommended for this case.", ephemeral: true });
+            await interaction.editReply({ content: "No action recommended for this case." });
             return true;
         }
         const results: string[] = [];
-        for (const action of actionable.slice(0, 2)) {
+        for (const action of actionable.slice(0, 3)) {
             const result = await this.executeAction(guild, action, {
                 userId: payload.userId ?? record.user_id,
                 channelId: payload.channelId ?? record.channel_id,
@@ -1425,7 +1459,7 @@ export default class AiMonitorManager {
         }
         await this.markCase(caseId, "actioned", interaction.user.id);
         await this.disableButtons(interaction, labelConfig.buttons);
-        await interaction.reply({ content: `Actions executed: ${results.join("; ")}`, ephemeral: true });
+        await interaction.editReply({ content: `Actions executed: ${results.join("; ")}` });
         return true;
     }
 
@@ -1442,7 +1476,7 @@ export default class AiMonitorManager {
     }
 
     private markAlertedMessage(messageId: string) {
-        const ttlMs = 5 * 60 * 1000;
+        const ttlMs = 10 * 60 * 1000;
         this.recentAlertedMessages.set(messageId, Date.now() + ttlMs);
     }
 

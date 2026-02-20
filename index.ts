@@ -34,10 +34,7 @@ import WarningCleanup from "./WarningCleanup";
 import Workers from "./Workers";
 import path from "path";
 import { inspect } from "util";
-import langs from "langs";
-import NVIDIAModels from "./NVIDIAModels";
 import AiMonitorManager from "./managers/AiMonitorManager";
-import ai from "./ai";
 const manager = new ChatManager();
 const globalCommandsManager = new GlobalCommandsManager();
 process.on("uncaughtException", (err: any) => {
@@ -649,6 +646,7 @@ ${"═".repeat(78)}`;
                 fetchedGuilds++;
             }
             process.env.MEMBERS_FETCHED = "1";
+            await client.user?.setActivity(`there are ${client.users.cache.size} users around!`);
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
             const newMembers = client.users.cache.size - startCacheSize;
             const doneEmbed = new EmbedBuilder()
@@ -838,6 +836,13 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(interaction.user.id)) return;
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
     const Lang = foundLang[0] ? foundLang[0].lang : "en";
+    const isSlashCommand = interaction.isCommand();
+    const cachedCommand = isSlashCommand ? data.bot.commands.get(interaction.commandName as string) : undefined;
+    if (isSlashCommand && cachedCommand && !interaction.deferred && !interaction.replied) {
+        try {
+            await interaction.deferReply({ ephemeral: cachedCommand.ephemeral });
+        } catch { }
+    }
     let texts = {
         new: "🆕 **Welcome!** It looks like this is your first time using BarnieBot. Please take a moment to review our privacy policy here: ",
         error: "❌ **An error occurred** while processing your request. Please try again later. If the issue persists, contact support. -> ",
@@ -876,12 +881,19 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
         return;
     }
     if (interaction.isCommand()) {
-        const cmd = data.bot.commands.get(interaction.commandName as string);
+        const cmd = cachedCommand ?? data.bot.commands.get(interaction.commandName as string);
         if (!cmd) {
+            if (interaction.deferred || interaction.replied) {
+                return await interaction.editReply({ content: "```\n" + `/${interaction.commandName}\n ${utils.createArrows(`${interaction.command?.name}`.length)}\n\nERR: Unknown slash command` + "\n```" });
+            }
             return await interaction.reply({ content: "```\n" + `/${interaction.commandName}\n ${utils.createArrows(`${interaction.command?.name}`.length)}\n\nERR: Unknown slash command` + "\n```", ephemeral: true });
         }
         try {
-            await interaction.reply({ content: data.bot.loadingEmoji.mention, flags: cmd.ephemeral ? MessageFlags.Ephemeral : undefined });
+            if (interaction.deferred || interaction.replied) {
+                await interaction.editReply({ content: data.bot.loadingEmoji.mention });
+            } else {
+                await interaction.reply({ content: data.bot.loadingEmoji.mention, flags: cmd.ephemeral ? MessageFlags.Ephemeral : undefined });
+            }
             await cmd.execute(interaction, Lang);
             await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE");
             await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]);

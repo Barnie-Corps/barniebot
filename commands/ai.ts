@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, TextChannel, VoiceChannel, GuildMember, AttachmentBuilder, Message, PermissionFlagsBits, ChannelType } from "discord.js";
+import { ChatInputCommandInteraction, SlashCommandBuilder, TextChannel, VoiceChannel, GuildMember, AttachmentBuilder, Message, PermissionFlagsBits, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from "discord.js";
 import {
     joinVoiceChannel,
     createAudioPlayer,
@@ -95,6 +95,16 @@ export default {
                         .setDescription("Language code for AI monitor alerts (e.g., en, es, fr)")
                         .setRequired(false)
                 )
+        )
+        .addSubcommand(s =>
+            s.setName("monitor_cases")
+                .setDescription("View AI monitor cases for this guild")
+                .addIntegerOption(o =>
+                    o.setName("page")
+                        .setDescription("Page number")
+                        .setMinValue(1)
+                        .setRequired(false)
+                )
         ),
     category: "AI",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
@@ -119,6 +129,7 @@ export default {
                 language_too_long: "Language code cannot have more than 2 characters.",
                 logs_channel_required: "Please provide a text logs channel.",
                 invalid_action: "Invalid action.",
+                no_monitor_cases: "No AI monitor cases found for this guild.",
             },
             common: {
                 question: "Your question was:",
@@ -142,6 +153,22 @@ export default {
                 alerts_language_label: "Alerts language:",
                 monitor_enabled_label: "AI monitor enabled.",
                 monitor_disabled_label: "AI monitor disabled.",
+            },
+            monitor_cases: {
+                title: "AI Monitor Cases",
+                page: "Page",
+                of: "of",
+                total: "Total",
+                status: "Status",
+                risk: "Risk",
+                event: "Event",
+                user: "User",
+                channel: "Channel",
+                action: "Action",
+                created: "Created",
+                summary: "Summary",
+                reason: "Reason",
+                none: "No details provided"
             },
             voice: {
                 joining: "Joining voice channel and starting AI conversation...\n\nSay \"stop\" or \"end conversation\" to stop.\nVoice:",
@@ -404,6 +431,126 @@ export default {
                     return await reply(texts.common.monitor_disabled_label);
                 }
                 return await reply(texts.errors.invalid_action);
+            }
+            case "monitor_cases": {
+                if (!interaction.inGuild()) return await reply(texts.errors.guild_only);
+                if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) return await reply(texts.errors.not_admin);
+                const PAGE_SIZE = 5;
+                const reqPage = interaction.options.getInteger("page") ?? 1;
+                const countRows = await db.query("SELECT COUNT(*) as total FROM ai_monitor_cases WHERE guild_id = ?", [interaction.guildId]) as unknown as any[];
+                const total = Number(countRows?.[0]?.total ?? 0);
+                if (total < 1) return await reply(texts.errors.no_monitor_cases);
+                const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+                let currentPage = Math.min(Math.max(1, reqPage), totalPages);
+
+                const formatText = (value: string | null | undefined, limit = 200) => {
+                    if (!value || !value.trim()) return texts.monitor_cases.none;
+                    if (value.length <= limit) return value;
+                    return `${value.slice(0, limit - 3)}...`;
+                };
+
+                const buildEmbed = async (page: number) => {
+                    const offset = (page - 1) * PAGE_SIZE;
+                    const rows = await db.query(
+                        "SELECT case_id, event_type, risk, status, summary, reason, recommended_action, recommended_actions, user_id, channel_id, message_id, created_at, auto_action_taken FROM ai_monitor_cases WHERE guild_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                        [interaction.guildId, PAGE_SIZE, offset]
+                    ) as unknown as any[];
+
+                    const embed = new EmbedBuilder()
+                        .setColor("Blue")
+                        .setTitle(texts.monitor_cases.title)
+                        .setFooter({ text: `${texts.monitor_cases.page} ${page} ${texts.monitor_cases.of} ${totalPages} • ${texts.monitor_cases.total}: ${total}` })
+                        .setTimestamp();
+
+                    for (const row of rows) {
+                        let actions: string[] = [];
+                        if (row.recommended_actions) {
+                            try {
+                                const parsed = JSON.parse(row.recommended_actions);
+                                if (Array.isArray(parsed)) actions = parsed;
+                            } catch {}
+                        }
+                        if (actions.length === 0 && row.recommended_action) actions = [row.recommended_action];
+                        const actionText = actions.length ? actions.join(", ") : "notify";
+                        const userText = row.user_id ? `<@${row.user_id}>` : texts.monitor_cases.none;
+                        const channelText = row.channel_id ? `<#${row.channel_id}>` : texts.monitor_cases.none;
+                        const createdText = row.created_at ? new Date(row.created_at).toLocaleString() : texts.monitor_cases.none;
+                        const link = row.message_id && row.channel_id
+                            ? `https://discord.com/channels/${interaction.guildId}/${row.channel_id}/${row.message_id}`
+                            : null;
+                        const valueLines = [
+                            `${texts.monitor_cases.status}: ${row.status ?? "open"}`,
+                            `${texts.monitor_cases.risk}: ${row.risk ?? "low"}`,
+                            `${texts.monitor_cases.event}: ${row.event_type ?? texts.monitor_cases.none}`,
+                            `${texts.monitor_cases.user}: ${userText}`,
+                            `${texts.monitor_cases.channel}: ${channelText}`,
+                            `${texts.monitor_cases.action}: ${actionText}${row.auto_action_taken ? " (auto)" : ""}`,
+                            `${texts.monitor_cases.created}: ${createdText}`,
+                            `${texts.monitor_cases.summary}: ${formatText(row.summary)}`,
+                            `${texts.monitor_cases.reason}: ${formatText(row.reason)}`
+                        ];
+                        if (link) valueLines.push(`Message: ${link}`);
+                        embed.addFields({ name: row.case_id, value: valueLines.join("\n"), inline: false });
+                    }
+                    return embed;
+                };
+
+                const buildComponents = (page: number) => {
+                    const prevPage = Math.max(1, page - 1);
+                    const nextPage = Math.min(totalPages, page + 1);
+                    return new ActionRowBuilder<ButtonBuilder>().addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`aimoncases-prev-${interaction.user.id}-${prevPage}`)
+                            .setLabel("Previous")
+                            .setStyle(ButtonStyle.Secondary)
+                            .setDisabled(page <= 1),
+                        new ButtonBuilder()
+                            .setCustomId(`aimoncases-next-${interaction.user.id}-${nextPage}`)
+                            .setLabel("Next")
+                            .setStyle(ButtonStyle.Primary)
+                            .setDisabled(page >= totalPages)
+                    );
+                };
+
+                const embed = await buildEmbed(currentPage);
+                const components = [buildComponents(currentPage)];
+                const response = await utils.safeInteractionRespond(interaction, {
+                    embeds: [embed],
+                    components,
+                    content: ""
+                });
+
+                const collector = response.createMessageComponentCollector({
+                    filter: (i: any) => i.user.id === interaction.user.id && i.customId.startsWith("aimoncases-"),
+                    time: 300000
+                });
+
+                collector.on("collect", async (i: any) => {
+                    const parts = i.customId.split("-");
+                    const targetPage = Number(parts[3]) || currentPage;
+                    currentPage = Math.min(Math.max(1, targetPage), totalPages);
+                    const newEmbed = await buildEmbed(currentPage);
+                    const newComponents = [buildComponents(currentPage)];
+                    await utils.safeComponentUpdate(i, {
+                        embeds: [newEmbed],
+                        components: newComponents,
+                        content: ""
+                    });
+                });
+
+                collector.on("end", async () => {
+                    try {
+                        const disabledComponents = components.map(row => {
+                            const newRow = ActionRowBuilder.from(row as any);
+                            newRow.components.forEach((component: any) => {
+                                if (component.setDisabled) component.setDisabled(true);
+                            });
+                            return newRow;
+                        });
+                        await utils.safeInteractionRespond(interaction, { components: disabledComponents as any, content: "" });
+                    } catch { }
+                });
+                break;
             }
             case "voice": {
                 if (!interaction.guild) return await utils.safeInteractionRespond(interaction, texts.errors.guild_only);

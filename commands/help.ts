@@ -2,7 +2,6 @@ import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionR
 import data from "../data";
 import utils from "../utils";
 
-// Category emojis for visual appeal
 const CATEGORY_EMOJIS: Record<string, string> = {
     "Utility": "🛠️",
     "AI": "🤖",
@@ -14,7 +13,6 @@ const CATEGORY_EMOJIS: Record<string, string> = {
     "Fun": "🎉"
 };
 
-// Category descriptions
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
     "Utility": "General utility commands for everyday use",
     "AI": "AI-powered features and interactions",
@@ -57,7 +55,6 @@ export default {
         const specificCommand = interaction.options.getString("command");
         const selectedCategory = interaction.options.getString("category");
 
-        // If a specific command is requested
         if (specificCommand) {
             const cmd = data.bot.commands.get(specificCommand.toLowerCase());
             if (!cmd) {
@@ -79,13 +76,11 @@ export default {
                 texts = await utils.autoTranslate(texts, "en", lang);
             }
 
-            // Translate only the command description
             let translatedDescription = cmd.data.description;
             if (lang !== "en") {
                 try {
                     translatedDescription = (await utils.translate(cmd.data.description, "en", lang)).text;
                 } catch (error) {
-                    // If translation fails, use original
                     translatedDescription = cmd.data.description;
                 }
             }
@@ -104,7 +99,7 @@ export default {
 
 
             return await utils.safeInteractionRespond(interaction, { embeds: [detailEmbed], content: "" });
-        }        // Get all commands and organize by category
+        }
         const commandsByCategory: Record<string, any[]> = {};
 
         for (const [name, cmd] of data.bot.commands) {
@@ -115,17 +110,14 @@ export default {
             commandsByCategory[category].push(cmd);
         }
 
-        // Sort categories and commands
         const sortedCategories = Object.keys(commandsByCategory).sort();
         for (const category of sortedCategories) {
             commandsByCategory[category].sort((a, b) => a.data.name.localeCompare(b.data.name));
         }
 
-        // Filter by category if specified
         const categoriesToShow = selectedCategory ? [selectedCategory] : sortedCategories;
         const COMMANDS_PER_PAGE = 8;
 
-        // Collect all commands to show
         let allCommands: Array<{ cmd: any; category: string }> = [];
         for (const category of categoriesToShow) {
             if (commandsByCategory[category]) {
@@ -142,7 +134,6 @@ export default {
         const totalPages = Math.ceil(allCommands.length / COMMANDS_PER_PAGE);
         let currentPage = 0;
 
-        // Texts for translation
         let texts = {
             title: "Command Help",
             description: "Browse all available commands by category",
@@ -174,7 +165,6 @@ export default {
                 .setFooter({ text: `${texts.page} ${page + 1} ${texts.of} ${totalPages} • ${texts.totalCommands}: ${allCommands.length}` })
                 .setTimestamp();
 
-            // Group commands by category for this page
             const pageCategories: Record<string, any[]> = {};
             for (const { cmd, category } of pageCommands) {
                 if (!pageCategories[category]) {
@@ -183,11 +173,9 @@ export default {
                 pageCategories[category].push(cmd);
             }
 
-            // Add fields for each category on this page
             for (const [category, cmds] of Object.entries(pageCategories)) {
                 const emoji = CATEGORY_EMOJIS[category] || "📋";
 
-                // Translate only descriptions
                 const commandList = [];
                 for (const cmd of cmds) {
                     let translatedDesc = cmd.data.description;
@@ -240,7 +228,6 @@ export default {
                     .setDisabled(page >= totalPages - 1)
             );
 
-            // Category filter dropdown
             const categoryOptions = [
                 new StringSelectMenuOptionBuilder()
                     .setLabel(texts.categoryAll)
@@ -275,13 +262,13 @@ export default {
 
         const response = await utils.safeInteractionRespond(interaction, {
             embeds: [embed],
-            components: components
+            components: components,
+            content: ""
         });
 
-        // Create collector for button interactions
         const collector = response.createMessageComponentCollector({
             filter: (i: any) => i.user.id === interaction.user.id,
-            time: 300000 // 5 minutes
+            time: 300000
         });
 
         collector.on("collect", async (i: any) => {
@@ -296,7 +283,6 @@ export default {
             } else if (i.customId === "help_category_filter" && i.isStringSelectMenu()) {
                 const selectedValue = i.values[0];
 
-                // Rebuild command list based on selection
                 allCommands = [];
                 const filterCategories = selectedValue === "all" ? sortedCategories : [selectedValue];
 
@@ -322,7 +308,6 @@ export default {
 
         collector.on("end", async () => {
             try {
-                // Disable all components when collector expires
                 const disabledComponents = components.map(row => {
                     const newRow = ActionRowBuilder.from(row as any);
                     newRow.components.forEach((component: any) => {
@@ -332,9 +317,7 @@ export default {
                 });
 
                 await utils.safeInteractionRespond(interaction, { components: disabledComponents as any });
-            } catch (error) {
-                // Ignore errors if message was already deleted
-            }
+            } catch (error) { }
         });
     },
     ephemeral: false
