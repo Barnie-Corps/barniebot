@@ -1427,10 +1427,6 @@ export default class AiMonitorManager {
             await interaction.editReply({ content: "Marked as solved." });
             return true;
         }
-        if (config && !config.allow_actions) {
-            await interaction.editReply({ content: "Auto actions are disabled for this guild." });
-            return true;
-        }
         const guild = this.client.guilds.cache.get(record.guild_id);
         if (!guild) {
             await interaction.editReply({ content: "Guild not found." });
