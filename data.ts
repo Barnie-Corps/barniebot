@@ -5,6 +5,10 @@ const data: DataType = {
         host: String(process.env.DB_HOST),
         user: String(process.env.DB_USER),
         password: String(process.env.DB_PASSWORD),
+        port: (() => {
+            const p = Number(process.env.DB_PORT);
+            return Number.isFinite(p) && p > 0 ? p : undefined;
+        })(),
         database: String(process.env.DB_NAME),
         charset: "utf8mb4"
     },
