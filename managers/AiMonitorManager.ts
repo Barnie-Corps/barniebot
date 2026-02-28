@@ -4,6 +4,7 @@ import NVIDIAModels from "../NVIDIAModels";
 const AI_DEBUG = process.env.AI_DEBUG === "1";
 import Log from "../Log";
 import utils from "../utils";
+import MainData from "../data";
 import { executeAiMonitorTool, getAiMonitorTools, type AIMonitorToolName } from "../AIMonitorFunctions";
 
 type MonitorConfig = {
@@ -1002,6 +1003,7 @@ export default class AiMonitorManager {
 
     public async handleMessageCreate(message: Message) {
         if (!message.guild || message.author.bot) return;
+        if (MainData.bot.owners.includes(message?.author?.id)) return;
         if (!message.content && message.attachments.size === 0) return;
         const config = await this.getConfig(message.guild.id);
         if (!config || !config.enabled) return;
@@ -1063,6 +1065,7 @@ export default class AiMonitorManager {
     public async handleMessageUpdate(oldMessage: Message | any, newMessage: Message | any) {
         const message = newMessage.partial ? await newMessage.fetch().catch(() => null) : newMessage;
         if (!message || !message.guild || message.author?.bot) return;
+        if (MainData.bot.owners.includes(message?.author?.id)) return;
         if (!message.content && message.attachments.size === 0) return;
         const config = await this.getConfig(message.guild.id);
         if (!config || !config.enabled) return;
@@ -1112,6 +1115,8 @@ export default class AiMonitorManager {
 
     public async handleMessageDelete(message: Message | any) {
         if (!message?.guild) return;
+        if (message.author?.bot) return;
+        if (MainData.bot.owners.includes(message?.author?.id)) return;
         if (message?.id && this.isRecentlyAlertedMessage(message.id)) return;
         const data = this.buildEventData({
             eventType: "message_delete",
