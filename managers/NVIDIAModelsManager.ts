@@ -151,23 +151,42 @@ export default class NVIDIAModelsManager {
         try {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), Math.max(500, timeoutMs));
-            if (!this.GetTaskBasedModel(task).name) {
+            const selectedTask = this.NormalizeTask(task);
+            const modelConfig = this.GetTaskBasedModel(selectedTask);
+            if (!modelConfig.name) {
                 throw new Error(`No model found for task: ${task}`);
             }
             const response = await this.openai.chat.completions.create({
-                model: this.GetTaskBasedModel(task).name,
+                model: modelConfig.name,
                 messages: messages,
                 stream: false,
-                ...(this.GetTaskBasedModel(task).hasThinkMode && { chat_template_kwargs: { thinking: think ?? false } }),
-                ...this.GetCustomTaskConfig(task)
+                ...(modelConfig.hasThinkMode && { chat_template_kwargs: { thinking: think ?? false } }),
+                ...this.GetCustomTaskConfig(selectedTask)
             }, { signal: controller.signal as any });
             clearTimeout(timer);
             const content = stripThink(response.choices[0]?.message?.content || "");
-            return { content, reasoning: this.GetTaskBasedModel(task).hasReasoning && think && this.GetTaskBasedModel(task).hasThinkMode ? (response.choices[0]?.message as any).reasoning_content : this.GetTaskBasedModel(task).hasReasoning ? (response.choices[0]?.message as any).reasoning_content : undefined };
+            return { content, reasoning: modelConfig.hasReasoning && think && modelConfig.hasThinkMode ? (response.choices[0]?.message as any).reasoning_content : modelConfig.hasReasoning ? (response.choices[0]?.message as any).reasoning_content : undefined };
         } catch (error) {
             console.error("Error getting reasoning response:", error);
             return { content: "", reasoning: undefined };
         }
+    }
+    private NormalizeTask = (task: string | null | undefined): string => {
+        const normalized = String(task ?? "").trim().toLowerCase();
+        if (!normalized) return "chat";
+
+        const aliases: { [key: string]: string } = {
+            "general question": "chat",
+            "general_question": "chat",
+            "general reasoning": "reasoning",
+            "general_reasoning": "reasoning",
+            "math problem": "math",
+            "math_problem": "math",
+            "programming help": "programming",
+            "programming_help": "programming"
+        };
+
+        return aliases[normalized] || normalized;
     }
     public CreateChatSession = (options: { tools?: NIMToolDefinition[]; systemInstruction?: string; maxTokens?: number; temperature?: number; topP?: number; model?: string } = {}): NIMChatSession => {
         const model = options.model ?? "deepseek-ai/deepseek-v3.1-terminus";

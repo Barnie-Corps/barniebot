@@ -209,7 +209,8 @@ export default {
                 await reply(texts.common.thinking);
                 const question = interaction.options.getString("question") as string;
                 const think = interaction.options.getBoolean("think") || false;
-                const response = await NVIDIAModels.GetModelChatResponse([{ role: "user", content: `Answer the following question as briefly as possible and in the language used in the question: ${question}\n${"-".repeat(20)}\n Please avoid using complex markdown elements (i.e mathematical elements) as Discord does not support them. Only basic Markdown styling is supported in Discord.` }], 20000, interaction.options.getString("task") as string, think);
+                const task = interaction.options.getString("task", true).trim().toLowerCase();
+                const response = await NVIDIAModels.GetModelChatResponse([{ role: "user", content: `Answer the following question as briefly as possible and in the language used in the question: ${question}\n${"-".repeat(20)}\n Please avoid using complex markdown elements (i.e mathematical elements) as Discord does not support them. Only basic Markdown styling is supported in Discord.` }], 20000, task, think);
                 if (response.content.length < 1) return await reply(texts.errors.no_response);
                 if (response.content.length > 2000) {
                     const filename = `./ai-response-${Date.now()}.md`;
@@ -222,7 +223,7 @@ export default {
                 break;
             }
             case "chat": {
-                if (!await utils.isVIP(interaction.user.id) && !data.bot.owners.includes(interaction.user.id) && !utils.isStaff(interaction.user.id)) return await reply(texts.errors.not_vip);
+                if (!(await utils.isVIP(interaction.user.id)) && !String(process.env.OWNERS).trim().split(",").includes(interaction.user.id) && ! (await utils.isStaff(interaction.user.id))) return await reply(texts.errors.not_vip);
                 const convoOwnerId = interaction.user.id;
                 let addedUserId: string | null = null;
                 let conversationEndedBy: string | null = null;
