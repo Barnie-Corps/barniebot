@@ -10,7 +10,6 @@ export default {
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         const userId = interaction.user.id;
 
-        // Localizable interface texts
         let texts = {
             none: "📭 You don't have any unread notifications!",
             embedTitle: "📢 New Notification",
@@ -23,9 +22,7 @@ export default {
         if (lang !== "en") {
             try {
                 texts = await utils.autoTranslate(texts, "en", lang);
-            } catch {
-                // Ignore translation errors and fallback to English
-            }
+            } catch { }
         }
 
         const notifications = await utils.getUnreadNotifications(userId);

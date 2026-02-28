@@ -16,6 +16,7 @@ import client from "..";
 import * as fs from "fs";
 import * as path from "path";
 import { FunctionCall } from "@google/genai";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import langs from "langs";
 import NVIDIAModels from "../NVIDIAModels";
 import { prepareAudioForASR, stereoToMono, resampleAudio } from "../utils/audioUtils";
@@ -210,7 +211,30 @@ export default {
                 const question = interaction.options.getString("question") as string;
                 const think = interaction.options.getBoolean("think") || false;
                 const task = interaction.options.getString("task", true).trim().toLowerCase();
-                const response = await NVIDIAModels.GetModelChatResponse([{ role: "user", content: `Answer the following question as briefly as possible and in the language used in the question: ${question}\n${"-".repeat(20)}\n Please avoid using complex markdown elements (i.e mathematical elements) as Discord does not support them. Only basic Markdown styling is supported in Discord.` }], 20000, task, think);
+                const currentDateUtc = new Date().toISOString();
+                const channelName = interaction.channel && "name" in interaction.channel ? String((interaction.channel as any).name ?? "unknown") : "direct-message";
+                const guildName = interaction.guild?.name ?? "direct-message";
+                const systemContext = [
+                    "You are BarnieBot, an AI assistant running inside Discord. You were created by BarnieCorps.",
+                    "Help users with clear, practical, and concise answers.",
+                    "Respond in the same language as the user question unless explicitly requested otherwise.",
+                    "Use only Discord-compatible basic Markdown (no advanced math/LaTeX blocks).",
+                    `Current UTC datetime: ${currentDateUtc}`,
+                    `Task type selected by user: ${task}`,
+                    `Think mode: ${think ? "enabled" : "disabled"}`,
+                    `User: ${interaction.user.username} (${interaction.user.id})`,
+                    `Guild: ${guildName} (${interaction.guildId ?? "N/A"})`,
+                    `Channel: ${channelName} (${interaction.channelId})`,
+                    `Bot language setting for this interaction: ${lang}`
+                ].join("\n");
+                const askMessages: ChatCompletionMessageParam[] = [
+                    { role: "system", content: systemContext },
+                    {
+                        role: "user",
+                        content: `Answer the following question as briefly as possible and in the language used in the question: ${question}\n${"-".repeat(20)}\nPlease avoid using complex markdown elements (i.e mathematical elements) as Discord does not support them. Only basic Markdown styling is supported in Discord.`
+                    }
+                ];
+                const response = await NVIDIAModels.GetModelChatResponse(askMessages, 20000, task, think);
                 if (response.content.length < 1) return await reply(texts.errors.no_response);
                 if (response.content.length > 2000) {
                     const filename = `./ai-response-${Date.now()}.md`;

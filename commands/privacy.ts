@@ -30,7 +30,7 @@ export default {
                 },
                 {
                     name: "👥 Third-Party Services",
-                    value: "• Google Gemini (AI chat)\n• Google Translate (translation)\n• NVIDIA Riva (voice features)\n• Gmail (verification emails)\n• Discord API (all interactions)",
+                    value: "• Google Translate (translation)\n• NVIDIA Riva (voice features)\n• Gmail (verification emails)\n• Discord API (all interactions)",
                     inline: false
                 },
                 {
@@ -49,7 +49,6 @@ export default {
             })
             .setTimestamp();
 
-        // Translation if needed
         if (lang !== "en") {
             const translated = await utils.autoTranslate(
                 { value: "View our comprehensive privacy policy and usage terms for complete details about data handling, security measures, and your rights." },
