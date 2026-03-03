@@ -1,7 +1,19 @@
 import utils from "./utils";
 import type { FunctionDeclaration, OpenAIToolDefinition, SchemaType } from "./AIFunctions";
 
-export type AIMonitorToolName = "fetch_url_safe" | "fetch_discord_user" | "search_user_by_username_discord" | "get_user_warnings" | "get_warning_details" | "get_message_context" | "get_user_context" | "get_guild_context";
+export type AIMonitorToolName =
+    | "fetch_url_safe"
+    | "fetch_discord_user"
+    | "search_user_by_username_discord"
+    | "get_user_warnings"
+    | "get_warning_details"
+    | "get_message_context"
+    | "get_user_context"
+    | "get_guild_context"
+    | "get_user_case_history"
+    | "get_channel_case_history"
+    | "get_guild_audit_events"
+    | "get_member_safety_profile";
 
 const functionDeclarations: Record<AIMonitorToolName, FunctionDeclaration> = {
     fetch_url_safe: {
@@ -96,6 +108,60 @@ const functionDeclarations: Record<AIMonitorToolName, FunctionDeclaration> = {
                 guildId: { type: "string" as SchemaType }
             },
             required: ["guildId"]
+        }
+    },
+    get_user_case_history: {
+        name: "get_user_case_history",
+        description: "Get recent AI monitor cases for a specific user in a guild.",
+        parameters: {
+            type: "object" as SchemaType,
+            properties: {
+                guildId: { type: "string" as SchemaType },
+                userId: { type: "string" as SchemaType },
+                days: { type: "number" as SchemaType, description: "Lookback window in days (default 7, max 30)." },
+                limit: { type: "number" as SchemaType, description: "Maximum cases to return (default 10, max 25)." }
+            },
+            required: ["guildId", "userId"]
+        }
+    },
+    get_channel_case_history: {
+        name: "get_channel_case_history",
+        description: "Get recent AI monitor cases for a specific channel in a guild.",
+        parameters: {
+            type: "object" as SchemaType,
+            properties: {
+                guildId: { type: "string" as SchemaType },
+                channelId: { type: "string" as SchemaType },
+                hours: { type: "number" as SchemaType, description: "Lookback window in hours (default 24, max 168)." },
+                limit: { type: "number" as SchemaType, description: "Maximum cases to return (default 10, max 25)." }
+            },
+            required: ["guildId", "channelId"]
+        }
+    },
+    get_guild_audit_events: {
+        name: "get_guild_audit_events",
+        description: "Fetch recent guild audit log events for investigation.",
+        parameters: {
+            type: "object" as SchemaType,
+            properties: {
+                guildId: { type: "string" as SchemaType },
+                actionType: { type: "string" as SchemaType, description: "Optional Discord audit log action type numeric value." },
+                userId: { type: "string" as SchemaType, description: "Optional executor user ID filter." },
+                limit: { type: "number" as SchemaType, description: "Maximum audit entries to return (default 10, max 25)." }
+            },
+            required: ["guildId"]
+        }
+    },
+    get_member_safety_profile: {
+        name: "get_member_safety_profile",
+        description: "Get compact member risk profile from account age, warnings, recent monitor cases, and moderation state.",
+        parameters: {
+            type: "object" as SchemaType,
+            properties: {
+                guildId: { type: "string" as SchemaType },
+                userId: { type: "string" as SchemaType }
+            },
+            required: ["guildId", "userId"]
         }
     }
 };

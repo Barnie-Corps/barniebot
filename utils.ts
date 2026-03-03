@@ -793,6 +793,184 @@ const utils = {
         invites
       };
     },
+    get_user_case_history: async (args: { requesterId?: string; guildId?: string; userId?: string; days?: number; limit?: number }): Promise<any> => {
+      if (!args.guildId || !args.userId) return { error: "Missing parameters" };
+      if (!isSystemRequester(args.requesterId)) {
+        if (!args.requesterId) return { error: "Missing requesterId" };
+        const owner = isOwner(args.requesterId) === true;
+        const adminStaff = await isAdminStaffUser(args.requesterId);
+        const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+        if (guildInfo.error) return { error: guildInfo.error };
+        const member = guildInfo.member as any;
+        const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageMessages) || hasGuildPermission(member, PermissionFlagsBits.ModerateMembers);
+        if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      }
+      const limit = Math.max(1, Math.min(args.limit ?? 10, 25));
+      const days = Math.max(1, Math.min(args.days ?? 7, 30));
+      const since = Date.now() - days * 24 * 60 * 60 * 1000;
+      const rows = await db.query(
+        "SELECT case_id, event_type, risk, status, recommended_action, recommended_actions, created_at, summary, reason, auto_action_taken FROM ai_monitor_cases WHERE guild_id = ? AND user_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT ?",
+        [args.guildId, args.userId, since, limit]
+      ) as unknown as any[];
+      return {
+        guildId: args.guildId,
+        userId: args.userId,
+        since,
+        total: Array.isArray(rows) ? rows.length : 0,
+        cases: Array.isArray(rows) ? rows.map(r => ({
+          caseId: r.case_id,
+          eventType: r.event_type,
+          risk: r.risk,
+          status: r.status,
+          recommendedAction: r.recommended_action,
+          recommendedActions: (() => {
+            try { return r.recommended_actions ? JSON.parse(r.recommended_actions) : null; } catch { return null; }
+          })(),
+          createdAt: r.created_at,
+          summary: r.summary,
+          reason: r.reason,
+          autoActionTaken: Boolean(r.auto_action_taken)
+        })) : []
+      };
+    },
+    get_channel_case_history: async (args: { requesterId?: string; guildId?: string; channelId?: string; hours?: number; limit?: number }): Promise<any> => {
+      if (!args.guildId || !args.channelId) return { error: "Missing parameters" };
+      if (!isSystemRequester(args.requesterId)) {
+        if (!args.requesterId) return { error: "Missing requesterId" };
+        const owner = isOwner(args.requesterId) === true;
+        const adminStaff = await isAdminStaffUser(args.requesterId);
+        const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+        if (guildInfo.error) return { error: guildInfo.error };
+        const member = guildInfo.member as any;
+        const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageMessages) || hasGuildPermission(member, PermissionFlagsBits.ModerateMembers);
+        if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      }
+      const limit = Math.max(1, Math.min(args.limit ?? 10, 25));
+      const hours = Math.max(1, Math.min(args.hours ?? 24, 168));
+      const since = Date.now() - hours * 60 * 60 * 1000;
+      const rows = await db.query(
+        "SELECT case_id, event_type, risk, status, recommended_action, recommended_actions, created_at, summary, reason, auto_action_taken, user_id, message_id FROM ai_monitor_cases WHERE guild_id = ? AND channel_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT ?",
+        [args.guildId, args.channelId, since, limit]
+      ) as unknown as any[];
+      return {
+        guildId: args.guildId,
+        channelId: args.channelId,
+        since,
+        total: Array.isArray(rows) ? rows.length : 0,
+        cases: Array.isArray(rows) ? rows.map(r => ({
+          caseId: r.case_id,
+          eventType: r.event_type,
+          risk: r.risk,
+          status: r.status,
+          recommendedAction: r.recommended_action,
+          recommendedActions: (() => {
+            try { return r.recommended_actions ? JSON.parse(r.recommended_actions) : null; } catch { return null; }
+          })(),
+          createdAt: r.created_at,
+          summary: r.summary,
+          reason: r.reason,
+          autoActionTaken: Boolean(r.auto_action_taken),
+          userId: r.user_id ?? null,
+          messageId: r.message_id ?? null
+        })) : []
+      };
+    },
+    get_guild_audit_events: async (args: { requesterId?: string; guildId?: string; actionType?: string; userId?: string; limit?: number }): Promise<any> => {
+      if (!args.guildId) return { error: "Missing guildId parameter" };
+      if (!isSystemRequester(args.requesterId)) {
+        if (!args.requesterId) return { error: "Missing requesterId" };
+        const owner = isOwner(args.requesterId) === true;
+        const adminStaff = await isAdminStaffUser(args.requesterId);
+        const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+        if (guildInfo.error) return { error: guildInfo.error };
+        const member = guildInfo.member as any;
+        const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ViewAuditLog);
+        if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      }
+      const guild = client.guilds.cache.get(args.guildId);
+      if (!guild) return { error: "Guild not found" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ViewAuditLog)) return { error: "Bot lacks ViewAuditLog permission" };
+      const limit = Math.max(1, Math.min(args.limit ?? 10, 25));
+      const typeNum = args.actionType !== undefined ? Number(args.actionType) : undefined;
+      const logs = await guild.fetchAuditLogs({
+        limit,
+        type: Number.isFinite(typeNum) ? (typeNum as any) : undefined
+      }).catch(() => null);
+      if (!logs) return { error: "Unable to fetch audit logs" };
+      let entries = Array.from(logs.entries.values());
+      if (args.userId) entries = entries.filter(entry => entry.executor?.id === args.userId);
+      return {
+        guildId: guild.id,
+        total: entries.length,
+        entries: entries.slice(0, limit).map(entry => ({
+          id: entry.id,
+          action: entry.action,
+          actionType: entry.actionType,
+          createdAt: entry.createdTimestamp ?? null,
+          executor: entry.executor ? { id: entry.executor.id, tag: entry.executor.tag } : null,
+          targetId: entry.targetId ?? null,
+          reason: entry.reason ?? null
+        }))
+      };
+    },
+    get_member_safety_profile: async (args: { requesterId?: string; guildId?: string; userId?: string }): Promise<any> => {
+      if (!args.guildId || !args.userId) return { error: "Missing parameters" };
+      if (!isSystemRequester(args.requesterId)) {
+        if (!args.requesterId) return { error: "Missing requesterId" };
+        const owner = isOwner(args.requesterId) === true;
+        const adminStaff = await isAdminStaffUser(args.requesterId);
+        const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+        if (guildInfo.error) return { error: guildInfo.error };
+        const member = guildInfo.member as any;
+        const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageMessages) || hasGuildPermission(member, PermissionFlagsBits.ModerateMembers);
+        if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      }
+      const guild = client.guilds.cache.get(args.guildId);
+      if (!guild) return { error: "Guild not found" };
+      const user = await client.users.fetch(args.userId).catch(() => null);
+      const member = await guild.members.fetch(args.userId).catch(() => null);
+      const warningsRows = await db.query("SELECT COUNT(*) as total, SUM(CASE WHEN active = TRUE THEN 1 ELSE 0 END) as active FROM global_warnings WHERE userid = ?", [args.userId]) as unknown as any[];
+      const recentCasesRows = await db.query(
+        "SELECT case_id, risk, event_type, created_at FROM ai_monitor_cases WHERE guild_id = ? AND user_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 10",
+        [args.guildId, args.userId, Date.now() - 7 * 24 * 60 * 60 * 1000]
+      ) as unknown as any[];
+      const now = Date.now();
+      const accountAgeDays = user?.createdTimestamp ? Math.floor((now - user.createdTimestamp) / (24 * 60 * 60 * 1000)) : null;
+      const joinedAgeDays = member?.joinedTimestamp ? Math.floor((now - member.joinedTimestamp) / (24 * 60 * 60 * 1000)) : null;
+      const riskCounts = { low: 0, medium: 0, high: 0 };
+      if (Array.isArray(recentCasesRows)) {
+        for (const row of recentCasesRows) {
+          if (row?.risk === "high") riskCounts.high += 1;
+          else if (row?.risk === "medium") riskCounts.medium += 1;
+          else riskCounts.low += 1;
+        }
+      }
+      return {
+        guildId: args.guildId,
+        user: user ? { id: user.id, tag: user.tag, bot: user.bot } : { id: args.userId, tag: null, bot: null },
+        accountAgeDays,
+        joinedAgeDays,
+        warnings: {
+          total: Number(warningsRows?.[0]?.total ?? 0),
+          active: Number(warningsRows?.[0]?.active ?? 0)
+        },
+        moderationState: member ? {
+          communicationDisabledUntil: member.communicationDisabledUntilTimestamp ?? null,
+          roles: member.roles.cache.map((r: any) => ({ id: r.id, name: r.name }))
+        } : null,
+        recentCases: {
+          total: Array.isArray(recentCasesRows) ? recentCasesRows.length : 0,
+          risks: riskCounts,
+          latest: Array.isArray(recentCasesRows) ? recentCasesRows.map(row => ({
+            caseId: row.case_id,
+            eventType: row.event_type,
+            risk: row.risk,
+            createdAt: row.created_at
+          })) : []
+        }
+      };
+    },
     list_guild_channels: async (args: { requesterId?: string; guildId?: string; type?: string; limit?: number }): Promise<any> => {
       if (!args?.requesterId || !args.guildId) return { error: "Missing parameters" };
       const owner = isOwner(args.requesterId) === true;
@@ -2663,7 +2841,18 @@ const utils = {
       if (!args.guildId) return { error: "Missing guildId parameter" };
       const config: any = await db.query("SELECT * FROM ai_monitor_configs WHERE guild_id = ?", [args.guildId]);
       if (!config || !config[0]) return { error: "AI monitor not configured for this guild" };
-      return { config: config[0] };
+      const row = config[0];
+      let channelWhitelist: string[] = [];
+      let roleWhitelist: string[] = [];
+      try { channelWhitelist = Array.isArray(row.channel_whitelist_ids) ? row.channel_whitelist_ids : JSON.parse(row.channel_whitelist_ids || "[]"); } catch {}
+      try { roleWhitelist = Array.isArray(row.role_whitelist_ids) ? row.role_whitelist_ids : JSON.parse(row.role_whitelist_ids || "[]"); } catch {}
+      return {
+        config: {
+          ...row,
+          channel_whitelist_ids: channelWhitelist,
+          role_whitelist_ids: roleWhitelist
+        }
+      };
     },
     list_ai_monitor_cases: async (args: { guildId: string; status?: string; userId?: string; limit?: number }): Promise<any> => {
       if (!args.guildId) return { error: "Missing guildId parameter" };

@@ -15,6 +15,8 @@ type MonitorConfig = {
     analyze_potentially: boolean;
     allow_investigation_tools: boolean;
     monitor_language: string;
+    channel_whitelist_ids: string[];
+    role_whitelist_ids: string[];
 };
 
 type TriageResult = {
@@ -25,7 +27,7 @@ type TriageResult = {
     confidence: number;
 };
 
-type ActionType = "notify" | "warn" | "timeout" | "kick" | "ban" | "delete_message" | "delete_and_warn" | "delete_and_timeout" | "delete_and_kick" | "delete_and_ban";
+type ActionType = "notify" | "delete_message" | "warn" | "timeout" | "kick" | "ban";
 
 type ReviewResult = {
     suspicious: boolean;
@@ -36,7 +38,6 @@ type ReviewResult = {
     recommended_actions?: ActionType[];
     warning_message?: string;
     action_duration_ms?: number;
-    delete_message?: boolean;
     confidence: number;
 };
 
@@ -52,6 +53,7 @@ export default class AiMonitorManager {
         byDomain: Map<string, number>;
     }>();
     private recentRaidAlerts = new Map<string, number>();
+    private noisyEventCooldowns = new Map<string, number>();
     private logLabelCache = new Map<string, {
         title: string;
         fields: {
@@ -75,6 +77,19 @@ export default class AiMonitorManager {
 
     constructor(private client: Client) {}
 
+    private parseIdJson(value: any): string[] {
+        if (!value) return [];
+        try {
+            const parsed = typeof value === "string" ? JSON.parse(value) : value;
+            if (!Array.isArray(parsed)) return [];
+            return parsed
+                .map(v => String(v || "").trim())
+                .filter(v => /^\d{5,25}$/.test(v));
+        } catch {
+            return [];
+        }
+    }
+
     private async getConfig(guildId: string): Promise<MonitorConfig | null> {
         const rows = await db.query("SELECT * FROM ai_monitor_configs WHERE guild_id = ?", [guildId]) as unknown as any[];
         if (!rows || !rows[0]) return null;
@@ -87,7 +102,9 @@ export default class AiMonitorManager {
             allow_investigation_tools: Boolean(rows[0].allow_investigation_tools),
             monitor_language: typeof rows[0].monitor_language === "string" && rows[0].monitor_language.trim()
                 ? rows[0].monitor_language.trim().toLowerCase()
-                : "en"
+                : "en",
+            channel_whitelist_ids: this.parseIdJson(rows[0].channel_whitelist_ids),
+            role_whitelist_ids: this.parseIdJson(rows[0].role_whitelist_ids)
         };
     }
 
@@ -125,6 +142,27 @@ export default class AiMonitorManager {
         }
     }
 
+    private isNoisyEventSuppressed(guildId: string, eventType: string): boolean {
+        const noisyEventCooldownMs: Record<string, number> = {
+            role_update: 10000,
+            channel_update: 10000,
+            member_update: 10000,
+            webhook_update: 15000,
+            role_create: 5000,
+            role_delete: 5000,
+            channel_create: 5000,
+            channel_delete: 5000
+        };
+        const cooldownMs = noisyEventCooldownMs[eventType];
+        if (!cooldownMs) return false;
+        const key = `${guildId}:${eventType}`;
+        const now = Date.now();
+        const last = this.noisyEventCooldowns.get(key) ?? 0;
+        if (now - last < cooldownMs) return true;
+        this.noisyEventCooldowns.set(key, now);
+        return false;
+    }
+
     private canProcess(guildId: string): boolean {
         const now = Date.now();
         const windowMs = 60000;
@@ -160,6 +198,18 @@ export default class AiMonitorManager {
         if (!user?.createdTimestamp) return null;
         const ageMs = Date.now() - user.createdTimestamp;
         return Math.floor(ageMs / (1000 * 60 * 60 * 24));
+    }
+
+    private isChannelAllowed(config: MonitorConfig, channelId?: string | null): boolean {
+        if (!channelId) return true;
+        if (!Array.isArray(config.channel_whitelist_ids) || config.channel_whitelist_ids.length === 0) return true;
+        return config.channel_whitelist_ids.includes(channelId);
+    }
+
+    private isRoleWhitelisted(member: GuildMember | null | undefined, config: MonitorConfig): boolean {
+        if (!member) return false;
+        if (!Array.isArray(config.role_whitelist_ids) || config.role_whitelist_ids.length === 0) return false;
+        return member.roles.cache.some(role => config.role_whitelist_ids.includes(role.id));
     }
 
     private buildMessageSignals(message: Message) {
@@ -347,8 +397,10 @@ export default class AiMonitorManager {
         const scamSignal = scamPatterns.some(pattern => pattern.test(content));
         const localizedPatternSignal = localizedScamPatterns.some(pattern => pattern.test(content));
         const credentialBaitSignal = credentialBaitPatterns.some(pattern => pattern.test(content));
-        const keywordSignal = suspiciousKeywords.some(word => lowerContent.includes(word));
-        const localizedKeywordSignal = localizedKeywords.some(word => lowerContent.includes(word));
+        const keywordHits = suspiciousKeywords.filter(word => lowerContent.includes(word)).length;
+        const localizedKeywordHits = localizedKeywords.filter(word => lowerContent.includes(word)).length;
+        const keywordSignal = keywordHits >= 2;
+        const localizedKeywordSignal = localizedKeywordHits >= 2;
         const attachmentSignal = message.attachments.some(att => {
             const name = (att.name || "").toLowerCase();
             const ext = name.includes(".") ? name.split(".").pop() : "";
@@ -409,11 +461,13 @@ export default class AiMonitorManager {
             const hasToken = suspiciousDomainTokens.some(token => domain.includes(token));
             return (hasRiskyTld && hasToken) || domain.includes("discord.gift");
         });
-        const massMention = mentionCount >= 10 || (message.mentions.everyone && mentionCount >= 1);
+        const massMention = mentionCount >= 12 || (message.mentions.everyone && mentionCount >= 3);
         const multiInvite = inviteMatches.length >= 2;
         const linkAndMention = (urlMatches.length > 0 || inviteMatches.length > 0) && message.mentions.everyone;
-        const promoLink = urlMatches.length > 0 && /(free|money|cash|claim|gift|giveaway|nitro|airdrop|login|verify|account|reward|prize|bonus)/i.test(content);
-        const forceReview = scamSignal || localizedPatternSignal || keywordSignal || localizedKeywordSignal || credentialBaitSignal || obfuscatedLink || attachmentSignal || suspiciousAttachmentName || massMention || multiInvite || linkAndMention || promoLink || shortLink || brandMismatch || lookalikeDomainSignal || suspiciousDomainSignal || hasNonAscii;
+        const promoLink = urlMatches.length > 0 && keywordHits >= 1 && /(free|money|cash|claim|gift|giveaway|nitro|airdrop|login|verify|account|reward|prize|bonus)/i.test(content);
+        const strongSignal = scamSignal || localizedPatternSignal || credentialBaitSignal || obfuscatedLink || suspiciousAttachmentName || brandMismatch || lookalikeDomainSignal || suspiciousDomainSignal;
+        const mediumScore = Number(keywordSignal) + Number(localizedKeywordSignal) + Number(attachmentSignal) + Number(massMention) + Number(multiInvite) + Number(linkAndMention) + Number(promoLink) + Number(shortLink);
+        const forceReview = strongSignal || mediumScore >= 2;
         return {
             content,
             urlMatches,
@@ -434,6 +488,8 @@ export default class AiMonitorManager {
             lookalikeDomainSignal,
             suspiciousDomainSignal,
             hasNonAscii,
+            keywordHits,
+            localizedKeywordHits,
             urlDomains: allDomains
         };
     }
@@ -570,7 +626,7 @@ export default class AiMonitorManager {
         const normalizedLanguage = typeof language === "string" && language.trim() ? language.trim().toLowerCase() : "en";
         const prompt = JSON.stringify({
             role: "review",
-            instructions: `Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 3 from [\"notify\",\"warn\",\"timeout\",\"kick\",\"ban\",\"delete_message\",\"delete_and_warn\",\"delete_and_timeout\",\"delete_and_kick\",\"delete_and_ban\"]), warning_message(optional string for warn action), action_duration_ms(optional number), delete_message(optional boolean), confidence(number 0-1). Use recent_cases only as context; do not recommend punitive actions if the current content appears benign. If current content is benign, set suspicious=false, risk=low, recommended_actions=[\"notify\"]. Use language: ${normalizedLanguage} for summary, reason, and warning_message.`,
+            instructions: `Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 2 from [\"notify\",\"delete_message\",\"warn\",\"timeout\",\"kick\",\"ban\"]), warning_message(optional string for warn action), action_duration_ms(optional number), confidence(number 0-1). Never output compound actions. Prefer notify for uncertain cases. Reserve kick/ban for high risk with clear malicious evidence. Use recent_cases only as context; do not recommend punitive actions if the current content appears benign. If current content is benign, set suspicious=false, risk=low, recommended_actions=[\"notify\"]. Use language: ${normalizedLanguage} for summary, reason, and warning_message.`,
             eventType,
             data
         });
@@ -596,7 +652,7 @@ export default class AiMonitorManager {
         const normalizedLanguage = typeof language === "string" && language.trim() ? language.trim().toLowerCase() : "en";
         const prompt = JSON.stringify({
             role: "review",
-            instructions: `Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 3 from [\"notify\",\"warn\",\"timeout\",\"kick\",\"ban\",\"delete_message\",\"delete_and_warn\",\"delete_and_timeout\",\"delete_and_kick\",\"delete_and_ban\"]), warning_message(optional string for warn action), action_duration_ms(optional number), delete_message(optional boolean), confidence(number 0-1). Use tools only when needed. Use recent_cases only as context; do not recommend punitive actions if the current content appears benign. If current content is benign, set suspicious=false, risk=low, recommended_actions=[\"notify\"]. Use language: ${normalizedLanguage} for summary, reason, and warning_message.`,
+            instructions: `Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 2 from [\"notify\",\"delete_message\",\"warn\",\"timeout\",\"kick\",\"ban\"]), warning_message(optional string for warn action), action_duration_ms(optional number), confidence(number 0-1). Never output compound actions. Prefer notify for uncertain cases. Reserve kick/ban for high risk with clear malicious evidence. Use tools only when needed. Use recent_cases only as context; do not recommend punitive actions if the current content appears benign. If current content is benign, set suspicious=false, risk=low, recommended_actions=[\"notify\"]. Use language: ${normalizedLanguage} for summary, reason, and warning_message.`,
             eventType,
             data
         });
@@ -606,7 +662,7 @@ export default class AiMonitorManager {
             maxTokens: 1024,
             temperature: 0.4,
             topP: 0.8,
-            systemInstruction: "You are an AI monitor investigator. You may call tools to verify suspicious activity. Only call tools provided. Never fabricate tool outputs. Return JSON only."
+            systemInstruction: "You are an AI monitor investigator. You may call tools to verify suspicious activity. Avoid false positives and demand evidence before punitive actions. Only call tools provided. Never fabricate tool outputs. Return JSON only."
         });
         let result = await chat.sendMessage(prompt);
         for (let i = 0; i < 3; i += 1) {
@@ -656,15 +712,38 @@ export default class AiMonitorManager {
     }
 
     private normalizeRecommendedActions(review: ReviewResult): ActionType[] {
-        const allowList: ActionType[] = ["notify", "warn", "timeout", "kick", "ban", "delete_message", "delete_and_warn", "delete_and_timeout", "delete_and_kick", "delete_and_ban"];
+        const allowList: ActionType[] = ["notify", "delete_message", "warn", "timeout", "kick", "ban"];
         const list = Array.isArray(review.recommended_actions) ? review.recommended_actions : (review.recommended_action ? [review.recommended_action] : []);
         const seen = new Set<string>();
-        const filtered = list.filter(action => allowList.includes(action)).filter(action => {
+        let filtered = list.filter(action => allowList.includes(action)).filter(action => {
             if (seen.has(action)) return false;
             seen.add(action);
             return true;
-        }).slice(0, 3);
+        });
+        const punitive = ["warn", "timeout", "kick", "ban"].filter(action => filtered.includes(action as ActionType));
+        let strongestPunitive: ActionType | null = null;
+        if (punitive.includes("ban")) strongestPunitive = "ban";
+        else if (punitive.includes("kick")) strongestPunitive = "kick";
+        else if (punitive.includes("timeout")) strongestPunitive = "timeout";
+        else if (punitive.includes("warn")) strongestPunitive = "warn";
+        filtered = filtered.filter(action => !["warn", "timeout", "kick", "ban"].includes(action));
+        if (strongestPunitive) filtered.push(strongestPunitive);
+        filtered = filtered.filter(action => action !== "notify");
+        filtered = filtered.slice(0, 2);
         return filtered.length > 0 ? filtered : ["notify"];
+    }
+
+    private filterAutoActionsByPolicy(actions: ActionType[], risk: "low" | "medium" | "high", confidence: number): ActionType[] {
+        const c = Number.isFinite(confidence) ? confidence : 0;
+        return actions.filter(action => {
+            if (action === "notify") return false;
+            if (action === "delete_message") return (risk === "medium" && c >= 0.7) || (risk === "high" && c >= 0.6);
+            if (action === "warn") return (risk === "medium" && c >= 0.75) || (risk === "high" && c >= 0.65);
+            if (action === "timeout") return (risk === "high" && c >= 0.8);
+            if (action === "kick") return (risk === "high" && c >= 0.9);
+            if (action === "ban") return (risk === "high" && c >= 0.95);
+            return false;
+        }).slice(0, 2);
     }
 
     private async createCase(params: {
@@ -803,13 +882,6 @@ export default class AiMonitorManager {
                 this.markAlertedMessage(context.messageId);
                 return { ok: true, detail: "Message deleted" };
             };
-            if (action.startsWith("delete_and_")) {
-                const next = action.replace("delete_and_", "");
-                const deleteResult = await deleteMessage();
-                if (!deleteResult.ok) return deleteResult;
-                if (!["warn", "timeout", "kick", "ban"].includes(next)) return { ok: false, detail: "Unknown action" };
-                return await this.executeAction(guild, next, context);
-            }
             if (action === "delete_message") {
                 return await deleteMessage();
             }
@@ -894,6 +966,12 @@ export default class AiMonitorManager {
         if (!config || !config.enabled) return;
         if (!this.canProcess(guild.id)) return;
         if (!config.logs_channel || config.logs_channel === "0") return;
+        if (this.isNoisyEventSuppressed(guild.id, eventType)) return;
+        if (!this.isChannelAllowed(config, context.channelId ?? null)) return;
+        if (context.userId && Array.isArray(config.role_whitelist_ids) && config.role_whitelist_ids.length > 0) {
+            const targetMember = await guild.members.fetch(context.userId).catch(() => null);
+            if (this.isRoleWhitelisted(targetMember, config)) return;
+        }
 
         if (AI_DEBUG) {
             console.log("[AI Monitor] analyze", {
@@ -908,6 +986,13 @@ export default class AiMonitorManager {
         const monitorLanguage = typeof config.monitor_language === "string" && config.monitor_language.trim()
             ? config.monitor_language.trim().toLowerCase()
             : "en";
+        data.monitor_policy = {
+            allowActions: config.allow_actions,
+            analyzePotentially: config.analyze_potentially,
+            allowInvestigationTools: config.allow_investigation_tools,
+            channelWhitelistCount: config.channel_whitelist_ids.length,
+            roleWhitelistCount: config.role_whitelist_ids.length
+        };
         const triage = await this.triage(eventType, data, monitorLanguage);
         const scamSignal = Boolean(data?.extra?.scam_signal);
         const forceReview = Boolean(data?.extra?.force_review);
@@ -926,9 +1011,6 @@ export default class AiMonitorManager {
         const review = await this.reviewWithTools(eventType, data, config, monitorLanguage);
         if (!review.suspicious) return;
         let recommendedActions = this.normalizeRecommendedActions(review);
-        if (review.delete_message && !recommendedActions.includes("delete_message")) {
-            recommendedActions = ["delete_message", ...recommendedActions].slice(0, 3) as ActionType[];
-        }
 
         if (eventType === "message_create" && context.messageId) {
             this.markAlertedMessage(context.messageId);
@@ -941,7 +1023,6 @@ export default class AiMonitorManager {
             reason: review.reason || triage.reason,
             warnMessage: review.warning_message ?? null,
             durationMs: review.action_duration_ms ?? null,
-            deleteMessage: Boolean(review.delete_message),
             recommended_actions: recommendedActions
         };
         const messageContent = data?.message?.content ?? data?.extra?.content ?? null;
@@ -951,7 +1032,7 @@ export default class AiMonitorManager {
 
         if (config.allow_actions) {
             const results: string[] = [];
-            const actionable = recommendedActions.filter(action => action !== "notify").slice(0, 3);
+            const actionable = this.filterAutoActionsByPolicy(recommendedActions, review.risk || triage.risk, review.confidence ?? triage.confidence ?? 0);
             for (const action of actionable) {
                 const actionResult = await this.executeAction(guild, action, {
                     userId: actionPayload.userId,
@@ -1007,6 +1088,9 @@ export default class AiMonitorManager {
         if (!message.content && message.attachments.size === 0) return;
         const config = await this.getConfig(message.guild.id);
         if (!config || !config.enabled) return;
+        if (!this.isChannelAllowed(config, message.channelId)) return;
+        const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+        if (this.isRoleWhitelisted(member, config)) return;
         const signals = this.buildMessageSignals(message);
         const contentKey = message.content.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 140);
         const raid = this.detectRaidSignals(message, contentKey, signals.urlDomains || []);
@@ -1039,7 +1123,9 @@ export default class AiMonitorManager {
                 scam_signal: signals.scamSignal,
                 localized_pattern_signal: signals.localizedPatternSignal,
                 keyword_signal: signals.keywordSignal,
+                keyword_hits: signals.keywordHits,
                 localized_keyword_signal: signals.localizedKeywordSignal,
+                localized_keyword_hits: signals.localizedKeywordHits,
                 credential_bait_signal: signals.credentialBaitSignal,
                 obfuscated_link: signals.obfuscatedLink,
                 attachment_signal: signals.attachmentSignal,
@@ -1069,6 +1155,9 @@ export default class AiMonitorManager {
         if (!message.content && message.attachments.size === 0) return;
         const config = await this.getConfig(message.guild.id);
         if (!config || !config.enabled) return;
+        if (!this.isChannelAllowed(config, message.channelId)) return;
+        const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+        if (this.isRoleWhitelisted(member, config)) return;
         const signals = this.buildMessageSignals(message);
         const accountAgeDays = this.getAccountAgeDays(message.author);
         const lowAgeSignal = accountAgeDays !== null && accountAgeDays < 3 && (signals.scamSignal || signals.keywordSignal || signals.obfuscatedLink);
@@ -1090,7 +1179,9 @@ export default class AiMonitorManager {
                 scam_signal: signals.scamSignal,
                 localized_pattern_signal: signals.localizedPatternSignal,
                 keyword_signal: signals.keywordSignal,
+                keyword_hits: signals.keywordHits,
                 localized_keyword_signal: signals.localizedKeywordSignal,
+                localized_keyword_hits: signals.localizedKeywordHits,
                 credential_bait_signal: signals.credentialBaitSignal,
                 obfuscated_link: signals.obfuscatedLink,
                 attachment_signal: signals.attachmentSignal,
@@ -1136,6 +1227,7 @@ export default class AiMonitorManager {
         if (!member.guild) return;
         const config = await this.getConfig(member.guild.id);
         if (!config || !config.enabled) return;
+        if (this.isRoleWhitelisted(member, config)) return;
         const accountAgeDays = this.getAccountAgeDays(member.user);
         const data = this.buildEventData({
             eventType: "member_add",
@@ -1441,13 +1533,21 @@ export default class AiMonitorManager {
         const actions: ActionType[] = Array.isArray(payload.recommended_actions)
             ? payload.recommended_actions
             : (record.recommended_action ? [record.recommended_action] : ["notify"]);
-        const actionable = actions.filter((a: ActionType) => a !== "notify");
-        if (actionable.length === 0) {
+        const expandedActions = actions.flatMap((a: any) => {
+            if (a === "delete_and_warn") return ["delete_message", "warn"];
+            if (a === "delete_and_timeout") return ["delete_message", "timeout"];
+            if (a === "delete_and_kick") return ["delete_message", "kick"];
+            if (a === "delete_and_ban") return ["delete_message", "ban"];
+            return [a];
+        }) as ActionType[];
+        const actionable = this.normalizeRecommendedActions({ suspicious: true, risk: record.risk ?? "low", summary: "", reason: "", confidence: 1, recommended_actions: expandedActions });
+        const manualActions = actionable.filter((a: ActionType) => a !== "notify");
+        if (manualActions.length === 0) {
             await interaction.editReply({ content: "No action recommended for this case." });
             return true;
         }
         const results: string[] = [];
-        for (const action of actionable.slice(0, 3)) {
+        for (const action of manualActions.slice(0, 2)) {
             const result = await this.executeAction(guild, action, {
                 userId: payload.userId ?? record.user_id,
                 channelId: payload.channelId ?? record.channel_id,

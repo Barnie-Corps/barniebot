@@ -96,6 +96,16 @@ export default {
                         .setDescription("Language code for AI monitor alerts (e.g., en, es, fr)")
                         .setRequired(false)
                 )
+                .addStringOption(o =>
+                    o.setName("whitelist_channels")
+                        .setDescription("Comma-separated channel IDs/mentions to monitor only, or 'none' to clear")
+                        .setRequired(false)
+                )
+                .addStringOption(o =>
+                    o.setName("whitelist_roles")
+                        .setDescription("Comma-separated role IDs/mentions to exempt from monitoring, or 'none' to clear")
+                        .setRequired(false)
+                )
         )
         .addSubcommand(s =>
             s.setName("monitor_cases")
@@ -129,6 +139,8 @@ export default {
                 invalid_language: "Invalid language code.",
                 language_too_long: "Language code cannot have more than 2 characters.",
                 logs_channel_required: "Please provide a text logs channel.",
+                invalid_whitelist_channels: "One or more channel IDs in whitelist_channels are invalid for this guild.",
+                invalid_whitelist_roles: "One or more role IDs in whitelist_roles are invalid for this guild.",
                 invalid_action: "Invalid action.",
                 no_monitor_cases: "No AI monitor cases found for this guild.",
             },
@@ -151,6 +163,8 @@ export default {
                 auto_actions_label: "Auto actions:",
                 potential_label: "Potential analysis:",
                 tools_label: "Investigation tools:",
+                channels_whitelist_label: "Channel whitelist:",
+                roles_whitelist_label: "Role whitelist:",
                 alerts_language_label: "Alerts language:",
                 monitor_enabled_label: "AI monitor enabled.",
                 monitor_disabled_label: "AI monitor disabled.",
@@ -401,10 +415,19 @@ export default {
                 if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) return await reply(texts.errors.not_admin);
                 const action = interaction.options.getString("action", true);
                 const logsChannel = interaction.options.getChannel("logs_channel");
-                const allowActions = interaction.options.getBoolean("allow_actions") ?? false;
-                const analyzePotential = interaction.options.getBoolean("analyze_potential") ?? false;
-                const allowInvestigationTools = interaction.options.getBoolean("allow_investigation_tools") ?? false;
+                const allowActionsInput = interaction.options.getBoolean("allow_actions");
+                const analyzePotentialInput = interaction.options.getBoolean("analyze_potential");
+                const allowInvestigationToolsInput = interaction.options.getBoolean("allow_investigation_tools");
                 const alertsLanguageRaw = interaction.options.getString("alerts_language");
+                const whitelistChannelsRaw = interaction.options.getString("whitelist_channels");
+                const whitelistRolesRaw = interaction.options.getString("whitelist_roles");
+                const parseIdList = (raw: string | null): string[] | null | undefined => {
+                    if (raw === null) return undefined;
+                    const normalized = raw.trim().toLowerCase();
+                    if (!normalized || normalized === "none" || normalized === "clear") return [];
+                    const ids = (raw.match(/\d{17,20}/g) || []).filter((v, i, arr) => arr.indexOf(v) === i);
+                    return ids;
+                };
                 let alertsLanguage: string | null = null;
                 if (alertsLanguageRaw) {
                     const normalized = alertsLanguageRaw.trim().toLowerCase();
@@ -414,6 +437,16 @@ export default {
                     }
                     alertsLanguage = normalized;
                 }
+                const channelWhitelistInput = parseIdList(whitelistChannelsRaw);
+                const roleWhitelistInput = parseIdList(whitelistRolesRaw);
+                if (Array.isArray(channelWhitelistInput) && channelWhitelistInput.length > 0) {
+                    const allValid = channelWhitelistInput.every(id => interaction.guild!.channels.cache.has(id));
+                    if (!allValid) return await reply(texts.errors.invalid_whitelist_channels);
+                }
+                if (Array.isArray(roleWhitelistInput) && roleWhitelistInput.length > 0) {
+                    const allValid = roleWhitelistInput.every(id => interaction.guild!.roles.cache.has(id));
+                    if (!allValid) return await reply(texts.errors.invalid_whitelist_roles);
+                }
                 const existing = await db.query("SELECT * FROM ai_monitor_configs WHERE guild_id = ?", [interaction.guildId]) as unknown as any[];
                 if (action === "status") {
                     if (!existing[0]) return await reply(texts.errors.monitor_disabled);
@@ -422,32 +455,57 @@ export default {
                     const actionsText = existing[0].allow_actions ? texts.common.enabled : texts.common.disabled;
                     const potentialText = existing[0].analyze_potentially ? texts.common.enabled : texts.common.disabled;
                     const toolsText = existing[0].allow_investigation_tools ? texts.common.enabled : texts.common.disabled;
+                    let channelWhitelist: string[] = [];
+                    let roleWhitelist: string[] = [];
+                    try { channelWhitelist = Array.isArray(existing[0].channel_whitelist_ids) ? existing[0].channel_whitelist_ids : JSON.parse(existing[0].channel_whitelist_ids || "[]"); } catch {}
+                    try { roleWhitelist = Array.isArray(existing[0].role_whitelist_ids) ? existing[0].role_whitelist_ids : JSON.parse(existing[0].role_whitelist_ids || "[]"); } catch {}
+                    const channelWhitelistText = channelWhitelist.length > 0 ? channelWhitelist.map(id => `<#${id}>`).join(", ") : texts.common.not_set;
+                    const roleWhitelistText = roleWhitelist.length > 0 ? roleWhitelist.map(id => `<@&${id}>`).join(", ") : texts.common.not_set;
                     const languageText = typeof existing[0].monitor_language === "string" && existing[0].monitor_language.trim()
                         ? existing[0].monitor_language.trim().toLowerCase()
                         : "en";
-                    const statusMessage = `${texts.common.monitor_is} ${statusText}. ${texts.common.logs_label} ${channelText}. ${texts.common.auto_actions_label} ${actionsText}. ${texts.common.potential_label} ${potentialText}. ${texts.common.tools_label} ${toolsText}. ${texts.common.alerts_language_label} ${languageText}.`;
+                    const statusMessage = `${texts.common.monitor_is} ${statusText}. ${texts.common.logs_label} ${channelText}. ${texts.common.auto_actions_label} ${actionsText}. ${texts.common.potential_label} ${potentialText}. ${texts.common.tools_label} ${toolsText}. ${texts.common.channels_whitelist_label} ${channelWhitelistText}. ${texts.common.roles_whitelist_label} ${roleWhitelistText}. ${texts.common.alerts_language_label} ${languageText}.`;
                     return await reply(statusMessage);
                 }
                 if (action === "enable") {
                     if (!logsChannel || logsChannel.type !== ChannelType.GuildText) return await reply(texts.errors.logs_channel_required);
                     const now = Date.now();
                     const selectedLanguage = alertsLanguage ?? (existing[0]?.monitor_language ?? "en");
+                    const selectedAllowActions = allowActionsInput ?? Boolean(existing[0]?.allow_actions ?? false);
+                    const selectedAnalyzePotential = analyzePotentialInput ?? Boolean(existing[0]?.analyze_potentially ?? false);
+                    const selectedAllowTools = allowInvestigationToolsInput ?? Boolean(existing[0]?.allow_investigation_tools ?? false);
+                    const existingChannelWhitelist = (() => {
+                        try { return Array.isArray(existing[0]?.channel_whitelist_ids) ? existing[0]?.channel_whitelist_ids : JSON.parse(existing[0]?.channel_whitelist_ids || "[]"); } catch { return []; }
+                    })();
+                    const existingRoleWhitelist = (() => {
+                        try { return Array.isArray(existing[0]?.role_whitelist_ids) ? existing[0]?.role_whitelist_ids : JSON.parse(existing[0]?.role_whitelist_ids || "[]"); } catch { return []; }
+                    })();
+                    const selectedChannelWhitelist = channelWhitelistInput === undefined ? existingChannelWhitelist : channelWhitelistInput;
+                    const selectedRoleWhitelist = roleWhitelistInput === undefined ? existingRoleWhitelist : roleWhitelistInput;
                     if (existing[0]) {
-                        await db.query("UPDATE ai_monitor_configs SET enabled = TRUE, logs_channel = ?, allow_actions = ?, analyze_potentially = ?, allow_investigation_tools = ?, monitor_language = ?, updated_at = ? WHERE guild_id = ?", [logsChannel.id, allowActions, analyzePotential, allowInvestigationTools, selectedLanguage, now, interaction.guildId]);
+                        await db.query("UPDATE ai_monitor_configs SET enabled = TRUE, logs_channel = ?, allow_actions = ?, analyze_potentially = ?, allow_investigation_tools = ?, monitor_language = ?, channel_whitelist_ids = ?, role_whitelist_ids = ?, updated_at = ? WHERE guild_id = ?", [logsChannel.id, selectedAllowActions, selectedAnalyzePotential, selectedAllowTools, selectedLanguage, JSON.stringify(selectedChannelWhitelist), JSON.stringify(selectedRoleWhitelist), now, interaction.guildId]);
                     } else {
                         await db.query("INSERT INTO ai_monitor_configs SET ?", [{
                             guild_id: interaction.guildId,
                             enabled: true,
                             logs_channel: logsChannel.id,
-                            allow_actions: allowActions,
-                            analyze_potentially: analyzePotential,
-                            allow_investigation_tools: allowInvestigationTools,
+                            allow_actions: selectedAllowActions,
+                            analyze_potentially: selectedAnalyzePotential,
+                            allow_investigation_tools: selectedAllowTools,
                             monitor_language: selectedLanguage,
+                            channel_whitelist_ids: JSON.stringify(channelWhitelistInput ?? []),
+                            role_whitelist_ids: JSON.stringify(roleWhitelistInput ?? []),
                             created_at: now,
                             updated_at: now
                         }]);
                     }
-                    const enabledMessage = `${texts.common.monitor_enabled_label} ${texts.common.logs_label} <#${logsChannel.id}>. ${texts.common.auto_actions_label} ${allowActions ? texts.common.enabled : texts.common.disabled}. ${texts.common.potential_label} ${analyzePotential ? texts.common.enabled : texts.common.disabled}. ${texts.common.tools_label} ${allowInvestigationTools ? texts.common.enabled : texts.common.disabled}. ${texts.common.alerts_language_label} ${selectedLanguage}.`;
+                    const channelWhitelistText = selectedChannelWhitelist.length > 0
+                        ? selectedChannelWhitelist.map((id: string) => `<#${id}>`).join(", ")
+                        : texts.common.not_set;
+                    const roleWhitelistText = selectedRoleWhitelist.length > 0
+                        ? selectedRoleWhitelist.map((id: string) => `<@&${id}>`).join(", ")
+                        : texts.common.not_set;
+                    const enabledMessage = `${texts.common.monitor_enabled_label} ${texts.common.logs_label} <#${logsChannel.id}>. ${texts.common.auto_actions_label} ${selectedAllowActions ? texts.common.enabled : texts.common.disabled}. ${texts.common.potential_label} ${selectedAnalyzePotential ? texts.common.enabled : texts.common.disabled}. ${texts.common.tools_label} ${selectedAllowTools ? texts.common.enabled : texts.common.disabled}. ${texts.common.channels_whitelist_label} ${channelWhitelistText}. ${texts.common.roles_whitelist_label} ${roleWhitelistText}. ${texts.common.alerts_language_label} ${selectedLanguage}.`;
                     return await reply(enabledMessage);
                 }
                 if (action === "disable") {
