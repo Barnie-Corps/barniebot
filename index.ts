@@ -35,6 +35,7 @@ import Workers from "./Workers";
 import path from "path";
 import { inspect } from "util";
 import AiMonitorManager from "./managers/AiMonitorManager";
+import cacheManager from "./managers/CacheManager";
 const manager = new ChatManager();
 const globalCommandsManager = new GlobalCommandsManager();
 process.on("uncaughtException", (err: any) => {
@@ -71,6 +72,7 @@ client.on("clientReady", async (): Promise<any> => {
         component: "Bot",
         username: client.user?.tag
     });
+    await cacheManager.initialize();
     queries();
     await StaffRanksManager.initialize();
     initializeShopItems();
