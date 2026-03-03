@@ -38,6 +38,7 @@ import AiMonitorManager from "./managers/AiMonitorManager";
 import cacheManager from "./managers/CacheManager";
 const manager = new ChatManager();
 const globalCommandsManager = new GlobalCommandsManager();
+
 process.on("uncaughtException", (err: any) => {
     Log.error("Unhandled exception", err);
 });
@@ -73,7 +74,9 @@ client.on("clientReady", async (): Promise<any> => {
         username: client.user?.tag
     });
     await cacheManager.initialize();
+    Log.info("Cache backend initialized", { component: "Cache", redisAvailable: cacheManager.isRedisAvailable(), mode: cacheManager.isRedisAvailable() ? "redis" : "memory" });
     queries();
+    await manager.initialize();
     await StaffRanksManager.initialize();
     initializeShopItems();
     initializeRPGData();
@@ -814,7 +817,8 @@ client.on("messageDeleteBulk", async (messages): Promise<any> => {
 client.on("messageCreate", async (message): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(message.author.id)) return;
     if (message.author.bot) return;
-    const customResponses: any = await db.query("SELECT * FROM custom_responses WHERE guild = ?", [message.guildId]);
+    if (!message.guildId) return;
+    const customResponses = await utils.getCustomResponsesCached(message.guildId);
     if (!customResponses[0]) return;
     for (const cr of customResponses) {
         let match = false;
@@ -1144,6 +1148,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         enabled_logs: state.values.logs_enabled,
                         lang: state.values.lang
                     }, state.guildId]);
+                    await utils.invalidateFilterCaches(state.guildId);
                     filterSetupSessions.delete(sessionKey);
                     if (interaction.isRepliable()) await interaction.deferUpdate();
                     const doneEmbed = new EmbedBuilder().setTitle("Filter Setup Complete").setColor("Green").setDescription(`Enabled: ${state.values.enabled ? "Yes" : "No"}\nLogging: ${state.values.logs_enabled ? "Yes" : "No"}\nLog Channel: ${state.values.logs_channel === "0" ? "Not set" : `#${interaction.guild?.channels.cache.get(state.values.logs_channel)?.name}`}\nLanguage: ${state.values.lang}`);
@@ -1603,6 +1608,12 @@ client.on("guildDelete", async (guild): Promise<any> => {
     });
     db.query("DELETE FROM filter_configs WHERE guild = ?", [guild.id]);
     db.query("DELETE FROM filter_words WHERE guild = ?", [guild.id]);
+    Promise.resolve(cacheManager.delete([
+        utils.globalChatCacheKey(guild.id),
+        utils.filterConfigCacheKey(guild.id),
+        utils.filterWordsCacheKey(guild.id),
+        utils.customResponsesCacheKey(guild.id)
+    ])).catch(() => { });
     Log.info("Filter configs deleted", {
         component: "FilterSystem",
         guildName: guild.name,
@@ -1614,9 +1625,10 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(message.author.id)) return;
     if (!message.inGuild()) return;
     if (Number(process.env.INGORE_GLOBAL_CHAT) === 1) return;
-    const chatdb: any = await db.query("SELECT * FROM globalchats WHERE guild = ?", [message.guildId]);
-    if (!chatdb[0]) return;
-    if (message.channelId !== chatdb[0].channel) return;
+    if (!message.guildId) return;
+    const chatdb = await utils.getGlobalChatConfigCached(message.guildId);
+    if (!chatdb) return;
+    if (message.channelId !== chatdb.channel) return;
     const { author, channel, guild, content } = message;
     if (author.bot) return;
 
@@ -1631,11 +1643,11 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (!message.inGuild()) return;
     if (message.author.bot) return;
     if (!message.channel.isTextBased()) return;
-    let filterConfig: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [message.guildId]);
-    if (!filterConfig[0]) return;
-    filterConfig = filterConfig[0];
+    if (!message.guildId) return;
+    const filterConfig = await utils.getFilterConfigCached(message.guildId);
+    if (!filterConfig) return;
     if (!Boolean(filterConfig.enabled)) return;
-    const wordList: any = await db.query("SELECT * FROM filter_words WHERE guild = ?", [message.guildId]);
+    const wordList: any = await utils.getFilterWordsCached(message.guildId);
     if (!wordList.some((w: any) => message.content.toLowerCase().includes(w.content))) return;
     if (message.member?.permissions.has(PermissionFlagsBits.ManageMessages)) return;
     const webHookData: any = await db.query("SELECT * FROM filter_webhooks WHERE channel = ?", [message.channel.id]);

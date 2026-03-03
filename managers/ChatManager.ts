@@ -41,6 +41,8 @@ const CACHE_RANK_PREFIX = "barniebot:chat:rank:";
 const CACHE_BLACKLIST_PREFIX = "barniebot:chat:blacklist:";
 const CACHE_MUTE_PREFIX = "barniebot:chat:mute:";
 const CACHE_TRANSLATION_PREFIX = "barniebot:chat:translation:";
+const RATE_COUNTER_PREFIX = "barniebot:chat:rate:count:";
+const RATE_LIMIT_PREFIX = "barniebot:chat:rate:limit:";
 
 let translationFailureCount = 0;
 let lastTranslationFailure = 0;
@@ -64,23 +66,23 @@ interface QueuedMessage {
 export default class ChatManager extends EventEmitter {
     private cache = new Collection<string, any>();
     private ratelimits = new Collection<string, any>();
-    private normal_interval: NodeJS.Timer = setInterval(() => { }, 1000);
-    private ratelimit_interval: NodeJS.Timer = setInterval(() => { }, 1000);
+    private normal_interval: NodeJS.Timer | null = null;
+    private ratelimit_interval: NodeJS.Timer | null = null;
     private guildCache: { expires: number, data: any[] } | null = null;
     private languageCache = new Collection<string, { expires: number, lang: string }>();
     private webhookCache = new Collection<string, WebhookClient>();
     private messageQueueHigh: QueuedMessage[] = [];
     private messageQueueLow: QueuedMessage[] = [];
     private isProcessingQueue = false;
-    private queueProcessor: NodeJS.Timer | null = null;
+    private queueScheduled = false;
     constructor(public options: ChatManagerOptions = DefaultChatManagerOptions) {
         super();
         this.clear_times_function = this.clear_times_function.bind(this);
         this.clear_limit_times_function = this.clear_limit_times_function.bind(this);
-        this.normal_interval = setInterval(this.clear_times_function, 1000);
         this.ratelimit_interval = setInterval(this.clear_limit_times_function, 1000);
-        this.queueProcessor = setInterval(() => this.processMessageQueue(), 100);
-        this.preloadGuildCache();
+    }
+    public async initialize(): Promise<void> {
+        await this.preloadGuildCache();
     }
 
     private async cleanupFailedGlobalChat(guildId: string, webhookId?: string): Promise<void> {
@@ -104,21 +106,30 @@ export default class ChatManager extends EventEmitter {
             Log.warn("Failed to preload guild cache", { error });
         }
     }
+    private scheduleQueueProcess(): void {
+        if (this.queueScheduled || this.isProcessingQueue) return;
+        this.queueScheduled = true;
+        setImmediate(() => {
+            this.queueScheduled = false;
+            Promise.resolve(this.processMessageQueue()).catch(() => { });
+        });
+    }
     public async processUser(user: User): Promise<void> {
-        if (!this.cache.has(user.id)) {
-            this.cache.set(user.id, { uid: user.id, count: 1, time_left: this.options.time });
+        const counterKey = `${RATE_COUNTER_PREFIX}${user.id}`;
+        const count = await cacheManager.increment(counterKey, this.options.time);
+        if (count === null) return;
+        const timeLeft = await cacheManager.getTtlMs(counterKey);
+        const state = {
+            uid: user.id,
+            count,
+            time_left: timeLeft > 0 ? timeLeft : this.options.time
+        };
+        if (count === this.options.messages_limit && !(await this.isRatelimited(user.id))) {
+            this.emit("limit-reached", state);
+            return;
         }
-        else {
-            const cachedu = this.cache.get(user.id);
-            cachedu.count += 1;
-            this.cache.set(user.id, cachedu);
-            if (cachedu.count === this.options.messages_limit && !this.isRatelimited(user.id)) {
-                this.emit("limit-reached", cachedu);
-            }
-            else if (cachedu.count >= this.options.messages_limit && !this.isRatelimited(user.id)) {
-                this.emit("limit-exceed", cachedu);
-            }
-            else this.cache.set(user.id, cachedu);
+        if (count >= this.options.messages_limit && !(await this.isRatelimited(user.id))) {
+            this.emit("limit-exceed", state);
         }
     };
     public async processMessage(message: Message<true>): Promise<any> {
@@ -129,10 +140,14 @@ export default class ChatManager extends EventEmitter {
         if (await this.isUserMutedCached(message.author.id)) {
             return Log.info("Ignoring muted user message.", { userId: message.author.id });
         }
-        if (this.isRatelimited(message.author.id)) return Log.info(`Ignoring user ${message.author.username} as they're ratelimited.`, { userId: message.author.id, username: message.author.username });
+        if (await this.isRatelimited(message.author.id)) return Log.info(`Ignoring user ${message.author.username} as they're ratelimited.`, { userId: message.author.id, username: message.author.username });
 
-        const guilds = await this.getActiveGuilds();
-        const priority = guilds.length > 50 ? 1 : 0;
+        const now = Date.now();
+        const cachedGuildCount = this.guildCache && this.guildCache.expires > now ? this.guildCache.data.length : 0;
+        const priority = cachedGuildCount > 50 ? 1 : 0;
+        if (!this.guildCache || this.guildCache.expires <= now) {
+            Promise.resolve(this.getActiveGuilds()).catch(() => { });
+        }
 
         const entry = {
             message,
@@ -144,6 +159,7 @@ export default class ChatManager extends EventEmitter {
         } else {
             this.messageQueueLow.push(entry);
         }
+        this.scheduleQueueProcess();
 
         message.react(data.bot.loadingEmoji.id).catch(() => { });
     }
@@ -161,21 +177,22 @@ export default class ChatManager extends EventEmitter {
     private async processMessageQueue(): Promise<void> {
         if (this.isProcessingQueue || (this.messageQueueHigh.length === 0 && this.messageQueueLow.length === 0)) return;
         this.isProcessingQueue = true;
-
-        const takeBatch = (queue: QueuedMessage[], remaining: number) => {
-            if (remaining <= 0 || queue.length === 0) return [];
-            const count = Math.min(queue.length, remaining);
-            return queue.splice(0, count);
-        };
-        const highBatch = takeBatch(this.messageQueueHigh, 5);
-        const batch = [
-            ...highBatch,
-            ...takeBatch(this.messageQueueLow, 5 - highBatch.length)
-        ];
-
-        await Promise.allSettled(batch.map(item => this.dispatchMessage(item.message)));
-
-        this.isProcessingQueue = false;
+        try {
+            while (this.messageQueueHigh.length > 0 || this.messageQueueLow.length > 0) {
+                const highCount = Math.min(this.messageQueueHigh.length, 5);
+                const highBatch = highCount > 0 ? this.messageQueueHigh.splice(0, highCount) : [];
+                const lowCount = Math.min(this.messageQueueLow.length, 5 - highBatch.length);
+                const lowBatch = lowCount > 0 ? this.messageQueueLow.splice(0, lowCount) : [];
+                const batch = highBatch.length > 0 ? highBatch.concat(lowBatch) : lowBatch;
+                if (batch.length === 0) break;
+                await Promise.allSettled(batch.map(item => this.dispatchMessage(item.message)));
+            }
+        } finally {
+            this.isProcessingQueue = false;
+            if (this.messageQueueHigh.length > 0 || this.messageQueueLow.length > 0) {
+                this.scheduleQueueProcess();
+            }
+        }
     }
 
     private async dispatchMessage(message: Message<true>): Promise<any> {
@@ -215,15 +232,6 @@ export default class ChatManager extends EventEmitter {
             hasTextContent
         );
         let failed = false;
-        const uniqueTargets = new Set<string>();
-        for (const graw of guilds) {
-            if (graw.guild === message.guildId) continue;
-            const targetLanguage = typeof graw.language === "string" ? graw.language : String(graw.language ?? "");
-            const shouldTranslate = Boolean(graw.autotranslate) && targetLanguage && targetLanguage.toLowerCase() !== normalizedUserLanguage;
-            if (shouldTranslate) uniqueTargets.add((targetLanguage ?? "").toLowerCase());
-        }
-        const primePromises = Array.from(uniqueTargets.values()).map(tl => getTranslatedContent(tl));
-        await Promise.all(primePromises);
 
         const filtered = guilds.filter((graw: any) => graw.guild !== message.guildId);
         const BATCH_SIZE = 30;
@@ -316,15 +324,6 @@ export default class ChatManager extends EventEmitter {
         );
         const botUsername = client.user?.username;
         const botAvatarURL = client.user?.displayAvatarURL();
-        const uniqueTargets = new Set<string>();
-        for (const graw of guilds) {
-            const targetLanguage = typeof graw.language === "string" ? graw.language : String(graw.language ?? "");
-            const shouldTranslate = Boolean(graw.autotranslate) && targetLanguage && targetLanguage.toLowerCase() !== normalizedLanguage;
-            if (shouldTranslate) uniqueTargets.add((targetLanguage ?? "").toLowerCase());
-        }
-        const primePromises = Array.from(uniqueTargets.values()).map(tl => getTranslatedContent(tl));
-        await Promise.all(primePromises);
-
         const tasks = guilds.map(async (graw: any) => {
             const guild = client.guilds.cache.get(graw.guild) as Guild | undefined;
             if (!guild) {
@@ -393,6 +392,7 @@ export default class ChatManager extends EventEmitter {
                 const newv = v;
                 if (v.time_left === 0) {
                     this.ratelimits.delete(k);
+                    Promise.resolve(cacheManager.delete(`${RATE_LIMIT_PREFIX}${k}`)).catch(() => { });
                     Log.info(`User removed from ratelimit`, { userId: k });
                     await this.announce(`Ratelimit for user ${v.username} has been removed.`, "en");
                     continue;
@@ -402,14 +402,17 @@ export default class ChatManager extends EventEmitter {
             }
         }
     };
-    public isRatelimited(uid: string): boolean {
-        return this.ratelimits.has(uid);
+    public async isRatelimited(uid: string): Promise<boolean> {
+        if (this.ratelimits.has(uid)) return true;
+        return cacheManager.has(`${RATE_LIMIT_PREFIX}${uid}`);
     };
     public get DefaultChatManagerOptions(): ChatManagerOptions {
         return DefaultChatManagerOptions;
     };
     public async ratelimit(uid: string, username: string): Promise<void> {
+        if (await this.isRatelimited(uid)) return;
         this.ratelimits.set(uid, { uid, time_left: this.options.ratelimit_time, username });
+        Promise.resolve(cacheManager.set(`${RATE_LIMIT_PREFIX}${uid}`, { uid }, this.options.ratelimit_time)).catch(() => { });
         await this.announce(`The user ${username} has been ratelimited for ${this.options.ratelimit_time / 1000} seconds.`, "en");
     }
     private sanitizeContent(content: string): string {

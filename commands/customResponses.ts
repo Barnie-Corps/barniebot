@@ -2,6 +2,7 @@ import { ChatInputCommandInteraction, SlashCommandBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
 import { CustomResponse } from "../types/interfaces";
+import cacheManager from "../managers/CacheManager";
 
 export default {
     data: new SlashCommandBuilder()
@@ -67,12 +68,14 @@ export default {
                 const command = interaction.options.getString("command", true);
                 const response = interaction.options.getString("response", true);
                 await db.query("INSERT INTO custom_responses (guild, command, response) VALUES (?, ?, ?)", [interaction.guildId, command, response]);
+                await cacheManager.delete(utils.customResponsesCacheKey(interaction.guildId));
                 await utils.safeInteractionRespond(interaction, `${texts.success.added}: \`${command}\` => \`${response}\``);
                 break;
             }
             case "remove": {
                 const command = interaction.options.getString("command", true);
                 await db.query("DELETE FROM custom_responses WHERE guild = ? AND command = ?", [interaction.guildId, command]);
+                await cacheManager.delete(utils.customResponsesCacheKey(interaction.guildId));
                 await utils.safeInteractionRespond(interaction, texts.success.removed);
                 break;
             }

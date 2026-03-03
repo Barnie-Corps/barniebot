@@ -4,6 +4,7 @@ import langs from "langs";
 import db from "../mysql/database";
 import type { GlobalChat } from "../types/interfaces";
 import client from "..";
+import cacheManager from "../managers/CacheManager";
 
 export default {
     data: new SlashCommandBuilder()
@@ -57,10 +58,12 @@ export default {
                     });
                     if (!chatdb[0]) {
                         await db.query("INSERT INTO globalchats SET ?", [{ autotranslate: false, guild: interaction.guildId, channel: channel.id, language: lang, webhook_id: wh.id, webhook_token: wh.token }]);
+                        await cacheManager.delete(utils.globalChatCacheKey(interaction.guildId!));
                         await utils.safeInteractionRespond(interaction, `${texts.success.first_time_enabled}`);
                         break;
                     }
                     await db.query("UPDATE globalchats SET ? WHERE guild = ?", [{ autotranslate: false, channel: channel.id, enabled: true, webhook_id: wh.id, webhook_token: wh.token }, interaction.guildId]);
+                    await cacheManager.delete(utils.globalChatCacheKey(interaction.guildId!));
                     await utils.safeInteractionRespond(interaction, texts.success.set);
                     break;
                 }
@@ -77,7 +80,7 @@ export default {
                         break;
                     }
                     await db.query("UPDATE globalchats SET ? WHERE guild = ?", [{ autotranslate: status }, interaction.guildId]);
-                    await utils.safeInteractionRespond(interaction, status ? texts.autotranslate.on : texts.autotranslate.off);
+                    await cacheManager.delete(utils.globalChatCacheKey(interaction.guildId!));
                     break;
                 }
                 case "language": {
@@ -97,7 +100,7 @@ export default {
                         break;
                     }
                     await db.query("UPDATE globalchats SET language = ? WHERE guild = ?", [language, interaction.guildId]);
-                    await utils.safeInteractionRespond(interaction, texts.language.set);
+                    await cacheManager.delete(utils.globalChatCacheKey(interaction.guildId!));
                     break;
                 }
                 case "toggle": {
@@ -112,7 +115,7 @@ export default {
                         break;
                     }
                     await db.query("UPDATE globalchats SET enabled = ? WHERE guild = ?", [chatdb[0].enabled ? false : true, interaction.guildId]);
-                    await utils.safeInteractionRespond(interaction, chatdb[0].enabled ? texts.success.disabled : texts.success.enabled);
+                    await cacheManager.delete(utils.globalChatCacheKey(interaction.guildId!));
                     break;
                 }
             }

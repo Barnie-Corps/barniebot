@@ -19,6 +19,7 @@ import { promisify, inspect, TextDecoder, TextEncoder } from "util";
 import * as mathjs from "mathjs";
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, PermissionsBitField, EmbedBuilder, TextChannel, GuildScheduledEvent } from "discord.js";
 import type { DiscordUser, UserLanguage, AIMemory } from "./types/interfaces";
+import cacheManager from "./managers/CacheManager";
 const TRANSLATE_WORKER_TYPE = "translate";
 const RATELIMIT_WORKER_TYPE = "ratelimit";
 const TRANSLATE_WORKER_PATH = path.join(__dirname, "workers/translate.js");
@@ -1183,7 +1184,7 @@ const utils = {
       if (!message.guild || !message.channel) return { error: "Not in a guild channel" };
       const channel = message.channel as any;
       return {
-        channel: {  id: channel.id, name: channel.name, type: ChannelType[channel.type as keyof typeof ChannelType] ?? String(channel.type) }
+        channel: { id: channel.id, name: channel.name, type: ChannelType[channel.type as keyof typeof ChannelType] ?? String(channel.type) }
       };
     },
     send_channel_message: async (args: { requesterId?: string; guildId?: string; channelId: string; content: string; sourceGuildId?: string | null }): Promise<any> => {
@@ -1572,8 +1573,8 @@ const utils = {
       const term = args.query.toLowerCase();
       await guild.members.fetch({ query: args.query, limit });
       const matches = Array.from(guild.members.cache.values())
-        .filter((m: any) => 
-          m.user.username.toLowerCase().includes(term) || 
+        .filter((m: any) =>
+          m.user.username.toLowerCase().includes(term) ||
           m.user.tag.toLowerCase().includes(term) ||
           (m.nickname && m.nickname.toLowerCase().includes(term))
         )
@@ -2844,8 +2845,8 @@ const utils = {
       const row = config[0];
       let channelWhitelist: string[] = [];
       let roleWhitelist: string[] = [];
-      try { channelWhitelist = Array.isArray(row.channel_whitelist_ids) ? row.channel_whitelist_ids : JSON.parse(row.channel_whitelist_ids || "[]"); } catch {}
-      try { roleWhitelist = Array.isArray(row.role_whitelist_ids) ? row.role_whitelist_ids : JSON.parse(row.role_whitelist_ids || "[]"); } catch {}
+      try { channelWhitelist = Array.isArray(row.channel_whitelist_ids) ? row.channel_whitelist_ids : JSON.parse(row.channel_whitelist_ids || "[]"); } catch { }
+      try { roleWhitelist = Array.isArray(row.role_whitelist_ids) ? row.role_whitelist_ids : JSON.parse(row.role_whitelist_ids || "[]"); } catch { }
       return {
         config: {
           ...row,
@@ -3669,6 +3670,49 @@ const utils = {
       const rank = await utils.getUserStaffRank(uid);
       resolve(rank !== null);
     });
+  },
+  globalChatCacheKey: (guildId: string) => `barniebot:index:globalchat:${guildId}`,
+  filterConfigCacheKey: (guildId: string) => `barniebot:index:filter:config:${guildId}`,
+  filterWordsCacheKey: (guildId: string) => `barniebot:index:filter:words:${guildId}`,
+  customResponsesCacheKey: (guildId: string) => `barniebot:index:customresponses:${guildId}`,
+  async getGlobalChatConfigCached(guildId: string): Promise<any | null> {
+    const key = utils.globalChatCacheKey(guildId);
+    const cached = await cacheManager.get<any>(key);
+    if (cached) return cached;
+    const rows: any = await db.query("SELECT * FROM globalchats WHERE guild = ?", [guildId]);
+    const first = rows?.[0] ?? null;
+    await cacheManager.set(key, first, 15000);
+    return first;
+  },
+  async getFilterConfigCached(guildId: string): Promise<any | null> {
+    const key = utils.filterConfigCacheKey(guildId);
+    const cached = await cacheManager.get<any>(key);
+    if (cached) return cached;
+    const rows: any = await db.query("SELECT * FROM filter_configs WHERE guild = ?", [guildId]);
+    const first = rows?.[0] ?? null;
+    await cacheManager.set(key, first, 30000);
+    return first;
+  },
+  async getFilterWordsCached(guildId: string): Promise<any[]> {
+    const key = utils.filterWordsCacheKey(guildId);
+    const cached = await cacheManager.get<any[]>(key);
+    if (Array.isArray(cached)) return cached;
+    const rows: any = await db.query("SELECT * FROM filter_words WHERE guild = ?", [guildId]);
+    const list = Array.isArray(rows) ? rows : [];
+    await cacheManager.set(key, list, 30000);
+    return list;
+  },
+  async getCustomResponsesCached(guildId: string): Promise<any[]> {
+    const key = utils.customResponsesCacheKey(guildId);
+    const cached = await cacheManager.get<any[]>(key);
+    if (Array.isArray(cached)) return cached;
+    const rows: any = await db.query("SELECT * FROM custom_responses WHERE guild = ?", [guildId]);
+    const list = Array.isArray(rows) ? rows : [];
+    await cacheManager.set(key, list, 30000);
+    return list;
+  },
+  async invalidateFilterCaches(guildId: string): Promise<void> {
+    await cacheManager.delete([utils.filterConfigCacheKey(guildId), utils.filterWordsCacheKey(guildId)]);
   },
 };
 export default utils;

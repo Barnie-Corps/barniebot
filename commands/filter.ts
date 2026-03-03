@@ -4,6 +4,8 @@ import utils from "../utils";
 import path from "path";
 import * as fs from "fs";
 import { FilterConfig, FilterWord } from "../types/interfaces";
+import cacheManager from "../managers/CacheManager";
+
 export default {
     data: new SlashCommandBuilder()
         .setName("filter")
@@ -132,12 +134,14 @@ export default {
                             guild: interaction.guildId,
                             enabled: true
                         }]);
+                        await cacheManager.delete(utils.filterConfigCacheKey(interaction.guildId));
                         await utils.safeInteractionRespond(interaction, texts.success.registered);
                         break;
                     }
                     else {
                         const set = !Boolean(filterMain.enabled);
                         await db.query("UPDATE filter_configs SET ? WHERE guild = ?", [{ enabled: set }, interaction.guildId]);
+                        await cacheManager.delete(utils.filterConfigCacheKey(interaction.guildId));
                         await utils.safeInteractionRespond(interaction, `${set ? texts.success.toggled_on : texts.success.toggled_off}`);
                         break;
                     }
@@ -153,6 +157,7 @@ export default {
                         if (foundWord[0]) return await utils.safeInteractionRespond(interaction, texts.errors.repeated);
                         if (isProtected && !interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) return await utils.safeInteractionRespond(interaction, texts.errors.not_admin_add);
                         await db.query("INSERT INTO filter_words SET ?", [{ guild: interaction.guildId, content: word.toLowerCase(), protected: isProtected ? true : false, single: isSingle ? true : false }]);
+                        await cacheManager.delete(utils.filterWordsCacheKey(interaction.guildId));
                     }
                     if (!Boolean(filterMain.enabled)) await utils.safeInteractionRespond(interaction, `${texts.success.added_word} ${isProtected ? ` ${texts.common.protected_word}` : ""}\n${texts.common.turned_off}`);
                     else await utils.safeInteractionRespond(interaction, `${texts.success.added_word} ${isProtected ? ` ${texts.common.protected_word}` : ""}${isSingle ? ` ${texts.common.single_word}` : ""}`);
@@ -216,6 +221,7 @@ export default {
                     if (!word[0]) return await utils.safeInteractionRespond(interaction, texts.errors.invalid_id);
                     if (Boolean(word[0].protected) && !force) return await utils.safeInteractionRespond(interaction, `${texts.common.protected_word} ${texts.errors.missing_force}`);
                     await db.query("DELETE FROM filter_words WHERE guild = ? AND id = ?", [interaction.guildId, wid]);
+                    await cacheManager.delete(utils.filterWordsCacheKey(interaction.guildId));
                     await utils.safeInteractionRespond(interaction, `${texts.success.removed_word} -> \`${word[0].content}\`${word[0] && force ? `. ${texts.common.was_forced}` : ""}`);
                     break;
                 }

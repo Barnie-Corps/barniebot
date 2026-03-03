@@ -1,12 +1,16 @@
 import Log from "../Log";
+import { createClient } from "redis";
 
 type RedisClient = {
-    connect: () => Promise<void>;
+    connect: () => Promise<unknown>;
     on: (event: string, listener: (...args: any[]) => void) => unknown;
     isOpen?: boolean;
     get: (key: string) => Promise<string | null>;
-    set: (key: string, value: string, options?: { PX?: number; EX?: number }) => Promise<unknown>;
+    set: (key: string, value: string, options?: { PX?: number; EX?: number; NX?: boolean }) => Promise<unknown>;
     del: (key: string | string[]) => Promise<number>;
+    incr: (key: string) => Promise<number>;
+    pTTL: (key: string) => Promise<number>;
+    pExpire: (key: string, milliseconds: number) => Promise<number>;
     disconnect: () => Promise<void>;
 };
 
@@ -32,13 +36,6 @@ class CacheManager {
 
     private async initRedis(): Promise<void> {
         try {
-            const req = (eval("require") as NodeJS.Require);
-            const redisModule: any = req("redis");
-            const createClient = redisModule?.createClient;
-            if (typeof createClient !== "function") {
-                Log.info("Redis module not available, using memory cache");
-                return;
-            }
             const redisUrl = process.env.REDIS_URL ?? `redis://${process.env.REDIS_HOST ?? "127.0.0.1"}:${process.env.REDIS_PORT ?? "6379"}`;
             const client: RedisClient = createClient({
                 url: redisUrl,
@@ -153,6 +150,73 @@ class CacheManager {
     async has(key: string): Promise<boolean> {
         const value = await this.get(key);
         return value !== null;
+    }
+
+    async increment(key: string, ttlMs?: number): Promise<number | null> {
+        if (this.redisAvailable && this.redisClient) {
+            try {
+                const value = await this.withTimeout(this.redisClient.incr(key), this.REDIS_OP_TIMEOUT);
+                if (value === null) return null;
+                if (ttlMs && value === 1) {
+                    await this.withTimeout(this.redisClient.pExpire(key, ttlMs), this.REDIS_OP_TIMEOUT);
+                }
+                return value;
+            }
+            catch {
+                this.redisAvailable = false;
+            }
+        }
+        const now = Date.now();
+        const existing = this.memoryCache.get(key);
+        if (!existing || (existing.expires > 0 && existing.expires <= now)) {
+            const expires = ttlMs ? now + ttlMs : 0;
+            this.memoryCache.set(key, { value: 1, expires });
+            return 1;
+        }
+        const nextValue = Number(existing.value) + 1;
+        this.memoryCache.set(key, { value: nextValue, expires: existing.expires });
+        return nextValue;
+    }
+
+    async getTtlMs(key: string): Promise<number> {
+        if (this.redisAvailable && this.redisClient) {
+            try {
+                const ttl = await this.withTimeout(this.redisClient.pTTL(key), this.REDIS_OP_TIMEOUT);
+                if (typeof ttl === "number") return ttl;
+            }
+            catch {
+                this.redisAvailable = false;
+            }
+        }
+        const entry = this.memoryCache.get(key);
+        if (!entry) return -2;
+        if (entry.expires <= 0) return -1;
+        return Math.max(0, entry.expires - Date.now());
+    }
+
+    async setIfNotExists<T>(key: string, value: T, ttlMs?: number): Promise<boolean> {
+        const payload = typeof value === "string" ? value : JSON.stringify(value);
+        if (this.redisAvailable && this.redisClient) {
+            try {
+                const opts = ttlMs ? { PX: ttlMs, NX: true } : { NX: true };
+                const result = await this.withTimeout(this.redisClient.set(key, payload, opts), this.REDIS_OP_TIMEOUT);
+                if (result === "OK") {
+                    const expires = ttlMs ? Date.now() + ttlMs : 0;
+                    this.memoryCache.set(key, { value, expires });
+                    return true;
+                }
+                return false;
+            }
+            catch {
+                this.redisAvailable = false;
+            }
+        }
+        const now = Date.now();
+        const existing = this.memoryCache.get(key);
+        if (existing && (existing.expires <= 0 || existing.expires > now)) return false;
+        const expires = ttlMs ? now + ttlMs : 0;
+        this.memoryCache.set(key, { value, expires });
+        return true;
     }
 
     isRedisAvailable(): boolean {
