@@ -139,6 +139,7 @@ const functionDeclarations = {
             properties: {
                 query: { type: SchemaType.STRING },
                 limit: { type: SchemaType.NUMBER },
+                includeProjectDocs: { type: SchemaType.BOOLEAN },
                 requesterId: { type: SchemaType.STRING }
             },
             required: ["query"]

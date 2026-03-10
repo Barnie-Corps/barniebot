@@ -18,7 +18,7 @@ import { exec as execCallback } from "child_process";
 import { promisify, inspect, TextDecoder, TextEncoder } from "util";
 import * as mathjs from "mathjs";
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, PermissionsBitField, EmbedBuilder, TextChannel, GuildScheduledEvent } from "discord.js";
-import type { DiscordUser, UserLanguage, AIMemory } from "./types/interfaces";
+import type { DiscordUser, UserLanguage, AIMemory, KnowledgeSource, KnowledgeCache, ProjectKnowledgeDoc, ProjectKnowledgeCache } from "./types/interfaces";
 import cacheManager from "./managers/CacheManager";
 const TRANSLATE_WORKER_TYPE = "translate";
 const RATELIMIT_WORKER_TYPE = "ratelimit";
@@ -50,6 +50,14 @@ const AI_WORKSPACE_ROOT = path.join(__dirname, "ai_workspace");
 const KNOWLEDGE_ROOT = path.join(PROJECT_ROOT, "knowledge");
 const KNOWLEDGE_SOURCES_PATH = path.join(KNOWLEDGE_ROOT, "sources.json");
 const KNOWLEDGE_CACHE_TTL_MS = 5 * 60 * 1000;
+const HYBRID_PROJECT_KNOWLEDGE_PATHS = [
+  "knowledge/project_knowledge.md",
+  "README.md",
+  "usage_policy.md",
+  "privacy.md",
+  "SECURITY.md",
+  "ai_rules.json"
+];
 const MAX_WORKSPACE_SCAN_RESULTS = 50;
 const MAX_FILE_SIZE_FOR_SEARCH = 1024 * 1024;
 const MAX_ATTACHMENT_SIZE = 8 * 1024 * 1024; // 8MB, safe default for Discord without Nitro
@@ -59,20 +67,8 @@ const execPromise = promisify(execCallback);
 const ALLOWED_SANDBOX_MODULES = new Map<string, unknown>([
   ["mathjs", mathjs]
 ]);
-type KnowledgeSource = {
-  id: string;
-  title: string;
-  scope: "project";
-  path: string;
-  access?: "public" | "staff" | "owner";
-  tags?: string[];
-};
-type KnowledgeCache = {
-  loadedAt: number;
-  sources: KnowledgeSource[];
-  contents: Map<string, string>;
-};
 let knowledgeCache: KnowledgeCache | null = null;
+let projectKnowledgeCache: ProjectKnowledgeCache | null = null;
 Workers.bulkCreateWorkers(TRANSLATE_WORKER_PATH, TRANSLATE_WORKER_TYPE, TRANSLATE_WORKER_POOL_SIZE);
 void (async () => {
   try {
@@ -234,6 +230,48 @@ const chunkText = (content: string, maxChars = 1200, overlap = 150): string[] =>
   if (current) chunks.push(current);
   return chunks;
 };
+const normalizeSearchText = (value: string): string => {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+const tokenizeSearchText = (value: string, minLength = 2, maxTerms = 24): string[] => {
+  const normalized = normalizeSearchText(value);
+  if (!normalized) return [];
+  const unique = new Set<string>();
+  for (const token of normalized.split(" ")) {
+    if (token.length < minLength) continue;
+    unique.add(token);
+    if (unique.size >= maxTerms) break;
+  }
+  return Array.from(unique);
+};
+const trigramSet = (value: string): Set<string> => {
+  const compact = normalizeSearchText(value).replace(/\s+/g, "");
+  const grams = new Set<string>();
+  if (!compact) return grams;
+  if (compact.length <= 3) {
+    grams.add(compact);
+    return grams;
+  }
+  for (let i = 0; i <= compact.length - 3; i++) {
+    grams.add(compact.slice(i, i + 3));
+  }
+  return grams;
+};
+const jaccardSimilarity = (a: Set<string>, b: Set<string>): number => {
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersection = 0;
+  for (const item of a) {
+    if (b.has(item)) intersection++;
+  }
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+};
 const scoreText = (text: string, terms: string[]): number => {
   if (!text || terms.length === 0) return 0;
   const lower = text.toLowerCase();
@@ -247,6 +285,35 @@ const scoreText = (text: string, terms: string[]): number => {
   }
   return score;
 };
+const scoreHybridChunk = (chunk: string, query: string, terms: string[], sourceTags: string[] = [], sourceTitle = ""): number => {
+  if (!chunk || !query) return 0;
+  const normalizedChunk = normalizeSearchText(chunk);
+  if (!normalizedChunk) return 0;
+  const normalizedQuery = normalizeSearchText(query);
+  if (!normalizedQuery) return 0;
+  const lexicalScore = scoreText(normalizedChunk, terms);
+  const matchedTerms = terms.filter(term => normalizedChunk.includes(term)).length;
+  const termCoverage = terms.length > 0 ? matchedTerms / terms.length : 0;
+  const phraseBonus = normalizedChunk.includes(normalizedQuery) ? 3 : 0;
+  const chunkTrigrams = trigramSet(normalizedChunk.slice(0, 4000));
+  const queryTrigrams = trigramSet(normalizedQuery);
+  const semanticScore = jaccardSimilarity(chunkTrigrams, queryTrigrams) * 8;
+  const tagBonus = sourceTags.reduce((acc, tag) => {
+    const normalizedTag = normalizeSearchText(tag);
+    if (!normalizedTag) return acc;
+    if (normalizedQuery.includes(normalizedTag)) return acc + 0.6;
+    if (terms.some(term => normalizedTag.includes(term) || term.includes(normalizedTag))) return acc + 0.4;
+    return acc;
+  }, 0);
+  const titleBonus = (() => {
+    const normalizedTitle = normalizeSearchText(sourceTitle);
+    if (!normalizedTitle) return 0;
+    if (normalizedTitle.includes(normalizedQuery)) return 1.2;
+    const titleHits = terms.filter(term => normalizedTitle.includes(term)).length;
+    return titleHits * 0.25;
+  })();
+  return lexicalScore + (termCoverage * 4) + phraseBonus + semanticScore + tagBonus + titleBonus;
+};
 const buildSnippet = (text: string, term: string, radius = 120): string => {
   const lower = text.toLowerCase();
   const idx = lower.indexOf(term);
@@ -254,6 +321,37 @@ const buildSnippet = (text: string, term: string, radius = 120): string => {
   const start = Math.max(0, idx - radius);
   const end = Math.min(text.length, idx + term.length + radius);
   return text.slice(start, end).trim();
+};
+const buildSnippetFromTerms = (text: string, terms: string[], radius = 180): string => {
+  if (!text) return "";
+  const normalized = normalizeSearchText(text);
+  const firstMatch = terms.find(term => normalized.includes(term));
+  if (!firstMatch) return text.slice(0, Math.min(text.length, 360)).trim();
+  return buildSnippet(text, firstMatch, radius);
+};
+const loadProjectKnowledgeCache = async (): Promise<ProjectKnowledgeCache> => {
+  const now = Date.now();
+  if (projectKnowledgeCache && now - projectKnowledgeCache.loadedAt < KNOWLEDGE_CACHE_TTL_MS) return projectKnowledgeCache;
+  const docs: ProjectKnowledgeDoc[] = [];
+  for (const relativePath of HYBRID_PROJECT_KNOWLEDGE_PATHS) {
+    const absolutePath = resolveProjectPath(relativePath);
+    const stats = await safeStat(absolutePath);
+    if (!stats || !stats.isFile() || stats.size > MAX_FILE_SIZE_FOR_SEARCH) continue;
+    try {
+      const content = await fs.readFile(absolutePath, "utf8");
+      docs.push({
+        id: `project:${relativePath}`,
+        path: relativePath.replace(/\\/g, "/"),
+        title: path.basename(relativePath),
+        tags: ["project", "docs"],
+        content
+      });
+    } catch {
+      continue;
+    }
+  }
+  projectKnowledgeCache = { loadedAt: now, docs };
+  return projectKnowledgeCache;
 };
 const canAccessKnowledge = async (access: KnowledgeSource["access"], requesterId?: string) => {
   if (!access || access === "public") return true;
@@ -450,31 +548,64 @@ const utils = {
       }
       return { sources: visible.map(s => ({ id: s.id, title: s.title, tags: s.tags ?? [], access: s.access ?? "public" })) };
     },
-    search_knowledge: async (args: { query: string; limit?: number; requesterId?: string }): Promise<any> => {
+    search_knowledge: async (args: { query: string; limit?: number; requesterId?: string; includeProjectDocs?: boolean }): Promise<any> => {
       if (!args?.query) return { error: "Missing query parameter" };
       const cache = await loadKnowledgeCache();
-      const terms = args.query.toLowerCase().split(/\s+/g).filter(t => t.length >= 3).slice(0, 8);
-      const limit = Math.max(1, Math.min(args.limit ?? 5, 10));
+      const query = String(args.query).trim();
+      if (!query) return { error: "Missing query parameter" };
+      const terms = tokenizeSearchText(query, 2, 16);
+      const limit = Math.max(1, Math.min(args.limit ?? 6, 12));
       const results: any[] = [];
       for (const source of cache.sources) {
         if (!(await canAccessKnowledge(source.access, args.requesterId))) continue;
         const content = cache.contents.get(source.id) ?? "";
         const chunks = chunkText(content);
         for (const chunk of chunks) {
-          const score = scoreText(chunk, terms);
+          const score = scoreHybridChunk(chunk, query, terms, source.tags ?? [], source.title);
           if (score <= 0) continue;
           results.push({
             sourceId: source.id,
             title: source.title,
             score,
-            snippet: buildSnippet(chunk, terms[0] ?? ""),
+            snippet: buildSnippetFromTerms(chunk, terms),
             tags: source.tags ?? [],
-            access: source.access ?? "public"
+            access: source.access ?? "public",
+            origin: "knowledge"
           });
         }
       }
+      const includeProjectDocs = args.includeProjectDocs !== false;
+      if (includeProjectDocs) {
+        const projectCache = await loadProjectKnowledgeCache();
+        for (const doc of projectCache.docs) {
+          const chunks = chunkText(doc.content);
+          for (const chunk of chunks) {
+            const score = scoreHybridChunk(chunk, query, terms, doc.tags, doc.title) * 0.95;
+            if (score <= 0) continue;
+            results.push({
+              sourceId: doc.id,
+              title: doc.title,
+              score,
+              snippet: buildSnippetFromTerms(chunk, terms),
+              tags: doc.tags,
+              access: "public",
+              origin: "project",
+              path: doc.path
+            });
+          }
+        }
+      }
       results.sort((a, b) => b.score - a.score);
-      return { results: results.slice(0, limit) };
+      const deduped: any[] = [];
+      const seen = new Set<string>();
+      for (const result of results) {
+        const key = `${result.sourceId}:${result.snippet}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        deduped.push(result);
+        if (deduped.length >= limit) break;
+      }
+      return { query, results: deduped };
     },
     get_knowledge_source: async (args: { sourceId: string; requesterId?: string }): Promise<any> => {
       if (!args?.sourceId) return { error: "Missing sourceId parameter" };
@@ -1170,10 +1301,16 @@ const utils = {
       });
       return { thread: { id: thread.id, name: thread.name, type: thread.type } };
     },
-    send_email: async (args: { to: string; subject: string; content: string, isHtml: boolean }): Promise<any> => {
-      if (!args.to || !args.subject || !args.content) return { error: "Missing parameters" };
+    send_email: async (args: { to?: string; subject?: string; body?: string; content?: string; isHtml?: boolean }): Promise<any> => {
+      const to = typeof args?.to === "string" ? args.to.trim() : "";
+      const subject = typeof args?.subject === "string" ? args.subject.trim() : "";
+      const body = typeof args?.body === "string"
+        ? args.body
+        : (typeof args?.content === "string" ? args.content : "");
+      if (!to || !subject || !body) return { error: "Missing parameters" };
       try {
-        await (args.isHtml ? utils.sendEmail(args.to, args.subject, "", args.content) : utils.sendEmail(args.to, args.subject, args.content));
+        const isHtml = Boolean(args?.isHtml);
+        await (isHtml ? utils.sendEmail(to, subject, "", body) : utils.sendEmail(to, subject, body));
         return { success: true };
       }
       catch (error: any) {

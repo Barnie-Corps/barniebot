@@ -28,6 +28,35 @@ export interface DataType {
         default_staff_ranks: string[];
     }
 }
+
+export interface KnowledgeSource {
+    id: string;
+    title: string;
+    scope: "project";
+    path: string;
+    access?: "public" | "staff" | "owner";
+    tags?: string[];
+}
+
+export interface KnowledgeCache {
+    loadedAt: number;
+    sources: KnowledgeSource[];
+    contents: Map<string, string>;
+}
+
+export interface ProjectKnowledgeDoc {
+    id: string;
+    path: string;
+    title: string;
+    tags: string[];
+    content: string;
+}
+
+export interface ProjectKnowledgeCache {
+    loadedAt: number;
+    docs: ProjectKnowledgeDoc[];
+}
+
 export interface BotEmoji {
     emoji: string;
     name: string;
