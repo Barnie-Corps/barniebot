@@ -18,7 +18,7 @@ import { exec as execCallback } from "child_process";
 import { promisify, inspect, TextDecoder, TextEncoder } from "util";
 import * as mathjs from "mathjs";
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, PermissionsBitField, EmbedBuilder, TextChannel, GuildScheduledEvent } from "discord.js";
-import type { DiscordUser, UserLanguage, AIMemory, KnowledgeSource, KnowledgeCache, ProjectKnowledgeDoc, ProjectKnowledgeCache } from "./types/interfaces";
+import type { DiscordUser, UserLanguage, AIMemory, KnowledgeSource, KnowledgeCache, ProjectKnowledgeDoc, ProjectKnowledgeCache, AiChatTierStatus, RPGSession, RPGCharacter } from "./types/interfaces";
 import cacheManager from "./managers/CacheManager";
 const TRANSLATE_WORKER_TYPE = "translate";
 const RATELIMIT_WORKER_TYPE = "ratelimit";
@@ -2425,7 +2425,7 @@ const utils = {
         permanent: !mute[0].until || mute[0].until === 0
       };
     },
-    create_support_ticket: async (args: { userId: string; category?: string; priority?: string; initialMessage: string; guildId?: string }): Promise<any> => {
+    create_support_ticket: async (args: { userId: string; initialMessage: string; guildId?: string }): Promise<any> => {
       if (!args.userId || !args.initialMessage) return { error: "Missing parameters" };
       try {
         const homeGuild = await client.guilds.fetch(data.bot.home_guild);
@@ -2466,8 +2466,6 @@ const utils = {
           user_id: args.userId,
           channel_id: "pending",
           status: "open",
-          priority: args.priority ?? "medium",
-          category: args.category ?? "general",
           created_at: createdAt,
           initial_message: args.initialMessage,
           guild_id: args.guildId ?? null,
@@ -3713,9 +3711,70 @@ const utils = {
   //   return await sendRequest(text) as string;
   // },
   isVIP: async (id: string) => {
-    const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [id]);
-    if (!foundVip[0]) return false;
-    else return true;
+    const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ? ORDER BY end_date DESC LIMIT 1", [id]);
+    const row = foundVip?.[0];
+    if (!row) return false;
+    const endDate = Number(row.end_date ?? 0);
+    if (endDate > 0 && endDate < Date.now()) return false;
+    return true;
+  },
+  isPremiumGuild: async (guildId: string) => {
+    const foundGuild: any = await db.query("SELECT * FROM vip_guilds WHERE guild_id = ? ORDER BY end_date DESC LIMIT 1", [guildId]);
+    const row = foundGuild?.[0];
+    if (!row) return false;
+    const endDate = Number(row.end_date ?? 0);
+    if (endDate > 0 && endDate < Date.now()) return false;
+    return true;
+  },
+  isAdminStaff: async (userId: string) => {
+    const rank = await utils.getUserStaffRank(userId);
+    if (!rank) return false;
+    return utils.hasMinimumRank(rank, "Administrator");
+  },
+  getUtcDateKey: (timestamp = Date.now()) => {
+    return new Date(timestamp).toISOString().slice(0, 10);
+  },
+  getAiChatTierStatus: async (userId: string): Promise<AiChatTierStatus> => {
+    if (data.bot.owners.includes(userId)) {
+      return { tier: "owner", allowed: true, unlimited: true, dailyLimit: null, used: 0, remaining: null };
+    }
+    if (await utils.isStaff(userId)) {
+      return { tier: "staff", allowed: true, unlimited: true, dailyLimit: null, used: 0, remaining: null };
+    }
+    if (await utils.isVIP(userId)) {
+      return { tier: "vip", allowed: true, unlimited: true, dailyLimit: null, used: 0, remaining: null };
+    }
+    const usageDate = utils.getUtcDateKey();
+    const rows: any = await db.query("SELECT messages_used FROM ai_chat_daily_usage WHERE user_id = ? AND usage_date = ? LIMIT 1", [userId, usageDate]);
+    const used = Number(rows?.[0]?.messages_used ?? 0);
+    const dailyLimit = 10;
+    return {
+      tier: "free",
+      allowed: used < dailyLimit,
+      unlimited: false,
+      dailyLimit,
+      used,
+      remaining: Math.max(0, dailyLimit - used)
+    };
+  },
+  consumeAiChatDailyQuota: async (userId: string): Promise<AiChatTierStatus> => {
+    const status = await utils.getAiChatTierStatus(userId);
+    if (status.unlimited) return status;
+    if (!status.allowed) return status;
+    const usageDate = utils.getUtcDateKey();
+    const now = Date.now();
+    const existing: any = await db.query("SELECT messages_used FROM ai_chat_daily_usage WHERE user_id = ? AND usage_date = ? LIMIT 1", [userId, usageDate]);
+    if (existing?.[0]) {
+      await db.query("UPDATE ai_chat_daily_usage SET messages_used = messages_used + 1, updated_at = ? WHERE user_id = ? AND usage_date = ?", [now, userId, usageDate]);
+    } else {
+      await db.query("INSERT INTO ai_chat_daily_usage SET ?", [{
+        user_id: userId,
+        usage_date: usageDate,
+        messages_used: 1,
+        updated_at: now
+      }]);
+    }
+    return await utils.getAiChatTierStatus(userId);
   },
   getAiResponse: async (prompt: string, chat: NIMChatSession) => {
     let result;
@@ -3801,6 +3860,50 @@ const utils = {
       }
       throw err;
     }
+  },
+  sendLongTextResponse: async (target: any, text: string, notice: string, filenamePrefix = "response"): Promise<any> => {
+    const filename = path.join(PROJECT_ROOT, `${filenamePrefix}-${Date.now()}.md`);
+    await fs.writeFile(filename, String(text || ""), "utf8");
+    try {
+      if (typeof target?.reply === "function" && typeof target?.editReply === "function") {
+        return await utils.safeInteractionRespond(target, { content: notice, files: [filename] });
+      }
+      if (typeof target?.reply === "function") {
+        return await target.reply({ content: notice, files: [filename] });
+      }
+      if (typeof target?.send === "function") {
+        return await target.send({ content: notice, files: [filename] });
+      }
+      throw new Error("Unsupported response target");
+    } finally {
+      try { await fs.unlink(filename); } catch { }
+    }
+  },
+  getActiveRpgProfile: async (userId: string): Promise<{ session: RPGSession | null; character: RPGCharacter | null }> => {
+    const sessionRows = await db.query(
+      "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
+      [userId]
+    ) as unknown as RPGSession[];
+    const session = sessionRows[0] || null;
+    if (!session) return { session: null, character: null };
+    const characterRows = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [session.account_id]) as unknown as RPGCharacter[];
+    return { session, character: characterRows[0] || null };
+  },
+  requireActiveRpgProfile: async (
+    interaction: any,
+    userId: string,
+    messages: { notLoggedIn: string; noCharacter: string }
+  ): Promise<{ session: RPGSession; character: RPGCharacter } | null> => {
+    const profile = await utils.getActiveRpgProfile(userId);
+    if (!profile.session) {
+      await utils.safeInteractionRespond(interaction, { content: messages.notLoggedIn });
+      return null;
+    }
+    if (!profile.character) {
+      await utils.safeInteractionRespond(interaction, { content: messages.noCharacter });
+      return null;
+    }
+    return { session: profile.session, character: profile.character };
   },
   isStaff(uid: string): Promise<boolean> {
     return new Promise(async (resolve) => {

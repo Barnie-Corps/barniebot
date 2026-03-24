@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ChannelType, PermissionFlagsBits, DMChannel, TextChannel, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
+import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ChannelType, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import utils from "../utils";
 import db from "../mysql/database";
 import data from "../data";
@@ -8,23 +8,17 @@ export default {
     data: new SlashCommandBuilder()
         .setName("support")
         .setDescription("Create a support ticket")
-        .addStringOption(o => o.setName("message").setDescription("Describe your issue or question").setRequired(true)),
+        .addStringOption(o => o.setName("message").setDescription("Describe your issue or question").setRequired(true).setMaxLength(1800)),
     category: "Support",
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
-        // In guilds, require ManageMessages permission to prevent spam
-        if (interaction.guild && interaction.member) {
-            const member = interaction.member as any;
-            if (!member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-                return await utils.safeInteractionRespond(interaction, "You need the `Manage Messages` permission to use this command in a server. Try using it in DMs instead.");
-            }
-        }
         let texts = {
             creating: "Creating your support ticket...",
             created: "Your support ticket has been created! Our staff will respond soon.",
             error: "Failed to create support ticket. Please try again later.",
-            dm_only_note: "Note: This command works best in DMs for privacy.",
+            guild_permission_required: "You need the `Manage Messages` permission to use this command in a server. Try using it in DMs instead.",
             guild_warning: "Support ticket created. Please note that staff responses will be visible in this channel.",
             no_home_guild: "Support system is not properly configured.",
+            invalid_message: "Please provide a valid support message.",
             ticket_info: "Ticket Information",
             user: "User",
             ticket_id: "Ticket ID",
@@ -34,17 +28,33 @@ export default {
             dm_origin: "Direct Message",
             guild_origin: "Guild",
             status: "Status",
-            open: "Open"
+            open: "Open",
+            assigned_to: "Assigned To",
+            unassigned: "Unassigned",
+            close_ticket: "Close Ticket",
+            new_ticket_assigned: "New ticket assigned to you!",
+            new_ticket_unassigned: "New unassigned ticket!",
+            ticket_created_title: "Support Ticket Created",
+            ticket_created_description: "Your support ticket #{ticketId} has been created!\n\nOur staff will respond to you soon. You can close this ticket at any time using the button below.",
+            all_messages_forwarded: "All messages you send here will be forwarded to staff"
         };
 
         if (lang !== "en") {
             texts = await utils.autoTranslate(texts, "en", lang);
         }
+        if (interaction.guild && interaction.member) {
+            const member = interaction.member as any;
+            if (!member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+                return await utils.safeInteractionRespond(interaction, texts.guild_permission_required);
+            }
+        }
 
-        const message = interaction.options.getString("message", true);
+        const message = interaction.options.getString("message", true).trim();
+        if (!message.length) return await utils.safeInteractionRespond(interaction, texts.invalid_message);
         const isDM = !interaction.guild;
-        
+
         try {
+            await utils.safeInteractionRespond(interaction, texts.creating);
             const homeGuild = await client.guilds.fetch(data.bot.home_guild);
             if (!homeGuild) {
                 return await utils.safeInteractionRespond(interaction, texts.no_home_guild);
@@ -55,32 +65,22 @@ export default {
                 return await utils.safeInteractionRespond(interaction, texts.no_home_guild);
             }
 
-            // Find available staff for auto-assignment
             let assignedStaff: string | null = null;
             try {
-                // Get all staff members with status
-                const allStaff = await utils.getStaffRanks();
-                const staffIds = Object.keys(allStaff);
-                
-                // Get staff statuses
+                const staffRows = await db.query("SELECT uid FROM staff") as unknown as Array<{ uid: string }>;
+                const staffIds = staffRows.map(row => row.uid);
                 const statuses: any = await db.query(
                     "SELECT user_id, status FROM staff_status WHERE user_id IN (?) AND status = 'available'",
-                    [staffIds.length > 0 ? staffIds : ['none']]
+                    [staffIds.length > 0 ? staffIds : ["none"]]
                 );
-                
                 const availableStaffIds = statuses.map((s: any) => s.user_id);
-                
-                // If we have available staff, find the one with least assigned tickets
                 if (availableStaffIds.length > 0) {
                     const workloads: any = await db.query(
                         "SELECT assigned_to, COUNT(*) as count FROM support_tickets WHERE assigned_to IN (?) AND status = 'open' GROUP BY assigned_to",
                         [availableStaffIds]
                     );
-                    
                     const workloadMap = new Map<string, number>();
                     workloads.forEach((w: any) => workloadMap.set(w.assigned_to, w.count));
-                    
-                    // Find staff with minimum workload (or not in workload map = 0 tickets)
                     let minWorkload = Infinity;
                     for (const staffId of availableStaffIds) {
                         const workload = workloadMap.get(staffId) || 0;
@@ -92,10 +92,8 @@ export default {
                 }
             } catch (error) {
                 console.error("Auto-assignment failed:", error);
-                // Continue without assignment
             }
-            
-            // Create ticket in database
+
             const createdAt = Date.now();
             const result: any = await db.query(
                 "INSERT INTO support_tickets SET ?",
@@ -107,27 +105,20 @@ export default {
                     initial_message: message,
                     guild_id: interaction.guild?.id || null,
                     guild_name: interaction.guild?.name || null,
-                    assigned_to: assignedStaff,
-                    priority: "medium",
-                    category: "general"
+                    assigned_to: assignedStaff
                 }]
             );
 
             const ticketId = result.insertId;
-
-            // Create channel in home guild
-            const channelName = `support-request-${ticketId}`;
             const ticketChannel = await homeGuild.channels.create({
-                name: channelName,
+                name: `support-request-${ticketId}`,
                 type: ChannelType.GuildText,
                 parent: data.bot.support_category,
-                topic: `Support ticket #${ticketId} - User: ${interaction.user.tag} (${interaction.user.id})`,
+                topic: `Support ticket #${ticketId} - User: ${interaction.user.tag} (${interaction.user.id})`
             });
 
-            // Update ticket with channel ID
             await db.query("UPDATE support_tickets SET channel_id = ? WHERE id = ?", [ticketChannel.id, ticketId]);
 
-            // Create ticket embed
             const ticketEmbed = new EmbedBuilder()
                 .setColor("Purple")
                 .setTitle(`${texts.ticket_info} #${ticketId}`)
@@ -136,9 +127,7 @@ export default {
                     { name: texts.user, value: `${interaction.user.tag} (<@${interaction.user.id}>)\nID: ${interaction.user.id}`, inline: false },
                     { name: texts.ticket_id, value: `#${ticketId}`, inline: true },
                     { name: texts.status, value: texts.open, inline: true },
-                    { name: "Priority", value: "🟡 Medium", inline: true },
-                    { name: "Category", value: "General", inline: true },
-                    { name: "Assigned To", value: assignedStaff ? `<@${assignedStaff}>` : "Unassigned", inline: true },
+                    { name: texts.assigned_to, value: assignedStaff ? `<@${assignedStaff}>` : texts.unassigned, inline: true },
                     { name: texts.created_at, value: `<t:${Math.floor(createdAt / 1000)}:F>`, inline: false },
                     { name: texts.origin, value: isDM ? texts.dm_origin : `${texts.guild_origin}: ${interaction.guild!.name} (${interaction.guild!.id})`, inline: false },
                     { name: texts.initial_message, value: message.length > 1024 ? message.substring(0, 1021) + "..." : message, inline: false }
@@ -150,48 +139,45 @@ export default {
                 .addComponents(
                     new ButtonBuilder()
                         .setCustomId(`close_ticket-${ticketId}-${interaction.user.id}`)
-                        .setLabel("Close Ticket")
+                        .setLabel(texts.close_ticket)
                         .setStyle(ButtonStyle.Danger)
                         .setEmoji("🔒")
                 );
 
-            const ticketMessage = await ticketChannel.send({ 
-                content: assignedStaff ? `<@${assignedStaff}> - New ticket assigned to you!` : `<@&${data.bot.home_guild}> - New unassigned ticket!`, 
-                embeds: [ticketEmbed], 
-                components: [closeButton] 
+            const ticketMessage = await ticketChannel.send({
+                content: assignedStaff ? `<@${assignedStaff}> - ${texts.new_ticket_assigned}` : texts.new_ticket_unassigned,
+                embeds: [ticketEmbed],
+                components: [closeButton]
             });
-            
-            // Send close option to user
+
             const userCloseEmbed = new EmbedBuilder()
                 .setColor("Purple")
-                .setTitle("🎫 Support Ticket Created")
-                .setDescription(`Your support ticket #${ticketId} has been created!\n\nOur staff will respond to you soon. You can close this ticket at any time using the button below.`)
+                .setTitle(`🎫 ${texts.ticket_created_title}`)
+                .setDescription(texts.ticket_created_description.replace("#{ticketId}", `#${ticketId}`))
                 .addFields(
-                    { name: "Ticket ID", value: `#${ticketId}`, inline: true },
-                    { name: "Status", value: "Open", inline: true }
+                    { name: texts.ticket_id, value: `#${ticketId}`, inline: true },
+                    { name: texts.status, value: texts.open, inline: true }
                 )
-                .setFooter({ text: "All messages you send here will be forwarded to staff" })
+                .setFooter({ text: texts.all_messages_forwarded })
                 .setTimestamp();
-            
+
             const userCloseButton = new ActionRowBuilder<ButtonBuilder>()
                 .addComponents(
                     new ButtonBuilder()
                         .setCustomId(`close_ticket-${ticketId}-${interaction.user.id}`)
-                        .setLabel("Close Ticket")
+                        .setLabel(texts.close_ticket)
                         .setStyle(ButtonStyle.Danger)
                         .setEmoji("🔒")
                 );
-            
+
             try {
                 await interaction.user.send({ embeds: [userCloseEmbed], components: [userCloseButton] });
             } catch (error) {
                 console.error("Failed to send close option to user:", error);
             }
-            
-            // Store the original message ID for later updates
+
             await db.query("UPDATE support_tickets SET message_id = ? WHERE id = ?", [ticketMessage.id, ticketId]);
 
-            // Save initial message to transcript
             await db.query("INSERT INTO support_messages SET ?", [{
                 ticket_id: ticketId,
                 user_id: interaction.user.id,
@@ -202,12 +188,8 @@ export default {
                 staff_rank: null
             }]);
 
-            const responseText = isDM 
-                ? texts.created 
-                : `${texts.created}\n${texts.guild_warning}`;
-
+            const responseText = isDM ? texts.created : `${texts.created}\n${texts.guild_warning}`;
             await utils.safeInteractionRespond(interaction, responseText);
-
         } catch (error: any) {
             console.error("Support ticket creation error:", error);
             await utils.safeInteractionRespond(interaction, texts.error);

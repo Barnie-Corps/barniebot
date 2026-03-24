@@ -1,20 +1,7 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
+import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, AutocompleteInteraction } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
-import { RPGSession, RPGCharacter, RPGCraftingMaterial, RPGCraftingRecipe, CountResult } from "../types/interfaces";
-
-async function getSession(userId: string) {
-    const session = (await db.query(
-        "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
-        [userId]
-    ) as unknown as RPGSession[]);
-    return session[0] || null;
-}
-
-async function getCharacter(accountId: number) {
-    const character = (await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]) as unknown as RPGCharacter[]);
-    return character[0] || null;
-}
+import { RPGCraftingMaterial, RPGCraftingRecipe, CountResult } from "../types/interfaces";
 
 export default {
     data: new SlashCommandBuilder()
@@ -31,8 +18,30 @@ export default {
             .setDescription("Craft an item from a recipe")
             .addIntegerOption(o => o.setName("recipe_id")
                 .setDescription("Recipe ID to craft")
+                .setAutocomplete(true)
                 .setRequired(true))),
     category: "RPG",
+    autocomplete: async (interaction: AutocompleteInteraction) => {
+        if (interaction.options.getSubcommand() !== "create") return await interaction.respond([]);
+        const profile = await utils.getActiveRpgProfile(interaction.user.id);
+        if (!profile.character) return await interaction.respond([]);
+        const recipes = await db.query(
+            `SELECT r.id, r.required_level, i.name as item_name 
+            FROM rpg_crafting_recipes r 
+            JOIN rpg_items i ON i.id = r.result_item_id 
+            ORDER BY r.required_level ASC, r.id ASC LIMIT 25`
+        ) as unknown as Array<{ id: number; required_level: number; item_name: string }>;
+        const focused = String(interaction.options.getFocused() || "");
+        await interaction.respond(
+            recipes
+                .map(recipe => ({
+                    name: `#${recipe.id} ${recipe.item_name} (Lv ${recipe.required_level})`,
+                    value: recipe.id
+                }))
+                .filter(recipe => recipe.name.toLowerCase().includes(focused.toLowerCase()) || String(recipe.value).includes(focused))
+                .slice(0, 25)
+        );
+    },
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
             errors: {
@@ -82,15 +91,12 @@ export default {
             texts = await utils.autoTranslate(texts, "en", lang);
         }
 
-        const session = await getSession(interaction.user.id);
-        if (!session) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.not_logged_in + "`/login`." });
-        }
-
-        const character = await getCharacter(session.account_id);
-        if (!character) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.no_character + "`/rpg create`." });
-        }
+        const profile = await utils.requireActiveRpgProfile(interaction, interaction.user.id, {
+            notLoggedIn: "❌ " + texts.errors.not_logged_in + "`/login`.",
+            noCharacter: "❌ " + texts.errors.no_character + "`/rpg create`."
+        });
+        if (!profile) return;
+        const { character } = profile;
 
         const sub = interaction.options.getSubcommand();
 
@@ -125,7 +131,7 @@ export default {
             for (const mat of materials) {
                 embed.addFields({
                     name: `${rarityColors[mat.rarity]} ${mat.emoji} ${mat.name} x${mat.quantity}`,
-                    value: `*${mat.description || "Crafting material"}*`,
+                    value: `*${mat.description || texts.materials.crafting_material}*`,
                     inline: true
                 });
             }
@@ -203,15 +209,15 @@ export default {
 
                 embed.addFields({
                     name: `${statusIcon} [${recipe.id}] ${recipe.name}`,
-                    value: `Creates: **${recipe.item_name}** (${recipe.rarity})\n` +
-                           `Level Required: ${recipe.required_level}\n` +
-                           `Materials:\n${materials.join("\n")}\n` +
-                           `💰 Gold Cost: ${recipe.gold_cost} | Success Rate: ${recipe.success_rate}%`,
+                    value: `${texts.recipes.creates}**${recipe.item_name}** (${recipe.rarity})\n` +
+                           `${texts.recipes.level_required}${recipe.required_level}\n` +
+                           `${texts.recipes.materials}\n${materials.join("\n")}\n` +
+                           `💰 ${texts.recipes.gold_cost}${recipe.gold_cost} | ${texts.recipes.success_rate}${recipe.success_rate}%`,
                     inline: false
                 });
             }
 
-            embed.setFooter({ text: `Use /craft create <recipe_id> to craft | Page ${page}/${totalPages}` });
+            embed.setFooter({ text: `${texts.recipes.use_create}${page}/${totalPages}` });
 
             return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }
@@ -256,7 +262,7 @@ export default {
                 if (!owned[0] || owned[0].quantity < mat.qty) {
                     const matInfo = (await db.query("SELECT name FROM rpg_crafting_materials WHERE id = ?", [mat.id]) as unknown as RPGCraftingMaterial[]);
                     return utils.safeInteractionRespond(interaction, { 
-                        content: `❌ You don't have enough **${matInfo[0].name}**! Need: ${mat.qty}, Have: ${owned[0]?.quantity || 0}` 
+                        content: `❌ ${texts.errors.not_enough}**${matInfo[0].name}**${texts.errors.need}${mat.qty}${texts.errors.have}${owned[0]?.quantity || 0}` 
                     });
                 }
             }

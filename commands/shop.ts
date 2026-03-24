@@ -1,20 +1,7 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
+import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, AutocompleteInteraction } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
-import { RPGSession, RPGCharacter, RPGItem, RPGInventoryItem } from "../types/interfaces";
-
-async function getSession(userId: string) {
-    const session = (await db.query(
-        "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
-        [userId]
-    ) as unknown as RPGSession[]);
-    return session[0] || null;
-}
-
-async function getCharacter(accountId: number) {
-    const character = (await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]) as unknown as RPGCharacter[]);
-    return character[0] || null;
-}
+import { RPGItem, RPGInventoryItem } from "../types/interfaces";
 
 export default {
     data: new SlashCommandBuilder()
@@ -35,6 +22,7 @@ export default {
             .setDescription("Purchase an item")
             .addIntegerOption(o => o.setName("item_id")
                 .setDescription("Item ID from shop")
+                .setAutocomplete(true)
                 .setRequired(true))
             .addIntegerOption(o => o.setName("quantity")
                 .setDescription("Quantity to buy")
@@ -44,12 +32,41 @@ export default {
             .setDescription("Sell an item from your inventory")
             .addIntegerOption(o => o.setName("inventory_id")
                 .setDescription("Inventory item ID")
+                .setAutocomplete(true)
                 .setRequired(true))
             .addIntegerOption(o => o.setName("quantity")
                 .setDescription("Quantity to sell")
                 .setMinValue(1)
                 .setMaxValue(99))),
     category: "RPG",
+    autocomplete: async (interaction: AutocompleteInteraction) => {
+        const sub = interaction.options.getSubcommand();
+        const focused = Number(interaction.options.getFocused()) || 0;
+        const profile = await utils.getActiveRpgProfile(interaction.user.id);
+        if (!profile.character) return await interaction.respond([]);
+        if (sub === "buy") {
+            const items = await db.query("SELECT id, name, base_value FROM rpg_items ORDER BY base_value ASC LIMIT 25") as unknown as Array<{ id: number; name: string; base_value: number }>;
+            return await interaction.respond(items.map(item => ({
+                name: `#${item.id} ${item.name} (${item.base_value}g)`,
+                value: item.id
+            })).filter(item => Number(item.value) >= 0 && (!focused || String(item.value).includes(String(focused)))));
+        }
+        if (sub === "sell") {
+            const items = await db.query(
+                `SELECT i.id, i.quantity, ri.name 
+                FROM rpg_inventory i 
+                JOIN rpg_items ri ON ri.id = i.item_id 
+                WHERE i.character_id = ? 
+                ORDER BY i.id DESC LIMIT 25`,
+                [profile.character.id]
+            ) as unknown as Array<{ id: number; quantity: number; name: string }>;
+            return await interaction.respond(items.map(item => ({
+                name: `#${item.id} ${item.name} x${item.quantity}`,
+                value: item.id
+            })).filter(item => Number(item.value) >= 0 && (!focused || String(item.value).includes(String(focused)))));
+        }
+        return await interaction.respond([]);
+    },
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
             errors: {
@@ -94,15 +111,12 @@ export default {
             texts = await utils.autoTranslate(texts, "en", lang);
         }
 
-        const session = await getSession(interaction.user.id);
-        if (!session) {
-            return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.not_logged_in + "`/login`.");
-        }
-
-        const character = await getCharacter(session.account_id);
-        if (!character) {
-            return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.no_character + "`/rpg create`.");
-        }
+        const profile = await utils.requireActiveRpgProfile(interaction, interaction.user.id, {
+            notLoggedIn: "❌ " + texts.errors.not_logged_in + "`/login`.",
+            noCharacter: "❌ " + texts.errors.no_character + "`/rpg create`."
+        });
+        if (!profile) return;
+        const { character } = profile;
 
         const sub = interaction.options.getSubcommand();
 

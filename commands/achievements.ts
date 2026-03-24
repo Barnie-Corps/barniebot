@@ -1,20 +1,7 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
-import { RPGSession, RPGCharacter, RPGAchievement, CountResult } from "../types/interfaces";
-
-async function getSession(userId: string) {
-    const session = (await db.query(
-        "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
-        [userId]
-    ) as unknown as RPGSession[]);
-    return session[0] || null;
-}
-
-async function getCharacter(accountId: number) {
-    const character = (await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]) as unknown as RPGCharacter[]);
-    return character[0] || null;
-}
+import { RPGAchievement, CountResult } from "../types/interfaces";
 
 export default {
     data: new SlashCommandBuilder()
@@ -35,42 +22,62 @@ export default {
             .setDescription("View your achievement progress")),
     category: "RPG",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
-        const session = await getSession(interaction.user.id);
-        if (!session) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ You need to log in first! Use `/login` to access your account." });
+        let texts = {
+            errors: {
+                not_logged_in: "You need to log in first! Use `/login` to access your account.",
+                no_character: "You need to create a character first! Use `/rpg create` to begin your adventure.",
+                no_achievements_category: "No achievements found for this category.",
+                no_progress: "You don't have any achievements in progress. Start exploring to unlock some!"
+            },
+            list: {
+                title: "Achievements",
+                collection: "achievement collection",
+                progress: "Progress",
+                rewards: "Rewards"
+            },
+            progress: {
+                title: "Achievement Progress",
+                current: "current achievements",
+                unlocked: "Unlocked"
+            }
+        };
+
+        if (lang !== "en") {
+            texts = await utils.autoTranslate(texts, "en", lang);
         }
 
-        const character = await getCharacter(session.account_id);
-        if (!character) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
-        }
+        const profile = await utils.requireActiveRpgProfile(interaction, interaction.user.id, {
+            notLoggedIn: `❌ ${texts.errors.not_logged_in}`,
+            noCharacter: `❌ ${texts.errors.no_character}`
+        });
+        if (!profile) return;
+        const { character } = profile;
 
         const sub = interaction.options.getSubcommand();
 
         if (sub === "list") {
             const category = interaction.options.getString("category");
-            
             let query = "SELECT * FROM rpg_achievements WHERE hidden = FALSE";
             const params: string[] = [];
-            
+
             if (category) {
                 query += " AND category = ?";
                 params.push(category);
             }
-            
+
             query += " ORDER BY category, id";
-            
-            const achievements = (await db.query(query, params) as unknown as RPGAchievement[]);
-            
+
+            const achievements = await db.query(query, params) as unknown as RPGAchievement[];
+
             if (achievements.length === 0) {
-                return utils.safeInteractionRespond(interaction, { content: "📜 No achievements found for this category." });
+                return utils.safeInteractionRespond(interaction, { content: `📜 ${texts.errors.no_achievements_category}` });
             }
 
-            const charAchievements = (await db.query(
+            const charAchievements = await db.query(
                 "SELECT achievement_id, progress, unlocked FROM rpg_character_achievements WHERE character_id = ?",
                 [character.id]
-            ) as unknown as any[]);
-            
+            ) as unknown as any[];
+
             const achievementMap = new Map();
             for (const ca of charAchievements) {
                 achievementMap.set(ca.achievement_id, { progress: ca.progress, unlocked: ca.unlocked });
@@ -78,30 +85,24 @@ export default {
 
             const embed = new EmbedBuilder()
                 .setColor("#FFD700")
-                .setTitle(`🏆 Achievements${category ? ` - ${category.charAt(0).toUpperCase() + category.slice(1)}` : ""}`)
-                .setDescription(`**${character.name}**'s achievement collection`)
+                .setTitle(`🏆 ${texts.list.title}${category ? ` - ${category.charAt(0).toUpperCase() + category.slice(1)}` : ""}`)
+                .setDescription(`**${character.name}**'s ${texts.list.collection}`)
                 .setTimestamp();
 
-            let currentCategory = "";
             for (const ach of achievements) {
-                if (ach.category !== currentCategory) {
-                    currentCategory = ach.category;
-                }
-                
                 const progress = achievementMap.get(ach.id);
                 const isUnlocked = progress?.unlocked || false;
                 const currentProgress = progress?.progress || 0;
-                const progressBar = Math.floor((currentProgress / ach.requirement_value) * 10);
+                const progressBar = Math.max(0, Math.min(10, Math.floor((currentProgress / ach.requirement_value) * 10)));
                 const bar = "▰".repeat(progressBar) + "▱".repeat(10 - progressBar);
-                
                 const status = isUnlocked ? "✅" : "🔒";
                 const rewardText = [];
                 if (ach.reward_gold > 0) rewardText.push(`💰 ${ach.reward_gold}`);
                 if (ach.reward_experience > 0) rewardText.push(`⭐ ${ach.reward_experience} XP`);
-                
+
                 embed.addFields({
                     name: `${status} ${ach.icon} ${ach.name}`,
-                    value: `*${ach.description}*\nProgress: ${currentProgress}/${ach.requirement_value} ${bar}\n${rewardText.length > 0 ? `Rewards: ${rewardText.join(" | ")}` : ""}`,
+                    value: `*${ach.description}*\n${texts.list.progress}: ${currentProgress}/${ach.requirement_value} ${bar}\n${rewardText.length > 0 ? `${texts.list.rewards}: ${rewardText.join(" | ")}` : ""}`,
                     inline: false
                 });
             }
@@ -110,7 +111,7 @@ export default {
         }
 
         if (sub === "progress") {
-            const charAchievements = (await db.query(
+            const charAchievements = await db.query(
                 `SELECT ca.*, a.name, a.description, a.icon, a.category, a.requirement_value, a.reward_gold, a.reward_experience 
                 FROM rpg_character_achievements ca 
                 JOIN rpg_achievements a ON ca.achievement_id = a.id 
@@ -118,23 +119,23 @@ export default {
                 ORDER BY (ca.progress / a.requirement_value) DESC 
                 LIMIT 10`,
                 [character.id]
-            ) as unknown as any[]);
+            ) as unknown as any[];
 
             if (charAchievements.length === 0) {
-                return utils.safeInteractionRespond(interaction, { content: "📊 You don't have any achievements in progress. Start exploring to unlock some!" });
+                return utils.safeInteractionRespond(interaction, { content: `📊 ${texts.errors.no_progress}` });
             }
 
             const embed = new EmbedBuilder()
                 .setColor("#3498DB")
-                .setTitle("📊 Achievement Progress")
-                .setDescription(`**${character.name}**'s current achievements`)
+                .setTitle(`📊 ${texts.progress.title}`)
+                .setDescription(`**${character.name}**'s ${texts.progress.current}`)
                 .setTimestamp();
 
             for (const ach of charAchievements) {
-                const progressBar = Math.floor((ach.progress / ach.requirement_value) * 20);
+                const progressBar = Math.max(0, Math.min(20, Math.floor((ach.progress / ach.requirement_value) * 20)));
                 const bar = "▰".repeat(progressBar) + "▱".repeat(20 - progressBar);
-                const percentage = Math.floor((ach.progress / ach.requirement_value) * 100);
-                
+                const percentage = Math.max(0, Math.min(100, Math.floor((ach.progress / ach.requirement_value) * 100)));
+
                 embed.addFields({
                     name: `${ach.icon} ${ach.name}`,
                     value: `${bar} ${percentage}%\n${ach.progress}/${ach.requirement_value} - *${ach.description}*`,
@@ -142,13 +143,13 @@ export default {
                 });
             }
 
-            const totalUnlocked = (await db.query(
+            const totalUnlocked = await db.query(
                 "SELECT COUNT(*) as count FROM rpg_character_achievements WHERE character_id = ? AND unlocked = TRUE",
                 [character.id]
-            ) as unknown as CountResult[]);
-            const totalAchievements = (await db.query("SELECT COUNT(*) as count FROM rpg_achievements WHERE hidden = FALSE") as unknown as CountResult[]);
-            
-            embed.setFooter({ text: `Unlocked: ${totalUnlocked[0]?.count || 0}/${totalAchievements[0]?.count || 0}` });
+            ) as unknown as CountResult[];
+            const totalAchievements = await db.query("SELECT COUNT(*) as count FROM rpg_achievements WHERE hidden = FALSE") as unknown as CountResult[];
+
+            embed.setFooter({ text: `${texts.progress.unlocked}: ${totalUnlocked[0]?.count || 0}/${totalAchievements[0]?.count || 0}` });
 
             return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
         }

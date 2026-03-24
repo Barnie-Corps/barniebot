@@ -636,6 +636,203 @@ ${"═".repeat(78)}`;
             await message.reply({ embeds: [listEmbed] });
             break;
         }
+        case "view_vip_status": {
+            if (!args[0]) {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#9B59B6").setTitle("👑 View VIP Status").setDescription("```\nb.view_vip_status <userId>\n```")] });
+            }
+            const [uid] = args;
+            if (isNaN(parseInt(uid))) return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Invalid user ID.")] });
+            let targetUser;
+            try {
+                targetUser = await client.users.fetch(uid);
+            } catch {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ User not found.")] });
+            }
+            const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ? ORDER BY end_date DESC LIMIT 1", [uid]);
+            const vip = foundVip?.[0];
+            if (!vip) {
+                return await message.reply({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setColor("#F39C12")
+                            .setTitle("👑 VIP Member Status")
+                            .setThumbnail(targetUser.displayAvatarURL({ size: 128 }))
+                            .addFields(
+                                { name: "👤 User", value: `${targetUser.username}\n\`${targetUser.id}\``, inline: true },
+                                { name: "📊 VIP Status", value: "Not VIP", inline: true }
+                            )
+                            .setTimestamp()
+                    ]
+                });
+            }
+            const now = Date.now();
+            const isActive = Number(vip.end_date) > now;
+            const statusEmbed = new EmbedBuilder()
+                .setColor(isActive ? "#FFD700" : "#95A5A6")
+                .setTitle("👑 VIP Member Status")
+                .setThumbnail(targetUser.displayAvatarURL({ size: 128 }))
+                .addFields(
+                    { name: "👤 User", value: `${targetUser.username}\n\`${targetUser.id}\``, inline: true },
+                    { name: "📊 VIP Status", value: isActive ? "Active" : "Expired", inline: true },
+                    { name: "📅 Started", value: vip.start_date ? time(Math.round(vip.start_date / 1000), TimestampStyles.ShortDateTime) : "Unknown", inline: true },
+                    { name: "⏳ Remaining", value: isActive ? time(Math.round(vip.end_date / 1000), TimestampStyles.RelativeTime) : "Expired", inline: true },
+                    { name: "📅 Ends", value: time(Math.round(vip.end_date / 1000), TimestampStyles.ShortDateTime), inline: true }
+                )
+                .setTimestamp();
+            await message.reply({ embeds: [statusEmbed] });
+            break;
+        }
+        case "add_vip_guild": {
+            if (!args[0]) {
+                const usageEmbed = new EmbedBuilder()
+                    .setColor("#9B59B6")
+                    .setTitle("🏰 Add VIP Guild Command")
+                    .setDescription("```\nb.add_vip_guild <guildId> <duration> <unit>\n```")
+                    .addFields(
+                        { name: "Units", value: "`seconds` `minutes` `hours` `days`", inline: false },
+                        { name: "Example", value: "`b.add_vip_guild 123456789 30 days`", inline: false }
+                    );
+                return await message.reply({ embeds: [usageEmbed] });
+            }
+            const [guildId, newTime, timeType] = args;
+            if ([guildId, newTime, timeType].some(v => !v)) {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Missing arguments: `<guildId> <duration> <unit>`")] });
+            }
+            const multiply = { seconds: 1, minutes: 60, hours: 3600, days: 86400 };
+            if (isNaN(parseInt(guildId))) return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Invalid guild ID.")] });
+            let targetGuild;
+            try {
+                targetGuild = await client.guilds.fetch(guildId);
+            } catch {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Guild not found.")] });
+            }
+            if (isNaN(parseInt(newTime))) return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Invalid duration.")] });
+            if (!Object.keys(multiply).includes(timeType.toLowerCase())) {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription(`❌ Invalid unit. Use: \`${Object.keys(multiply).join("`, `")}\``)] });
+            }
+            const foundVipGuild: any = await db.query("SELECT * FROM vip_guilds WHERE guild_id = ?", [guildId]);
+            const totalTime = (1000 * multiply[timeType.toLowerCase() as keyof typeof multiply]) * parseInt(newTime);
+            const now = Date.now();
+            const end = now + totalTime;
+            const vipGuildEmbed = new EmbedBuilder()
+                .setColor("#FFD700")
+                .setTitle("🏰 VIP Guild Status Updated")
+                .addFields(
+                    { name: "🏰 Guild", value: `${targetGuild.name}\n\`${targetGuild.id}\``, inline: true },
+                    { name: "⏱️ Duration", value: `\`${newTime} ${timeType}\``, inline: true },
+                    { name: "📅 Expires", value: `${time(Math.round(end / 1000), TimestampStyles.ShortDateTime)}\n${time(Math.round(end / 1000), TimestampStyles.RelativeTime)}`, inline: true }
+                )
+                .setTimestamp();
+            if (foundVipGuild[0]) {
+                vipGuildEmbed.setDescription("```ansi\n\u001b[1;33m[UPDATED]\u001b[0m VIP guild subscription extended\n```");
+                vipGuildEmbed.addFields({ name: "📊 Previous Expiry", value: `${time(Math.round(foundVipGuild[0].end_date / 1000), TimestampStyles.ShortDateTime)}`, inline: true });
+                await db.query("UPDATE vip_guilds SET end_date = ?, added_by = ? WHERE guild_id = ?", [end, message.author.id, guildId]);
+            } else {
+                vipGuildEmbed.setDescription("```ansi\n\u001b[1;32m[NEW]\u001b[0m VIP guild subscription activated\n```");
+                await db.query("INSERT INTO vip_guilds SET ?", [{ guild_id: guildId, start_date: now, end_date: end, added_by: message.author.id }]);
+            }
+            await message.reply({ embeds: [vipGuildEmbed] });
+            break;
+        }
+        case "remove_vip_guild": {
+            if (!args[0]) {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#9B59B6").setTitle("🏰 Remove VIP Guild").setDescription("```\nb.remove_vip_guild <guildId>\n```")] });
+            }
+            const [guildId] = args;
+            if (isNaN(parseInt(guildId))) return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Invalid guild ID.")] });
+            let targetGuild;
+            try {
+                targetGuild = await client.guilds.fetch(guildId);
+            } catch {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Guild not found.")] });
+            }
+            const foundVipGuild: any = await db.query("SELECT * FROM vip_guilds WHERE guild_id = ?", [guildId]);
+            if (!foundVipGuild[0]) {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#F39C12").setDescription(`⚠️ **${targetGuild.name}** is not a VIP guild.`)] });
+            }
+            await db.query("DELETE FROM vip_guilds WHERE guild_id = ?", [guildId]);
+            const removeGuildEmbed = new EmbedBuilder()
+                .setColor("#E74C3C")
+                .setTitle("🏰 VIP Guild Revoked")
+                .setDescription("```ansi\n\u001b[1;31m[REMOVED]\u001b[0m VIP guild subscription terminated\n```")
+                .addFields(
+                    { name: "🏰 Guild", value: `${targetGuild.name}\n\`${targetGuild.id}\``, inline: true },
+                    { name: "📅 Was Active Until", value: `${time(Math.round(foundVipGuild[0].end_date / 1000), TimestampStyles.ShortDateTime)}`, inline: true }
+                )
+                .setFooter({ text: `Revoked by ${message.author.username}` })
+                .setTimestamp();
+            await message.reply({ embeds: [removeGuildEmbed] });
+            break;
+        }
+        case "vip_guilds": {
+            const vipGuilds: any = await db.query("SELECT * FROM vip_guilds ORDER BY end_date DESC");
+            if (!vipGuilds.length) {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#F39C12").setDescription("🏰 No VIP guilds currently.")] });
+            }
+            const guildList = await Promise.all(vipGuilds.slice(0, 15).map(async (v: any) => {
+                try {
+                    const g = await client.guilds.fetch(v.guild_id);
+                    const isExpired = v.end_date < Date.now();
+                    return `${isExpired ? "⚫" : "🟢"} **${g.name}** • ${time(Math.round(v.end_date / 1000), TimestampStyles.RelativeTime)}`;
+                } catch {
+                    return `⚫ \`${v.guild_id}\` • ${time(Math.round(v.end_date / 1000), TimestampStyles.RelativeTime)}`;
+                }
+            }));
+            const listEmbed = new EmbedBuilder()
+                .setColor("#FFD700")
+                .setTitle("🏰 VIP Guilds")
+                .setDescription(guildList.join("\n"))
+                .setFooter({ text: `${vipGuilds.length} total VIP guilds` })
+                .setTimestamp();
+            await message.reply({ embeds: [listEmbed] });
+            break;
+        }
+        case "view_guild_vip_status": {
+            if (!args[0]) {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#9B59B6").setTitle("🏰 View VIP Guild Status").setDescription("```\nb.view_guild_vip_status <guildId>\n```")] });
+            }
+            const [guildId] = args;
+            if (isNaN(parseInt(guildId))) return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Invalid guild ID.")] });
+            let targetGuild;
+            try {
+                targetGuild = await client.guilds.fetch(guildId);
+            } catch {
+                return await message.reply({ embeds: [new EmbedBuilder().setColor("#E74C3C").setDescription("❌ Guild not found.")] });
+            }
+            const foundVipGuild: any = await db.query("SELECT * FROM vip_guilds WHERE guild_id = ? ORDER BY end_date DESC LIMIT 1", [guildId]);
+            const vipGuild = foundVipGuild?.[0];
+            if (!vipGuild) {
+                return await message.reply({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setColor("#F39C12")
+                            .setTitle("🏰 VIP Guild Status")
+                            .addFields(
+                                { name: "🏰 Guild", value: `${targetGuild.name}\n\`${targetGuild.id}\``, inline: true },
+                                { name: "📊 VIP Status", value: "Not VIP", inline: true }
+                            )
+                            .setTimestamp()
+                    ]
+                });
+            }
+            const now = Date.now();
+            const isActive = Number(vipGuild.end_date) > now;
+            const addedByText = vipGuild.added_by ? `<@${vipGuild.added_by}>` : "Unknown";
+            const statusEmbed = new EmbedBuilder()
+                .setColor(isActive ? "#FFD700" : "#95A5A6")
+                .setTitle("🏰 VIP Guild Status")
+                .addFields(
+                    { name: "🏰 Guild", value: `${targetGuild.name}\n\`${targetGuild.id}\``, inline: true },
+                    { name: "📊 VIP Status", value: isActive ? "Active" : "Expired", inline: true },
+                    { name: "🛠️ Added By", value: addedByText, inline: true },
+                    { name: "📅 Started", value: vipGuild.start_date ? time(Math.round(vipGuild.start_date / 1000), TimestampStyles.ShortDateTime) : "Unknown", inline: true },
+                    { name: "⏳ Remaining", value: isActive ? time(Math.round(vipGuild.end_date / 1000), TimestampStyles.RelativeTime) : "Expired", inline: true },
+                    { name: "📅 Ends", value: time(Math.round(vipGuild.end_date / 1000), TimestampStyles.ShortDateTime), inline: true }
+                )
+                .setTimestamp();
+            await message.reply({ embeds: [statusEmbed] });
+            break;
+        }
         case "fetch_guilds_members": {
             const fetchEmbed = new EmbedBuilder()
                 .setColor("#3498DB")
@@ -880,6 +1077,11 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     await interaction.respond(ranks);
                     return;
                 }
+            }
+            const cmd = data.bot.commands.get(interaction.commandName as string);
+            if (cmd?.autocomplete) {
+                await cmd.autocomplete(interaction);
+                return;
             }
         } catch (error) {
             Log.warn("Autocomplete failed", { component: "Autocomplete", error: (error as any)?.message || String(error) });

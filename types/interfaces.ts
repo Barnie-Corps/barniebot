@@ -74,6 +74,15 @@ export interface Ratelimit {
     messages: number;
 }
 
+export interface AiChatTierStatus {
+    tier: "free" | "vip" | "staff" | "owner";
+    allowed: boolean;
+    unlimited: boolean;
+    dailyLimit: number | null;
+    used: number;
+    remaining: number | null;
+}
+
 export interface DiscordUser {
     id: string;
     username: string;

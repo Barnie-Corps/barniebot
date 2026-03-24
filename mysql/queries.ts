@@ -44,6 +44,10 @@ export default function queries(): void {
     db.query("CREATE TABLE IF NOT EXISTS filter_webhooks (id VARCHAR(255) NOT NULL, token VARCHAR(255) NOT NULL, channel VARCHAR(255) NOT NULL)");
     
     db.query("CREATE TABLE IF NOT EXISTS vip_users (id VARCHAR(255) NOT NULL, start_date BIGINT(255) NOT NULL, end_date BIGINT(255) NOT NULL)");
+
+    db.query("CREATE TABLE IF NOT EXISTS vip_guilds (guild_id VARCHAR(255) NOT NULL PRIMARY KEY, start_date BIGINT(255) NOT NULL, end_date BIGINT(255) NOT NULL, added_by VARCHAR(255) DEFAULT NULL)");
+
+    db.query("CREATE TABLE IF NOT EXISTS ai_chat_daily_usage (user_id VARCHAR(255) NOT NULL, usage_date VARCHAR(10) NOT NULL, messages_used INT NOT NULL DEFAULT 0, updated_at BIGINT(255) NOT NULL, PRIMARY KEY (user_id, usage_date))");
     
     db.query("CREATE TABLE IF NOT EXISTS registered_accounts (id INT NOT NULL PRIMARY KEY AUTO_INCREMENT, uid VARCHAR(255) NOT NULL, username VARCHAR(255) NOT NULL, email VARCHAR(255) NOT NULL, password TEXT NOT NULL, verified BOOLEAN NOT NULL DEFAULT FALSE, verification_code VARCHAR(255) NOT NULL, verified_at BIGINT(255) NOT NULL DEFAULT 0, created_at BIGINT(255) NOT NULL, last_login BIGINT(255) NOT NULL DEFAULT 0, last_user_logged VARCHAR(255) NOT NULL DEFAULT '0', token VARCHAR(255) NOT NULL DEFAULT '0')");
     
@@ -55,7 +59,7 @@ export default function queries(): void {
     
     db.query("CREATE TABLE IF NOT EXISTS custom_responses (id INT PRIMARY KEY AUTO_INCREMENT, guild VARCHAR(255) NOT NULL, command VARCHAR(255) NOT NULL, response TEXT NOT NULL, is_regex BOOLEAN NOT NULL DEFAULT FALSE)");
     
-    db.query("CREATE TABLE IF NOT EXISTS support_tickets (id INT PRIMARY KEY AUTO_INCREMENT, user_id VARCHAR(255) NOT NULL, channel_id VARCHAR(255) NOT NULL, message_id VARCHAR(255) DEFAULT NULL, status VARCHAR(50) NOT NULL DEFAULT 'open', priority VARCHAR(20) DEFAULT 'medium', category VARCHAR(50) DEFAULT 'general', assigned_to VARCHAR(255) DEFAULT NULL, created_at BIGINT(255) NOT NULL, closed_at BIGINT(255) DEFAULT NULL, closed_by VARCHAR(255) DEFAULT NULL, first_response_at BIGINT(255) DEFAULT NULL, first_response_by VARCHAR(255) DEFAULT NULL, initial_message TEXT, guild_id VARCHAR(255) DEFAULT NULL, guild_name VARCHAR(255) DEFAULT NULL)");
+    db.query("CREATE TABLE IF NOT EXISTS support_tickets (id INT PRIMARY KEY AUTO_INCREMENT, user_id VARCHAR(255) NOT NULL, channel_id VARCHAR(255) NOT NULL, message_id VARCHAR(255) DEFAULT NULL, status VARCHAR(50) NOT NULL DEFAULT 'open', assigned_to VARCHAR(255) DEFAULT NULL, created_at BIGINT(255) NOT NULL, closed_at BIGINT(255) DEFAULT NULL, closed_by VARCHAR(255) DEFAULT NULL, first_response_at BIGINT(255) DEFAULT NULL, first_response_by VARCHAR(255) DEFAULT NULL, initial_message TEXT, guild_id VARCHAR(255) DEFAULT NULL, guild_name VARCHAR(255) DEFAULT NULL)");
     
     db.query("CREATE TABLE IF NOT EXISTS support_messages (id INT PRIMARY KEY AUTO_INCREMENT, ticket_id INT NOT NULL, user_id VARCHAR(255) NOT NULL, username VARCHAR(255) NOT NULL, content TEXT NOT NULL, timestamp BIGINT(255) NOT NULL, is_staff BOOLEAN NOT NULL DEFAULT FALSE, staff_rank VARCHAR(64) DEFAULT NULL)");
     

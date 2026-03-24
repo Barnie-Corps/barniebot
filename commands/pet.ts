@@ -1,20 +1,7 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
+import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, AutocompleteInteraction } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
-import { RPGSession, RPGCharacter, RPGPet } from "../types/interfaces";
-
-async function getSession(userId: string) {
-    const session = (await db.query(
-        "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
-        [userId]
-    ) as unknown as RPGSession[]);
-    return session[0] || null;
-}
-
-async function getCharacter(accountId: number) {
-    const character = (await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]) as unknown as RPGCharacter[]);
-    return character[0] || null;
-}
+import { RPGPet } from "../types/interfaces";
 
 export default {
     data: new SlashCommandBuilder()
@@ -26,6 +13,7 @@ export default {
             .setDescription("Equip a pet for bonuses")
             .addIntegerOption(o => o.setName("pet_id")
                 .setDescription("Your pet ID")
+                .setAutocomplete(true)
                 .setRequired(true)))
         .addSubcommand(s => s.setName("unequip")
             .setDescription("Unequip your active pet"))
@@ -33,16 +21,19 @@ export default {
             .setDescription("Feed your pet to increase happiness")
             .addIntegerOption(o => o.setName("pet_id")
                 .setDescription("Your pet ID")
+                .setAutocomplete(true)
                 .setRequired(true)))
         .addSubcommand(s => s.setName("info")
             .setDescription("View detailed pet information")
             .addIntegerOption(o => o.setName("pet_id")
                 .setDescription("Your pet ID")
+                .setAutocomplete(true)
                 .setRequired(true)))
         .addSubcommand(s => s.setName("rename")
             .setDescription("Rename your pet")
             .addIntegerOption(o => o.setName("pet_id")
                 .setDescription("Your pet ID")
+                .setAutocomplete(true)
                 .setRequired(true))
             .addStringOption(o => o.setName("name")
                 .setDescription("New pet name")
@@ -50,6 +41,26 @@ export default {
                 .setMinLength(2)
                 .setMaxLength(30))),
     category: "RPG",
+    autocomplete: async (interaction: AutocompleteInteraction) => {
+        const sub = interaction.options.getSubcommand();
+        if (!["equip", "feed", "info", "rename"].includes(sub)) return await interaction.respond([]);
+        const profile = await utils.getActiveRpgProfile(interaction.user.id);
+        if (!profile.character) return await interaction.respond([]);
+        const focused = String(interaction.options.getFocused() || "");
+        const pets = await db.query(
+            "SELECT id, name, level, is_active FROM rpg_character_pets WHERE character_id = ? ORDER BY is_active DESC, level DESC, id DESC LIMIT 25",
+            [profile.character.id]
+        ) as unknown as Array<{ id: number; name: string; level: number; is_active: boolean }>;
+        await interaction.respond(
+            pets
+                .map(pet => ({
+                    name: `#${pet.id} ${pet.name} (Lv ${pet.level})${pet.is_active ? " [active]" : ""}`,
+                    value: pet.id
+                }))
+                .filter(pet => pet.name.toLowerCase().includes(focused.toLowerCase()) || String(pet.value).includes(focused))
+                .slice(0, 25)
+        );
+    },
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let texts = {
             errors: {
@@ -81,6 +92,7 @@ export default {
             },
             info: {
                 rarity: "Rarity",
+                level: "Level",
                 happiness: "Happiness",
                 experience: "Experience",
                 stat_bonuses: "Stat Bonuses",
@@ -101,15 +113,12 @@ export default {
             texts = await utils.autoTranslate(texts, "en", lang);
         }
 
-        const session = await getSession(interaction.user.id);
-        if (!session) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.not_logged_in + "`/login`." });
-        }
-
-        const character = await getCharacter(session.account_id);
-        if (!character) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.no_character + "`/rpg create`." });
-        }
+        const profile = await utils.requireActiveRpgProfile(interaction, interaction.user.id, {
+            notLoggedIn: "❌ " + texts.errors.not_logged_in + "`/login`.",
+            noCharacter: "❌ " + texts.errors.no_character + "`/rpg create`."
+        });
+        if (!profile) return;
+        const { character } = profile;
 
         const sub = interaction.options.getSubcommand();
 
@@ -250,7 +259,7 @@ export default {
             ) as unknown as any[]);
 
             if (!pet[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ Pet not found!" });
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.pet_not_found });
             }
 
             const p = pet[0];
@@ -265,26 +274,26 @@ export default {
                 .setTitle(`${p.emoji} ${p.name}`)
                 .setDescription(`*${p.description}*`)
                 .addFields(
-                    { name: "🎖️ Rarity", value: p.rarity.charAt(0).toUpperCase() + p.rarity.slice(1), inline: true },
-                    { name: "📊 Level", value: p.level.toString(), inline: true },
-                    { name: "❤️ Happiness", value: `${happinessBar} ${p.happiness}/100`, inline: true },
-                    { name: "⭐ Experience", value: `${p.experience}/${expNeeded}\n${expBar}`, inline: false },
-                    { name: "💪 Stat Bonuses", value: 
+                    { name: `🎖️ ${texts.info.rarity}`, value: p.rarity.charAt(0).toUpperCase() + p.rarity.slice(1), inline: true },
+                    { name: `📊 ${texts.info.level}`, value: p.level.toString(), inline: true },
+                    { name: `❤️ ${texts.info.happiness}`, value: `${happinessBar} ${p.happiness}/100`, inline: true },
+                    { name: `⭐ ${texts.info.experience}`, value: `${p.experience}/${expNeeded}\n${expBar}`, inline: false },
+                    { name: `💪 ${texts.info.stat_bonuses}`, value: 
                         `STR: +${p.strength_bonus} | DEF: +${p.defense_bonus} | AGI: +${p.agility_bonus}\n` +
                         `INT: +${p.intelligence_bonus} | LUK: +${p.luck_bonus}`, 
                         inline: false 
                     }
                 )
-                .setFooter({ text: p.is_active ? "Currently equipped" : "Not equipped" })
+                .setFooter({ text: p.is_active ? texts.info.currently_equipped : texts.info.not_equipped })
                 .setTimestamp();
 
             if (p.special_ability) {
-                embed.addFields({ name: "✨ Special Ability", value: p.special_ability, inline: false });
+                embed.addFields({ name: `✨ ${texts.info.special_ability}`, value: p.special_ability, inline: false });
             }
 
             if (p.last_fed) {
                 embed.addFields({ 
-                    name: "🍖 Last Fed", 
+                    name: `🍖 ${texts.info.last_fed}`, 
                     value: `<t:${Math.floor(p.last_fed / 1000)}:R>`, 
                     inline: true 
                 });

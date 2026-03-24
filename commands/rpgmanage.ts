@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
+import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, AutocompleteInteraction } from "discord.js";
 import utils from "../utils";
 import db from "../mysql/database";
 import client from "..";
@@ -76,7 +76,7 @@ export default {
             .addIntegerOption(o => o.setName("max_stack").setDescription("Max stack size (default: 99)").setRequired(false)))
         .addSubcommand(s => s.setName("edit_item")
             .setDescription("Edit an existing item (Admin+)")
-            .addIntegerOption(o => o.setName("item_id").setDescription("Item ID").setRequired(true))
+            .addIntegerOption(o => o.setName("item_id").setDescription("Item ID").setAutocomplete(true).setRequired(true))
             .addStringOption(o => o.setName("field")
                 .setDescription("Field to edit")
                 .addChoices(
@@ -92,7 +92,7 @@ export default {
             .addStringOption(o => o.setName("value").setDescription("New value").setRequired(true)))
         .addSubcommand(s => s.setName("delete_item")
             .setDescription("Delete an item (Admin+)")
-            .addIntegerOption(o => o.setName("item_id").setDescription("Item ID").setRequired(true)))
+            .addIntegerOption(o => o.setName("item_id").setDescription("Item ID").setAutocomplete(true).setRequired(true)))
         .addSubcommand(s => s.setName("list_items")
             .setDescription("List all items (Mod+)")
             .addStringOption(o => o.setName("type")
@@ -138,7 +138,7 @@ export default {
             .addStringOption(o => o.setName("icon").setDescription("Icon emoji (default: 🏆)").setRequired(false)))
         .addSubcommand(s => s.setName("delete_achievement")
             .setDescription("Delete an achievement (Admin+)")
-            .addIntegerOption(o => o.setName("achievement_id").setDescription("Achievement ID").setRequired(true)))
+            .addIntegerOption(o => o.setName("achievement_id").setDescription("Achievement ID").setAutocomplete(true).setRequired(true)))
         .addSubcommand(s => s.setName("list_achievements")
             .setDescription("List all achievements (Mod+)")
             .addStringOption(o => o.setName("category")
@@ -176,7 +176,7 @@ export default {
             .addStringOption(o => o.setName("emoji").setDescription("Pet emoji (default: 🐾)").setRequired(false)))
         .addSubcommand(s => s.setName("delete_pet")
             .setDescription("Delete a pet (Admin+)")
-            .addIntegerOption(o => o.setName("pet_id").setDescription("Pet ID").setRequired(true)))
+            .addIntegerOption(o => o.setName("pet_id").setDescription("Pet ID").setAutocomplete(true).setRequired(true)))
         .addSubcommand(s => s.setName("list_pets")
             .setDescription("List all pets (Mod+)"))
         .addSubcommand(s => s.setName("create_dungeon")
@@ -203,7 +203,7 @@ export default {
             .addIntegerOption(o => o.setName("cooldown").setDescription("Cooldown in seconds").setRequired(true)))
         .addSubcommand(s => s.setName("delete_dungeon")
             .setDescription("Delete a dungeon (Admin+)")
-            .addIntegerOption(o => o.setName("dungeon_id").setDescription("Dungeon ID").setRequired(true)))
+            .addIntegerOption(o => o.setName("dungeon_id").setDescription("Dungeon ID").setAutocomplete(true).setRequired(true)))
         .addSubcommand(s => s.setName("list_dungeons")
             .setDescription("List all dungeons (Mod+)"))
         .addSubcommand(s => s.setName("create_material")
@@ -225,13 +225,48 @@ export default {
             .addStringOption(o => o.setName("emoji").setDescription("Material emoji").setRequired(false)))
         .addSubcommand(s => s.setName("delete_material")
             .setDescription("Delete a crafting material (Admin+)")
-            .addIntegerOption(o => o.setName("material_id").setDescription("Material ID").setRequired(true)))
+            .addIntegerOption(o => o.setName("material_id").setDescription("Material ID").setAutocomplete(true).setRequired(true)))
         .addSubcommand(s => s.setName("list_materials")
             .setDescription("List all crafting materials (Mod+)"))
         .addSubcommand(s => s.setName("init_data")
             .setDescription("Initialize/reinitialize RPG data (Admin+)")
             .addBooleanOption(o => o.setName("force").setDescription("Force reinitialize existing data").setRequired(false))),
     category: "Bot Staff",
+    autocomplete: async (interaction: AutocompleteInteraction) => {
+        const focused = interaction.options.getFocused(true);
+        const query = String(focused.value || "").toLowerCase();
+        const configs: Record<string, { sql: string; label: (row: any) => string }> = {
+            item_id: {
+                sql: "SELECT id, name FROM rpg_items ORDER BY id DESC LIMIT 25",
+                label: (row: any) => `#${row.id} ${row.name}`
+            },
+            achievement_id: {
+                sql: "SELECT id, name FROM rpg_achievements ORDER BY id DESC LIMIT 25",
+                label: (row: any) => `#${row.id} ${row.name}`
+            },
+            pet_id: {
+                sql: "SELECT id, name FROM rpg_pets ORDER BY id DESC LIMIT 25",
+                label: (row: any) => `#${row.id} ${row.name}`
+            },
+            dungeon_id: {
+                sql: "SELECT id, name FROM rpg_dungeons ORDER BY id DESC LIMIT 25",
+                label: (row: any) => `#${row.id} ${row.name}`
+            },
+            material_id: {
+                sql: "SELECT id, name FROM rpg_crafting_materials ORDER BY id DESC LIMIT 25",
+                label: (row: any) => `#${row.id} ${row.name}`
+            }
+        };
+        const config = configs[focused.name];
+        if (!config) return await interaction.respond([]);
+        const rows = await db.query(config.sql) as unknown as any[];
+        await interaction.respond(
+            rows
+                .map(row => ({ name: config.label(row), value: Number(row.id) }))
+                .filter(row => row.name.toLowerCase().includes(query) || String(row.value).includes(query))
+                .slice(0, 25)
+        );
+    },
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         const sub = interaction.options.getSubcommand();
         const executor = interaction.user;

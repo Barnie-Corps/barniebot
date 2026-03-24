@@ -1,5 +1,4 @@
 import EventEmitter from "events";
-import { Ratelimit } from "../types/interfaces";
 import utils from "../utils";
 import type { NIMChatSession, NIMToolCall } from "./NVIDIAModelsManager";
 import Log from "../Log";
@@ -13,7 +12,7 @@ import NVIDIAModels from "../NVIDIAModels";
 const AI_DEBUG = process.env.AI_DEBUG === "1";
 
 class AiManager extends EventEmitter {
-    private ratelimits: Map<string, Ratelimit> = new Map();
+    private promptRateLimits: Map<string, number[]> = new Map();
     private chats: Map<string, NIMChatSession> = new Map();
     private voiceChats: Map<string, NIMChatSession> = new Map();
     private localFunctionHandlers: Map<string, Record<string, (args: any, message: Message) => Promise<any>>> = new Map();
@@ -29,9 +28,21 @@ class AiManager extends EventEmitter {
     public clearLocalFunctionHandlers(id: string): void {
         this.localFunctionHandlers.delete(id);
     }
+    private isPromptRateLimited(id: string): boolean {
+        const now = Date.now();
+        const windowStart = now - this.timeout;
+        const existing = this.promptRateLimits.get(id) ?? [];
+        const recent = existing.filter(ts => ts >= windowStart);
+        if (recent.length >= this.max) {
+            this.promptRateLimits.set(id, recent);
+            return true;
+        }
+        recent.push(now);
+        this.promptRateLimits.set(id, recent);
+        return false;
+    }
     public async ExecuteFunctionVoice(id: string, name: string, args: any, message: Message | null, options?: { suppressProgress?: boolean }): Promise<any> {
         const suppressProgress = options?.suppressProgress ?? false;
-        if (await this.RatelimitUser(id)) return { error: "You are sending too many messages, please wait a few seconds before sending another message." };
         const chat = await this.GetVoiceChat(id);
         const func: any = utils.AIFunctions[name as keyof typeof utils.AIFunctions];
         if (!func) {
@@ -165,30 +176,11 @@ class AiManager extends EventEmitter {
         }
         return reply;
     }
-    public async RatelimitUser(id: string): Promise<boolean> {
-        if (!this.ratelimits.has(id)) {
-            this.ratelimits.set(id, {
-                id,
-                messages: 1,
-                time: Date.now()
-            });
-            return false;
-        }
-        const ratelimit = this.ratelimits.get(id) as Ratelimit;
-        if (Date.now() - ratelimit.time > this.timeout) {
-            ratelimit.time = Date.now();
-            ratelimit.messages = 1;
-            return false;
-        }
-        ratelimit.messages++;
-        if (ratelimit.messages > this.max) return true;
-        return false;
-    }
     public async RemoveRatelimit(id: string): Promise<void> {
-        this.ratelimits.delete(id);
+        this.promptRateLimits.delete(id);
     }
     public async GetResponse(id: string, text: string): Promise<any> {
-        if (await this.RatelimitUser(id)) return "You are sending too many messages, please wait a few seconds before sending another message.";
+        if (this.isPromptRateLimited(id)) return "You are sending too many messages, please wait a few seconds before sending another message.";
         const chat = await this.GetChat(id, text);
         await this.ensureToolBootstrap(id, chat);
         let response = await utils.getAiResponse(text, chat);
@@ -200,12 +192,12 @@ class AiManager extends EventEmitter {
         return response;
     }
     public async GetSingleResponse(id: string, text: string): Promise<string> {
-        if (await this.RatelimitUser(id)) return "You are sending too many messages, please wait a few seconds before sending another message.";
+        if (this.isPromptRateLimited(id)) return "You are sending too many messages, please wait a few seconds before sending another message.";
         const response = await NVIDIAModels.GetModelChatResponse([{ role: "user", content: text }], 20000, "chat", false);
         return response.content;
     }
     public async GetVoiceResponse(id: string, text: string): Promise<any> {
-        if (await this.RatelimitUser(id)) return { text: "You are sending too many messages, please wait a few seconds before sending another message.", call: null };
+        if (this.isPromptRateLimited(id)) return { text: "You are sending too many messages, please wait a few seconds before sending another message.", call: null };
         const chat = await this.GetVoiceChat(id);
         await this.ensureToolBootstrap(id, chat);
         const response = await utils.getAiResponse(text, chat);
@@ -217,10 +209,6 @@ class AiManager extends EventEmitter {
         const startedAt = Date.now();
         let status = "unknown";
         try {
-            if (await this.RatelimitUser(id)) {
-                status = "ratelimited";
-                return { error: "You are sending too many messages, please wait a few seconds before sending another message." };
-            }
             const chat = await this.GetChat(id, "");
             const localHandlers = this.localFunctionHandlers.get(id);
             const localHandler = localHandlers ? localHandlers[name ?? Queue![0].name] : undefined;
@@ -426,8 +414,11 @@ class AiManager extends EventEmitter {
         return this.voiceChats.get(id) as NIMChatSession;
     }
     private ClearTimeouts(): void {
-        this.ratelimits.forEach((ratelimit) => {
-            if (Date.now() - ratelimit.time > this.timeout) this.ratelimits.delete(ratelimit.id);
+        const cutoff = Date.now() - this.timeout;
+        this.promptRateLimits.forEach((timestamps, id) => {
+            const filtered = timestamps.filter(ts => ts >= cutoff);
+            if (filtered.length > 0) this.promptRateLimits.set(id, filtered);
+            else this.promptRateLimits.delete(id);
         });
     }
 

@@ -839,8 +839,6 @@ const functionDeclarations = {
             type: SchemaType.OBJECT,
             properties: {
                 userId: { type: SchemaType.STRING },
-                category: { type: SchemaType.STRING },
-                priority: { type: SchemaType.STRING },
                 initialMessage: { type: SchemaType.STRING },
                 guildId: { type: SchemaType.STRING }
             },

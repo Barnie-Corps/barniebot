@@ -122,11 +122,13 @@ export default {
         let texts = {
             errors: {
                 not_vip: "You must be a VIP to use this feature.",
+                free_tier_limit: "You reached the free AI chat limit for today. Free tier allows 10 messages per day.",
                 no_response: "Oh no! I couldn't generate a reply. Try repeating what you said, maybe changing a couple of words.",
                 long_response: "Oh no! The response is too long. I'll send it as a Markdown-formatted text file.",
                 unsafe_message: "Your message was flagged as unsafe. Conversation cannot continue and it'll be ended. You can reach out in our support server if you believe this was a mistake made by the safety check model.",
                 guild_only: "This command can only be used in a server.",
                 not_admin: "Administrator permission is required to configure AI monitoring.",
+                premium_guild_required: "AI monitor is only available in premium guilds unless you are bot staff Administrator or above.",
                 not_in_voice: "You must be in a voice channel to use this command.",
                 no_male_voice_prefix: "No male voice available for language:",
                 no_male_voice_supported: "Supported languages: en-US, es-US, fr-FR, de-DE, zh-CN",
@@ -148,6 +150,8 @@ export default {
                 question: "Your question was:",
                 thinking: "💭 Thinking...",
                 started_chat: "The chat with the AI has started. You can say one of the following phrases to stop it:",
+                free_tier_started: "Free tier active.",
+                free_tier_remaining: "Messages remaining today:",
                 stopped_ai: "The chat with the AI has been disabled.",
                 can_take_time: "Remember that the AI's reply can take a bit of time. If you send multiple messages before getting a response or start flooding the chat, you'll lose access to this command indefinitely.",
                 ai_left: "The AI decided to end the conversation: ",
@@ -251,17 +255,15 @@ export default {
                 const response = await NVIDIAModels.GetModelChatResponse(askMessages, 20000, task, think);
                 if (response.content.length < 1) return await reply(texts.errors.no_response);
                 if (response.content.length > 2000) {
-                    const filename = `./ai-response-${Date.now()}.md`;
-                    fs.writeFileSync(filename, `${response.reasoning ? `${"-".repeat(20)}\n${texts.common.reasoning}: ${response.reasoning}\n${"-".repeat(20)}\n` : ""}${response.content}`, "utf-8");
-                    await reply({ content: texts.errors.long_response, files: [filename] });
-                    fs.unlinkSync(filename);
+                    await utils.sendLongTextResponse(interaction, `${response.reasoning ? `${"-".repeat(20)}\n${texts.common.reasoning}: ${response.reasoning}\n${"-".repeat(20)}\n` : ""}${response.content}`, texts.errors.long_response, "ai-response");
                     return;
                 }
                 await reply(response.content);
                 break;
             }
             case "chat": {
-                if (!(await utils.isVIP(interaction.user.id)) && !String(process.env.OWNERS).trim().split(",").includes(interaction.user.id) && ! (await utils.isStaff(interaction.user.id))) return await reply(texts.errors.not_vip);
+                const starterTier = await utils.getAiChatTierStatus(interaction.user.id);
+                if (!starterTier.allowed) return await reply(texts.errors.free_tier_limit);
                 const convoOwnerId = interaction.user.id;
                 let addedUserId: string | null = null;
                 let conversationEndedBy: string | null = null;
@@ -292,7 +294,14 @@ export default {
                     filter: (m: { author: { id: string } }) => m.author.id === convoOwnerId || (addedUserId !== null && m.author.id === addedUserId)
                 });
                 let isWaitingForResponse = false;
-                await reply(`${texts.common.started_chat} \`stop ai, ai stop, stop chat, end ai\`\n${texts.common.can_take_time}`);
+                const startLines = [
+                    `${texts.common.started_chat} \`stop ai, ai stop, stop chat, end ai\``,
+                    texts.common.can_take_time
+                ];
+                if (!starterTier.unlimited && starterTier.remaining !== null) {
+                    startLines.push(`${texts.common.free_tier_started} ${texts.common.free_tier_remaining} ${starterTier.remaining}/${starterTier.dailyLimit}.`);
+                }
+                await reply(startLines.join("\n"));
                 collector?.on("collect", async (message: Message): Promise<any> => {
                     if (isWaitingForResponse) return;
                     if (message.content.startsWith("!")) return;
@@ -309,6 +318,13 @@ export default {
                             collector?.stop();
                             return;
                         }
+                        const beforeQuota = await utils.getAiChatTierStatus(message.author.id);
+                        if (!beforeQuota.allowed) {
+                            await message.reply(texts.errors.free_tier_limit);
+                            if (message.author.id === convoOwnerId) collector?.stop();
+                            return;
+                        }
+                        await utils.consumeAiChatDailyQuota(message.author.id);
                         await (interaction.channel as TextChannel).sendTyping?.();
 
                         let imageDescription = "";
@@ -389,10 +405,7 @@ export default {
                             return;
                         }
                         if (response.text.length > 2000) {
-                            const filename = `./ai-response-${Date.now()}.md`;
-                            fs.writeFileSync(filename, cleanedResponseText || response.text, "utf-8");
-                            await message.reply({ content: texts.errors.long_response, files: [filename] });
-                            fs.unlinkSync(filename);
+                            await utils.sendLongTextResponse(message, cleanedResponseText || response.text, texts.errors.long_response, "ai-response");
                             return;
                         }
                         await message.reply(cleanedResponseText || response.text);
@@ -413,6 +426,7 @@ export default {
             case "monitor": {
                 if (!interaction.inGuild()) return await reply(texts.errors.guild_only);
                 if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) return await reply(texts.errors.not_admin);
+                if (!(await utils.isPremiumGuild(interaction.guildId!)) && !(await utils.isAdminStaff(interaction.user.id))) return await reply(texts.errors.premium_guild_required);
                 const action = interaction.options.getString("action", true);
                 const logsChannel = interaction.options.getChannel("logs_channel");
                 const allowActionsInput = interaction.options.getBoolean("allow_actions");
@@ -518,6 +532,7 @@ export default {
             case "monitor_cases": {
                 if (!interaction.inGuild()) return await reply(texts.errors.guild_only);
                 if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) return await reply(texts.errors.not_admin);
+                if (!(await utils.isPremiumGuild(interaction.guildId!)) && !(await utils.isAdminStaff(interaction.user.id))) return await reply(texts.errors.premium_guild_required);
                 const PAGE_SIZE = 5;
                 const reqPage = interaction.options.getInteger("page") ?? 1;
                 const countRows = await db.query("SELECT COUNT(*) as total FROM ai_monitor_cases WHERE guild_id = ?", [interaction.guildId]) as unknown as any[];
