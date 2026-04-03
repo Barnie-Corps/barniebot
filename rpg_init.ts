@@ -1,5 +1,6 @@
 import db from "./mysql/database";
 import Log from "./Log";
+import type { ConsumableData, EquipmentData } from "./types/rpgInit";
 
 export async function initializeShopItems() {
     try {
@@ -180,23 +181,4 @@ export async function initializeRPGData() {
     } catch (error: any) {
         Log.error("Failed to initialize RPG data", new Error(error.message));
     }
-}
-
-interface EquipmentData {
-    item_name: string;
-    slot: string;
-    required_level?: number;
-    required_class?: string;
-    strength_bonus?: number;
-    defense_bonus?: number;
-    agility_bonus?: number;
-    intelligence_bonus?: number;
-    luck_bonus?: number;
-    mp_bonus?: number;
-}
-
-interface ConsumableData {
-    item_name: string;
-    effect_type: string;
-    effect_value: number;
 }

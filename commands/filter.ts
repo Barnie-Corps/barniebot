@@ -1,4 +1,4 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChatInputCommandInteraction, PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChatInputCommandInteraction, EmbedBuilder, PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
 import path from "path";
@@ -74,6 +74,19 @@ export default {
                 )
         )
         .addSubcommand(s =>
+            s.setName("test")
+                .setDescription("Simulate whether a message would trigger the filter")
+                .addStringOption(o =>
+                    o.setName("message")
+                        .setDescription("Message content to simulate")
+                        .setRequired(true)
+                )
+        )
+        .addSubcommand(s =>
+            s.setName("explain")
+                .setDescription("Explain the current filter configuration and coverage")
+        )
+        .addSubcommand(s =>
             s.setName("toggle")
                 .setDescription("Toggles filter status. On -> Off / Off -> On")
         )
@@ -112,7 +125,20 @@ export default {
                 protected_text: "Protected",
                 filter_content_text: "Words in filter",
                 results: "Results for",
-                single_word: "This word is marked as a single word. (Cannot be part of another word)"
+                single_word: "This word is marked as a single word. (Cannot be part of another word)",
+                test_title: "Filter Simulation",
+                explain_title: "Filter Configuration",
+                status: "Status",
+                logs: "Logs",
+                language: "Language",
+                total_words: "Total words",
+                protected_words: "Protected words",
+                single_words: "Single-word rules",
+                blocked: "Blocked",
+                matched: "Matched",
+                no_match: "No filter words matched this message.",
+                enabled_text: "enabled",
+                disabled_text: "disabled"
             },
             setup: {
                 msg: "You are about to initialize the filter setup, do you want to continue?",
@@ -127,6 +153,17 @@ export default {
         const subcmd = interaction.options.getSubcommand();
         if (subcmd) {
             const filterMain = ((await db.query("SELECT * FROM filter_configs WHERE guild = ?", [interaction.guildId])) as unknown as FilterConfig[])[0];
+            const getMatchedWords = (words: FilterWord[], message: string) => {
+                const normalized = message.toLowerCase();
+                const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                return words.filter((word: FilterWord) => {
+                    if (word.single) {
+                        const regex = new RegExp(`(^|[^a-z0-9])${escapeRegex(word.content)}([^a-z0-9]|$)`, "i");
+                        return regex.test(normalized);
+                    }
+                    return normalized.includes(word.content.toLowerCase());
+                });
+            };
             switch (subcmd) {
                 case "toggle": {
                     if (!filterMain) {
@@ -210,6 +247,43 @@ export default {
                             break;
                         }
                     }
+                    break;
+                }
+                case "test": {
+                    if (!filterMain) return await utils.safeInteractionRespond(interaction, `${texts.errors.not_setup} /filter setup`);
+                    const message = interaction.options.getString("message", true);
+                    const words = (await db.query("SELECT * FROM filter_words WHERE guild = ?", [interaction.guildId]) as unknown as FilterWord[]);
+                    const matched = getMatchedWords(words, message);
+                    const embed = new EmbedBuilder()
+                        .setColor(matched.length > 0 ? "Orange" : "Green")
+                        .setTitle(texts.common.test_title)
+                        .addFields(
+                            { name: texts.common.status, value: filterMain.enabled ? texts.common.enabled_text : texts.common.disabled_text, inline: true },
+                            { name: texts.common.blocked, value: matched.length > 0 ? "true" : "false", inline: true },
+                            { name: texts.common.matched, value: matched.length > 0 ? matched.slice(0, 10).map(word => `#${word.id} \`${word.content}\``).join(", ") : texts.common.no_match, inline: false }
+                        );
+                    await utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
+                    break;
+                }
+                case "explain": {
+                    if (!filterMain) return await utils.safeInteractionRespond(interaction, `${texts.errors.not_setup} /filter setup`);
+                    const words = (await db.query("SELECT * FROM filter_words WHERE guild = ?", [interaction.guildId]) as unknown as FilterWord[]);
+                    const protectedCount = words.filter(word => Boolean(word.protected)).length;
+                    const singleCount = words.filter(word => Boolean(word.single)).length;
+                    const filterRows: any = await db.query("SELECT * FROM filter_configs WHERE guild = ? LIMIT 1", [interaction.guildId]);
+                    const current = filterRows?.[0];
+                    const embed = new EmbedBuilder()
+                        .setColor(Boolean(filterMain.enabled) ? "Blue" : "Orange")
+                        .setTitle(texts.common.explain_title)
+                        .addFields(
+                            { name: texts.common.status, value: Boolean(filterMain.enabled) ? texts.common.enabled_text : texts.common.disabled_text, inline: true },
+                            { name: texts.common.logs, value: current?.enabled_logs ? texts.common.enabled_text : texts.common.disabled_text, inline: true },
+                            { name: texts.common.language, value: current?.lang || lang, inline: true },
+                            { name: texts.common.total_words, value: String(words.length), inline: true },
+                            { name: texts.common.protected_words, value: String(protectedCount), inline: true },
+                            { name: texts.common.single_words, value: String(singleCount), inline: true }
+                        );
+                    await utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
                     break;
                 }
                 case "remove": {

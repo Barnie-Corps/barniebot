@@ -6,6 +6,7 @@ import fs from 'fs';
 import Table from 'cli-table3';
 import moment from 'moment';
 import figlet from 'figlet';
+import type { LogMeta } from "../types/logging";
 
 const LOG_DIR = path.join(__dirname, '..', 'logs');
 
@@ -30,10 +31,6 @@ const unknownColors = {
     warning: chalk.hex('#F7D060'),
     info: chalk.hex('#4B56D2')
 };
-
-interface LogMeta {
-    [key: string]: any;
-}
 
 const levels = {
     error: 0,

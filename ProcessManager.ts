@@ -3,15 +3,7 @@ import { exec, spawnSync, ChildProcess } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-
-interface ProcessManagerOptions {
-    script: string;
-    autoRestart?: boolean;
-    maxRestarts?: number;
-    restartDelay?: number;
-    crashPatterns?: string[];
-    logFile?: string;
-}
+import type { ProcessManagerOptions } from "./types/processManager";
 
 export default class ProcessManager {
     private process: ChildProcess | null = null;

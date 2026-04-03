@@ -1,19 +1,6 @@
 import utils from "./utils";
 import type { FunctionDeclaration, OpenAIToolDefinition, SchemaType } from "./AIFunctions";
-
-export type AIMonitorToolName =
-    | "fetch_url_safe"
-    | "fetch_discord_user"
-    | "search_user_by_username_discord"
-    | "get_user_warnings"
-    | "get_warning_details"
-    | "get_message_context"
-    | "get_user_context"
-    | "get_guild_context"
-    | "get_user_case_history"
-    | "get_channel_case_history"
-    | "get_guild_audit_events"
-    | "get_member_safety_profile";
+import type { AIMonitorToolName } from "./types/aiMonitorTools";
 
 const functionDeclarations: Record<AIMonitorToolName, FunctionDeclaration> = {
     fetch_url_safe: {
@@ -162,6 +149,19 @@ const functionDeclarations: Record<AIMonitorToolName, FunctionDeclaration> = {
                 userId: { type: "string" as SchemaType }
             },
             required: ["guildId", "userId"]
+        }
+    },
+    get_monitor_entity_profile: {
+        name: "get_monitor_entity_profile",
+        description: "Get stored AI monitor reputation and feedback stats for a monitored entity.",
+        parameters: {
+            type: "object" as SchemaType,
+            properties: {
+                guildId: { type: "string" as SchemaType },
+                entityType: { type: "string" as SchemaType, description: "One of user, channel, domain." },
+                entityValue: { type: "string" as SchemaType }
+            },
+            required: ["guildId", "entityType", "entityValue"]
         }
     }
 };

@@ -1,7 +1,7 @@
 # Special Contributors
 
 - [Santiago Morales](https://github.com/santiadjmc) - Creator and development lead
-  
+
 	**Features & Systems:**
 	- Global Chat Network
 	- AI Integration (NVIDIA NIM, DeepSeek, Llama safety/monitor, Vision, Riva ASR/TTS)
@@ -42,3 +42,10 @@
 	- System Stats & Info
 	- Privacy & Security Policies
 	- Usage Policy Management
+	- AI Chat Free Tier
+	- Premium Guild System
+	- Local Guild Ticket System
+	- AI Monitor Entity Profiling & Whitelists
+	- Cache Manager & Shared Cache Layer
+	- Schema Reconciliation / Table Auto-Ensure System
+	- Backup System

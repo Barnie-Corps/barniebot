@@ -1,23 +1,6 @@
 import Log from "../Log";
 import { createClient } from "redis";
-
-type RedisClient = {
-    connect: () => Promise<unknown>;
-    on: (event: string, listener: (...args: any[]) => void) => unknown;
-    isOpen?: boolean;
-    get: (key: string) => Promise<string | null>;
-    set: (key: string, value: string, options?: { PX?: number; EX?: number; NX?: boolean }) => Promise<unknown>;
-    del: (key: string | string[]) => Promise<number>;
-    incr: (key: string) => Promise<number>;
-    pTTL: (key: string) => Promise<number>;
-    pExpire: (key: string, milliseconds: number) => Promise<number>;
-    disconnect: () => Promise<void>;
-};
-
-type CacheEntry<T> = {
-    value: T;
-    expires: number;
-};
+import type { CacheEntry, RedisClient } from "../types/cache";
 
 class CacheManager {
     private redisClient: RedisClient | null = null;
@@ -93,6 +76,21 @@ class CacheManager {
         }
     }
 
+    private getMemoryValue<T>(key: string): T | null {
+        const entry = this.memoryCache.get(key);
+        if (!entry) return null;
+        if (entry.expires > 0 && entry.expires <= Date.now()) {
+            this.memoryCache.delete(key);
+            return null;
+        }
+        return entry.value as T;
+    }
+
+    private setMemoryValue<T>(key: string, value: T, ttlMs?: number): void {
+        const expires = ttlMs ? Date.now() + ttlMs : 0;
+        this.memoryCache.set(key, { value, expires });
+    }
+
     async get<T>(key: string): Promise<T | null> {
         if (this.redisAvailable && this.redisClient) {
             try {
@@ -110,13 +108,7 @@ class CacheManager {
                 this.redisAvailable = false;
             }
         }
-        const entry = this.memoryCache.get(key);
-        if (!entry) return null;
-        if (entry.expires > 0 && entry.expires <= Date.now()) {
-            this.memoryCache.delete(key);
-            return null;
-        }
-        return entry.value as T;
+        return this.getMemoryValue<T>(key);
     }
 
     async set<T>(key: string, value: T, ttlMs?: number): Promise<void> {
@@ -130,8 +122,7 @@ class CacheManager {
                 this.redisAvailable = false;
             }
         }
-        const expires = ttlMs ? Date.now() + ttlMs : 0;
-        this.memoryCache.set(key, { value, expires });
+        this.setMemoryValue(key, value, ttlMs);
     }
 
     async delete(key: string | string[]): Promise<void> {
@@ -201,8 +192,7 @@ class CacheManager {
                 const opts = ttlMs ? { PX: ttlMs, NX: true } : { NX: true };
                 const result = await this.withTimeout(this.redisClient.set(key, payload, opts), this.REDIS_OP_TIMEOUT);
                 if (result === "OK") {
-                    const expires = ttlMs ? Date.now() + ttlMs : 0;
-                    this.memoryCache.set(key, { value, expires });
+                    this.setMemoryValue(key, value, ttlMs);
                     return true;
                 }
                 return false;
@@ -214,9 +204,59 @@ class CacheManager {
         const now = Date.now();
         const existing = this.memoryCache.get(key);
         if (existing && (existing.expires <= 0 || existing.expires > now)) return false;
-        const expires = ttlMs ? now + ttlMs : 0;
-        this.memoryCache.set(key, { value, expires });
+        this.setMemoryValue(key, value, ttlMs);
         return true;
+    }
+
+    getLocal<T>(key: string): T | null {
+        return this.getMemoryValue<T>(key);
+    }
+
+    setLocal<T>(key: string, value: T, ttlMs?: number): void {
+        this.setMemoryValue(key, value, ttlMs);
+    }
+
+    deleteLocal(key: string | string[]): void {
+        const keys = Array.isArray(key) ? key : [key];
+        keys.forEach(k => this.memoryCache.delete(k));
+    }
+
+    deleteLocalByPrefix(prefix: string): number {
+        let deleted = 0;
+        for (const key of this.memoryCache.keys()) {
+            if (!key.startsWith(prefix)) continue;
+            this.memoryCache.delete(key);
+            deleted++;
+        }
+        return deleted;
+    }
+
+    countLocalByPrefix(prefix: string): number {
+        let count = 0;
+        for (const key of this.memoryCache.keys()) {
+            if (key.startsWith(prefix) && this.getMemoryValue(key) !== null) count++;
+        }
+        return count;
+    }
+
+    hasLocal(key: string): boolean {
+        return this.getMemoryValue(key) !== null;
+    }
+
+    async remember<T>(key: string, ttlMs: number, resolver: () => Promise<T>): Promise<T> {
+        const cached = await this.get<T>(key);
+        if (cached !== null) return cached;
+        const value = await resolver();
+        await this.set(key, value, ttlMs);
+        return value;
+    }
+
+    rememberLocal<T>(key: string, ttlMs: number, resolver: () => T): T {
+        const cached = this.getLocal<T>(key);
+        if (cached !== null) return cached;
+        const value = resolver();
+        this.setLocal(key, value, ttlMs);
+        return value;
     }
 
     isRedisAvailable(): boolean {

@@ -55,6 +55,10 @@ export default {
                 .setDescription("Starts a chat with the AI.")
         )
         .addSubcommand(s =>
+            s.setName("usage")
+                .setDescription("View your AI tier and remaining free usage.")
+        )
+        .addSubcommand(s =>
             s.setName("voice")
                 .setDescription("Starts a voice conversation with the AI (requires being in a voice channel).")
         )
@@ -98,12 +102,42 @@ export default {
                 )
                 .addStringOption(o =>
                     o.setName("whitelist_channels")
-                        .setDescription("Comma-separated channel IDs/mentions to monitor only, or 'none' to clear")
+                        .setDescription("Comma-separated channel IDs/mentions to exclude from monitoring, or 'none' to clear")
                         .setRequired(false)
                 )
                 .addStringOption(o =>
                     o.setName("whitelist_roles")
                         .setDescription("Comma-separated role IDs/mentions to exempt from monitoring, or 'none' to clear")
+                        .setRequired(false)
+                )
+        )
+        .addSubcommand(s =>
+            s.setName("monitor_whitelist")
+                .setDescription("Manage AI monitor whitelisted channels and roles")
+                .addStringOption(o =>
+                    o.setName("scope")
+                        .setDescription("Which whitelist to manage")
+                        .setRequired(true)
+                        .addChoices(
+                            { name: "Channels", value: "channels" },
+                            { name: "Roles", value: "roles" }
+                        )
+                )
+                .addStringOption(o =>
+                    o.setName("action")
+                        .setDescription("How to update the whitelist")
+                        .setRequired(true)
+                        .addChoices(
+                            { name: "Status", value: "status" },
+                            { name: "Add", value: "add" },
+                            { name: "Remove", value: "remove" },
+                            { name: "Set", value: "set" },
+                            { name: "Clear", value: "clear" }
+                        )
+                )
+                .addStringOption(o =>
+                    o.setName("values")
+                        .setDescription("Comma-separated IDs or mentions")
                         .setRequired(false)
                 )
         )
@@ -143,6 +177,7 @@ export default {
                 logs_channel_required: "Please provide a text logs channel.",
                 invalid_whitelist_channels: "One or more channel IDs in whitelist_channels are invalid for this guild.",
                 invalid_whitelist_roles: "One or more role IDs in whitelist_roles are invalid for this guild.",
+                whitelist_values_required: "Please provide one or more IDs or mentions in values.",
                 invalid_action: "Invalid action.",
                 no_monitor_cases: "No AI monitor cases found for this guild.",
             },
@@ -172,6 +207,20 @@ export default {
                 alerts_language_label: "Alerts language:",
                 monitor_enabled_label: "AI monitor enabled.",
                 monitor_disabled_label: "AI monitor disabled.",
+                whitelist_updated_label: "AI monitor whitelist updated.",
+                whitelist_scope_channels: "Channels",
+                whitelist_scope_roles: "Roles",
+                usage_title: "AI Usage",
+                tier_label: "Tier:",
+                limit_label: "Daily limit:",
+                used_label: "Used today:",
+                remaining_label: "Remaining today:",
+                reset_label: "Reset:",
+                unlimited_label: "Unlimited",
+                free_label: "Free",
+                vip_label: "VIP",
+                staff_label: "Staff",
+                owner_label: "Owner"
             },
             monitor_cases: {
                 title: "AI Monitor Cases",
@@ -224,6 +273,29 @@ export default {
             }
         };
         switch (subcmd) {
+            case "usage": {
+                const usage = await utils.getAiChatTierStatus(interaction.user.id);
+                const tierMap: Record<string, string> = {
+                    free: texts.common.free_label,
+                    vip: texts.common.vip_label,
+                    staff: texts.common.staff_label,
+                    owner: texts.common.owner_label
+                };
+                const nextReset = new Date();
+                nextReset.setUTCHours(24, 0, 0, 0);
+                const lines = [
+                    `${texts.common.tier_label} ${tierMap[usage.tier] ?? usage.tier}`,
+                    `${texts.common.limit_label} ${usage.unlimited ? texts.common.unlimited_label : usage.dailyLimit}`,
+                    `${texts.common.used_label} ${usage.used}`,
+                    `${texts.common.remaining_label} ${usage.unlimited ? texts.common.unlimited_label : usage.remaining}`,
+                    `${texts.common.reset_label} <t:${Math.floor(nextReset.getTime() / 1000)}:R>`
+                ];
+                const embed = new EmbedBuilder()
+                    .setColor("Blue")
+                    .setTitle(texts.common.usage_title)
+                    .setDescription(lines.join("\n"));
+                return await reply({ embeds: [embed], content: "" });
+            }
             case "ask": {
                 await reply(texts.common.thinking);
                 const question = interaction.options.getString("question") as string;
@@ -363,10 +435,18 @@ export default {
                             collector?.stop();
                             return;
                         }
-                        const response = await withTimeout(ai.GetResponse(interaction.user.id, userContent), 50000);
-                        if (!response) {
-                            console.warn("AI response timeout");
-                            return await message.reply(texts.errors.no_response);
+                        const typingInterval = setInterval(() => {
+                            (interaction.channel as TextChannel).sendTyping?.().catch(() => {});
+                        }, 10000);
+                        let response;
+                        try {
+                            response = await withTimeout(ai.GetResponse(interaction.user.id, userContent), 120000);
+                            if (!response) {
+                                console.warn("AI response timeout");
+                                return await message.reply(texts.errors.no_response);
+                            }
+                        } finally {
+                            clearInterval(typingInterval);
                         }
                         const structuredToolCalls = Array.isArray((response as any).toolCalls)
                             ? (response as any).toolCalls
@@ -528,6 +608,72 @@ export default {
                     return await reply(texts.common.monitor_disabled_label);
                 }
                 return await reply(texts.errors.invalid_action);
+            }
+            case "monitor_whitelist": {
+                if (!interaction.inGuild()) return await reply(texts.errors.guild_only);
+                if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) return await reply(texts.errors.not_admin);
+                if (!(await utils.isPremiumGuild(interaction.guildId!)) && !(await utils.isAdminStaff(interaction.user.id))) return await reply(texts.errors.premium_guild_required);
+                const scope = interaction.options.getString("scope", true);
+                const action = interaction.options.getString("action", true);
+                const valuesRaw = interaction.options.getString("values");
+                const ids = (valuesRaw?.match(/\d{17,20}/g) || []).filter((value, index, array) => array.indexOf(value) === index);
+                const configRows = await db.query("SELECT * FROM ai_monitor_configs WHERE guild_id = ?", [interaction.guildId]) as unknown as any[];
+                const existing = configRows?.[0];
+                const getStoredList = (key: "channel_whitelist_ids" | "role_whitelist_ids") => {
+                    try {
+                        return Array.isArray(existing?.[key]) ? existing[key] : JSON.parse(existing?.[key] || "[]");
+                    } catch {
+                        return [];
+                    }
+                };
+                const validateIds = () => {
+                    if (scope === "channels") {
+                        return ids.every(id => interaction.guild!.channels.cache.has(id));
+                    }
+                    return ids.every(id => interaction.guild!.roles.cache.has(id));
+                };
+                const currentList = scope === "channels" ? getStoredList("channel_whitelist_ids") : getStoredList("role_whitelist_ids");
+                const renderList = (list: string[]) => {
+                    if (!list.length) return texts.common.not_set;
+                    return scope === "channels" ? list.map(id => `<#${id}>`).join(", ") : list.map(id => `<@&${id}>`).join(", ");
+                };
+                if (action === "status") {
+                    return await reply(`${scope === "channels" ? texts.common.whitelist_scope_channels : texts.common.whitelist_scope_roles}: ${renderList(currentList)}`);
+                }
+                if ((action === "add" || action === "remove" || action === "set") && ids.length === 0) {
+                    return await reply(texts.errors.whitelist_values_required);
+                }
+                if ((action === "add" || action === "remove" || action === "set") && !validateIds()) {
+                    return await reply(scope === "channels" ? texts.errors.invalid_whitelist_channels : texts.errors.invalid_whitelist_roles);
+                }
+                let nextList = [...currentList];
+                if (action === "add") nextList = Array.from(new Set([...currentList, ...ids]));
+                else if (action === "remove") nextList = currentList.filter((id: string) => !ids.includes(id));
+                else if (action === "set") nextList = ids;
+                else if (action === "clear") nextList = [];
+                else return await reply(texts.errors.invalid_action);
+                const now = Date.now();
+                if (existing) {
+                    await db.query(
+                        `UPDATE ai_monitor_configs SET ${scope === "channels" ? "channel_whitelist_ids" : "role_whitelist_ids"} = ?, updated_at = ? WHERE guild_id = ?`,
+                        [JSON.stringify(nextList), now, interaction.guildId]
+                    );
+                } else {
+                    await db.query("INSERT INTO ai_monitor_configs SET ?", [{
+                        guild_id: interaction.guildId,
+                        enabled: false,
+                        logs_channel: "0",
+                        allow_actions: false,
+                        analyze_potentially: false,
+                        allow_investigation_tools: false,
+                        monitor_language: lang,
+                        channel_whitelist_ids: JSON.stringify(scope === "channels" ? nextList : []),
+                        role_whitelist_ids: JSON.stringify(scope === "roles" ? nextList : []),
+                        created_at: now,
+                        updated_at: now
+                    }]);
+                }
+                return await reply(`${texts.common.whitelist_updated_label} ${scope === "channels" ? texts.common.whitelist_scope_channels : texts.common.whitelist_scope_roles}: ${renderList(nextList)}`);
             }
             case "monitor_cases": {
                 if (!interaction.inGuild()) return await reply(texts.errors.guild_only);

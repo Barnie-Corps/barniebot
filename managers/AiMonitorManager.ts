@@ -5,41 +5,12 @@ const AI_DEBUG = process.env.AI_DEBUG === "1";
 import Log from "../Log";
 import utils from "../utils";
 import MainData from "../data";
-import { executeAiMonitorTool, getAiMonitorTools, type AIMonitorToolName } from "../AIMonitorFunctions";
+import cacheManager from "./CacheManager";
+import { executeAiMonitorTool, getAiMonitorTools } from "../AIMonitorFunctions";
+import type { AIMonitorToolName } from "../types/aiMonitorTools";
+import type { MonitorConfig, TriageResult, ActionType, ReviewResult, EntityStats, QueuedMonitorEvent } from "../types/aiMonitor";
 
-type MonitorConfig = {
-    guild_id: string;
-    enabled: boolean;
-    logs_channel: string;
-    allow_actions: boolean;
-    analyze_potentially: boolean;
-    allow_investigation_tools: boolean;
-    monitor_language: string;
-    channel_whitelist_ids: string[];
-    role_whitelist_ids: string[];
-};
-
-type TriageResult = {
-    suspicious: boolean;
-    risk: "low" | "medium" | "high";
-    summary: string;
-    reason: string;
-    confidence: number;
-};
-
-type ActionType = "notify" | "delete_message" | "warn" | "timeout" | "kick" | "ban";
-
-type ReviewResult = {
-    suspicious: boolean;
-    risk: "low" | "medium" | "high";
-    summary: string;
-    reason: string;
-    recommended_action?: ActionType;
-    recommended_actions?: ActionType[];
-    warning_message?: string;
-    action_duration_ms?: number;
-    confidence: number;
-};
+const LOG_LABEL_CACHE_PREFIX = "barniebot:local:aimonitor:log-labels:";
 
 export default class AiMonitorManager {
     private rateLimits = new Map<string, { windowStart: number; count: number }>();
@@ -54,27 +25,9 @@ export default class AiMonitorManager {
     }>();
     private recentRaidAlerts = new Map<string, number>();
     private noisyEventCooldowns = new Map<string, number>();
-    private logLabelCache = new Map<string, {
-        title: string;
-        fields: {
-            caseLabel: string;
-            eventLabel: string;
-            riskLabel: string;
-            summaryLabel: string;
-            reasonLabel: string;
-            recommendedLabel: string;
-            userLabel: string;
-            channelLabel: string;
-            messageLabel: string;
-            autoActionLabel: string;
-            confidenceLabel: string;
-        };
-        buttons: {
-            actionLabel: string;
-            solveLabel: string;
-        };
-    }>();
-
+    private queuedEvents = new Map<string, QueuedMonitorEvent[]>();
+    private activeGuildProcessing = new Set<string>();
+    private recentFingerprints = new Map<string, number>();
     constructor(private client: Client) {}
 
     private parseIdJson(value: any): string[] {
@@ -110,7 +63,7 @@ export default class AiMonitorManager {
 
     private async getLogLabels(language: string) {
         const normalized = typeof language === "string" && language.trim() ? language.trim().toLowerCase() : "en";
-        const cached = this.logLabelCache.get(normalized);
+        const cached = cacheManager.getLocal<any>(`${LOG_LABEL_CACHE_PREFIX}${normalized}`);
         if (cached) return cached;
         const base = {
             title: "AI Monitor Alert",
@@ -125,17 +78,19 @@ export default class AiMonitorManager {
                 channelLabel: "Channel",
                 messageLabel: "Message",
                 autoActionLabel: "Auto Action",
-                confidenceLabel: "Confidence"
+                confidenceLabel: "Confidence",
+                profileLabel: "Profile"
             },
             buttons: {
                 actionLabel: "Automatically take action",
-                solveLabel: "Mark as solved"
+                solveLabel: "Mark as solved",
+                falsePositiveLabel: "Mark false positive"
             }
         };
         if (normalized === "en") return base;
         try {
             const translated = await utils.autoTranslate(base, "en", normalized);
-            this.logLabelCache.set(normalized, translated);
+            cacheManager.setLocal(`${LOG_LABEL_CACHE_PREFIX}${normalized}`, translated, 3600000);
             return translated;
         } catch {
             return base;
@@ -203,13 +158,146 @@ export default class AiMonitorManager {
     private isChannelAllowed(config: MonitorConfig, channelId?: string | null): boolean {
         if (!channelId) return true;
         if (!Array.isArray(config.channel_whitelist_ids) || config.channel_whitelist_ids.length === 0) return true;
-        return config.channel_whitelist_ids.includes(channelId);
+        return !config.channel_whitelist_ids.includes(channelId);
     }
 
     private isRoleWhitelisted(member: GuildMember | null | undefined, config: MonitorConfig): boolean {
         if (!member) return false;
         if (!Array.isArray(config.role_whitelist_ids) || config.role_whitelist_ids.length === 0) return false;
         return member.roles.cache.some(role => config.role_whitelist_ids.includes(role.id));
+    }
+
+    private clamp(value: number, min: number, max: number) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private hashText(text: string): string {
+        let hash = 0;
+        for (let i = 0; i < text.length; i += 1) {
+            hash = ((hash << 5) - hash) + text.charCodeAt(i);
+            hash |= 0;
+        }
+        return Math.abs(hash).toString(36);
+    }
+
+    private makeEntityKey(type: "user" | "channel" | "domain", value: string) {
+        return `${type}:${String(value || "").toLowerCase()}`;
+    }
+
+    private async getEntityStats(guildId: string, entityKey: string): Promise<EntityStats> {
+        try {
+            const rows = await db.query(
+                "SELECT risk_score, flag_count, action_count, false_positive_count, last_flag_at, last_action_at FROM ai_monitor_entity_stats WHERE guild_id = ? AND entity_key = ? LIMIT 1",
+                [guildId, entityKey]
+            ) as unknown as any[];
+            const row = rows?.[0];
+            return {
+                riskScore: Number(row?.risk_score ?? 0),
+                flagCount: Number(row?.flag_count ?? 0),
+                actionCount: Number(row?.action_count ?? 0),
+                falsePositiveCount: Number(row?.false_positive_count ?? 0),
+                lastFlagAt: row?.last_flag_at ? Number(row.last_flag_at) : null,
+                lastActionAt: row?.last_action_at ? Number(row.last_action_at) : null
+            };
+        } catch (error: any) {
+            Log.warn("AI monitor entity stats lookup failed", { component: "AiMonitor", guildId, entityKey, error: error?.message || String(error) });
+            return {
+                riskScore: 0,
+                flagCount: 0,
+                actionCount: 0,
+                falsePositiveCount: 0,
+                lastFlagAt: null,
+                lastActionAt: null
+            };
+        }
+    }
+
+    private async bumpEntityStats(guildId: string, entityKey: string, entityType: "user" | "channel" | "domain", changes: {
+        riskDelta?: number;
+        flagDelta?: number;
+        actionDelta?: number;
+        falsePositiveDelta?: number;
+        lastFlagAt?: number | null;
+        lastActionAt?: number | null;
+    }) {
+        try {
+            const rows = await db.query("SELECT * FROM ai_monitor_entity_stats WHERE guild_id = ? AND entity_key = ? LIMIT 1", [guildId, entityKey]) as unknown as any[];
+            const existing = rows?.[0];
+            const next = {
+                guild_id: guildId,
+                entity_key: entityKey,
+                entity_type: entityType,
+                risk_score: this.clamp(Number(existing?.risk_score ?? 0) + Number(changes.riskDelta ?? 0), -10, 100),
+                flag_count: Math.max(0, Number(existing?.flag_count ?? 0) + Number(changes.flagDelta ?? 0)),
+                action_count: Math.max(0, Number(existing?.action_count ?? 0) + Number(changes.actionDelta ?? 0)),
+                false_positive_count: Math.max(0, Number(existing?.false_positive_count ?? 0) + Number(changes.falsePositiveDelta ?? 0)),
+                last_flag_at: changes.lastFlagAt ?? existing?.last_flag_at ?? null,
+                last_action_at: changes.lastActionAt ?? existing?.last_action_at ?? null,
+                updated_at: Date.now()
+            };
+            if (existing) {
+                await db.query("UPDATE ai_monitor_entity_stats SET ? WHERE guild_id = ? AND entity_key = ?", [next, guildId, entityKey]);
+            } else {
+                await db.query("INSERT INTO ai_monitor_entity_stats SET ?", [next]);
+            }
+        } catch (error: any) {
+            Log.warn("AI monitor entity stats update failed", { component: "AiMonitor", guildId, entityKey, entityType, error: error?.message || String(error) });
+        }
+    }
+
+    private computeEventFingerprint(eventType: string, context: { userId?: string | null; channelId?: string | null; messageId?: string | null }, data: any) {
+        const content = String(data?.message?.content ?? data?.extra?.content ?? "").trim().toLowerCase().replace(/\s+/g, " ").slice(0, 200);
+        const domains = Array.isArray(data?.extra?.url_domains) ? data.extra.url_domains.join(",") : "";
+        const basis = [eventType, context.userId ?? "", context.channelId ?? "", context.messageId ?? "", content, domains].join("|");
+        return this.hashText(basis);
+    }
+
+    private isDuplicateFingerprint(guildId: string, fingerprint: string) {
+        const key = `${guildId}:${fingerprint}`;
+        const now = Date.now();
+        const ttl = 2 * 60 * 1000;
+        const expires = this.recentFingerprints.get(key) ?? 0;
+        if (expires > now) return true;
+        this.recentFingerprints.set(key, now + ttl);
+        return false;
+    }
+
+    private async enqueueEvent(event: Omit<QueuedMonitorEvent, "resolve" | "enqueuedAt">): Promise<void> {
+        return await new Promise(resolve => {
+            const queue = this.queuedEvents.get(event.guild.id) ?? [];
+            queue.push({
+                ...event,
+                enqueuedAt: Date.now(),
+                resolve
+            });
+            this.queuedEvents.set(event.guild.id, queue);
+            void this.drainQueue(event.guild.id);
+        });
+    }
+
+    private async drainQueue(guildId: string): Promise<void> {
+        if (this.activeGuildProcessing.has(guildId)) return;
+        this.activeGuildProcessing.add(guildId);
+        try {
+            while (true) {
+                const queue = this.queuedEvents.get(guildId) ?? [];
+                const next = queue.shift();
+                if (!next) {
+                    this.queuedEvents.delete(guildId);
+                    break;
+                }
+                this.queuedEvents.set(guildId, queue);
+                try {
+                    await this.processEvent(next.eventType, next.guild, next.data, next.context, next.configOverride);
+                } catch (error: any) {
+                    Log.warn("AI monitor queued event failed", { component: "AiMonitor", guildId, error: error?.message || String(error) });
+                } finally {
+                    next.resolve();
+                }
+            }
+        } finally {
+            this.activeGuildProcessing.delete(guildId);
+        }
     }
 
     private buildMessageSignals(message: Message) {
@@ -604,6 +692,61 @@ export default class AiMonitorManager {
         })) : [];
     }
 
+    private async buildRiskProfile(guildId: string, context: { userId?: string | null; channelId?: string | null }, domains: string[] = []) {
+        const userStats = context.userId ? await this.getEntityStats(guildId, this.makeEntityKey("user", context.userId)) : null;
+        const channelStats = context.channelId ? await this.getEntityStats(guildId, this.makeEntityKey("channel", context.channelId)) : null;
+        const domainStats = [];
+        for (const domain of domains.slice(0, 3)) {
+            domainStats.push({
+                domain,
+                stats: await this.getEntityStats(guildId, this.makeEntityKey("domain", domain))
+            });
+        }
+        const profile = {
+            user: userStats,
+            channel: channelStats,
+            domains: domainStats,
+            repeatOffender: Boolean((userStats?.actionCount ?? 0) >= 1 || (userStats?.flagCount ?? 0) >= 3 || domainStats.some(entry => entry.stats.actionCount >= 2)),
+            trustedEntity: Boolean(userStats && userStats.actionCount === 0 && userStats.flagCount <= 1 && userStats.falsePositiveCount >= 2)
+        };
+        return profile;
+    }
+
+    private summarizeRiskProfile(profile: Awaited<ReturnType<AiMonitorManager["buildRiskProfile"]>>) {
+        const parts: string[] = [];
+        if (profile.user) {
+            parts.push(`user risk ${profile.user.riskScore.toFixed(1)} • flags ${profile.user.flagCount} • actions ${profile.user.actionCount} • false positives ${profile.user.falsePositiveCount}`);
+        }
+        if (profile.channel) {
+            parts.push(`channel risk ${profile.channel.riskScore.toFixed(1)} • flags ${profile.channel.flagCount}`);
+        }
+        if (profile.domains.length > 0) {
+            const domainPart = profile.domains.map(entry => `${entry.domain} (${entry.stats.riskScore.toFixed(1)}/${entry.stats.flagCount}/${entry.stats.actionCount})`).join(", ");
+            parts.push(`domains ${domainPart}`);
+        }
+        if (profile.repeatOffender) parts.push("repeat offender");
+        if (profile.trustedEntity) parts.push("trusted profile");
+        return parts.join("\n");
+    }
+
+    private adjustReviewForProfile(review: ReviewResult, profile: Awaited<ReturnType<AiMonitorManager["buildRiskProfile"]>>, data: any): ReviewResult {
+        const adjusted: ReviewResult = { ...review };
+        const strongSignal = Boolean(data?.extra?.scam_signal || data?.extra?.credential_bait_signal || data?.extra?.obfuscated_link || data?.extra?.suspicious_attachment_name || data?.extra?.brand_mismatch || data?.extra?.lookalike_domain || data?.extra?.suspicious_domain);
+        if (profile.trustedEntity && !strongSignal && adjusted.risk !== "high" && adjusted.confidence < 0.8) {
+            adjusted.suspicious = false;
+            adjusted.risk = "low";
+            adjusted.summary = adjusted.summary || "trusted profile, low confidence";
+            adjusted.reason = adjusted.reason || "Historical false positives and low current evidence";
+            adjusted.recommended_actions = ["notify"];
+            return adjusted;
+        }
+        if (profile.repeatOffender && adjusted.suspicious) {
+            adjusted.confidence = this.clamp((adjusted.confidence ?? 0) + 0.08, 0, 1);
+            if (adjusted.risk === "low") adjusted.risk = "medium";
+        }
+        return adjusted;
+    }
+
     private async triage(eventType: string, data: any, language: string): Promise<TriageResult> {
         const normalizedLanguage = typeof language === "string" && language.trim() ? language.trim().toLowerCase() : "en";
         const prompt = JSON.stringify({
@@ -817,6 +960,7 @@ export default class AiMonitorManager {
         messageContent?: string | null;
         autoAction?: string | null;
         confidence?: number | null;
+        profileSummary?: string | null;
         language?: string | null;
     }) {
         const channel = guild.channels.cache.get(config.logs_channel) as TextChannel | undefined;
@@ -848,10 +992,12 @@ export default class AiMonitorManager {
         }
         if (payload.autoAction) embed.addFields({ name: labels.fields.autoActionLabel, value: payload.autoAction, inline: false });
         if (payload.confidence !== null && payload.confidence !== undefined) embed.addFields({ name: labels.fields.confidenceLabel, value: payload.confidence.toFixed(2), inline: true });
+        if (payload.profileSummary) embed.addFields({ name: labels.fields.profileLabel, value: payload.profileSummary.slice(0, 1024), inline: false });
 
         const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder().setCustomId(`aimon_action-${payload.caseId}`).setLabel(labels.buttons.actionLabel).setStyle(ButtonStyle.Danger),
-            new ButtonBuilder().setCustomId(`aimon_solve-${payload.caseId}`).setLabel(labels.buttons.solveLabel).setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder().setCustomId(`aimon_solve-${payload.caseId}`).setLabel(labels.buttons.solveLabel).setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId(`aimon_fp-${payload.caseId}`).setLabel(labels.buttons.falsePositiveLabel).setStyle(ButtonStyle.Secondary)
         );
 
         const sent = await channel.send({
@@ -957,7 +1103,7 @@ export default class AiMonitorManager {
         return data;
     }
 
-    private async handleEvent(eventType: string, guild: Guild, data: any, context: {
+    private async processEvent(eventType: string, guild: Guild, data: any, context: {
         userId?: string | null;
         channelId?: string | null;
         messageId?: string | null;
@@ -972,6 +1118,8 @@ export default class AiMonitorManager {
             const targetMember = await guild.members.fetch(context.userId).catch(() => null);
             if (this.isRoleWhitelisted(targetMember, config)) return;
         }
+        const fingerprint = this.computeEventFingerprint(eventType, context, data);
+        if (this.isDuplicateFingerprint(guild.id, fingerprint)) return;
 
         if (AI_DEBUG) {
             console.log("[AI Monitor] analyze", {
@@ -1000,6 +1148,9 @@ export default class AiMonitorManager {
 
         const history = await this.getRecentHistory(guild.id, context.userId ?? null);
         if (history.length > 0) data.recent_cases = history;
+        const domains = Array.isArray(data?.extra?.url_domains) ? data.extra.url_domains.slice(0, 3) : [];
+        const riskProfile = await this.buildRiskProfile(guild.id, context, domains);
+        data.risk_profile = riskProfile;
 
         if (AI_DEBUG) {
             console.log("[AI Monitor] large review", {
@@ -1008,7 +1159,8 @@ export default class AiMonitorManager {
                 allowInvestigationTools: config.allow_investigation_tools
             });
         }
-        const review = await this.reviewWithTools(eventType, data, config, monitorLanguage);
+        const reviewed = await this.reviewWithTools(eventType, data, config, monitorLanguage);
+        const review = this.adjustReviewForProfile(reviewed, riskProfile, data);
         if (!review.suspicious) return;
         let recommendedActions = this.normalizeRecommendedActions(review);
 
@@ -1023,7 +1175,8 @@ export default class AiMonitorManager {
             reason: review.reason || triage.reason,
             warnMessage: review.warning_message ?? null,
             durationMs: review.action_duration_ms ?? null,
-            recommended_actions: recommendedActions
+            recommended_actions: recommendedActions,
+            url_domains: domains
         };
         const messageContent = data?.message?.content ?? data?.extra?.content ?? null;
 
@@ -1064,6 +1217,32 @@ export default class AiMonitorManager {
             reason: review.reason || triage.reason,
             confidence: review.confidence ?? triage.confidence
         });
+        const riskDelta = (review.risk === "high" ? 4 : review.risk === "medium" ? 2 : 1) * ((review.confidence ?? 0.5) >= 0.8 ? 1.25 : 1);
+        if (context.userId) {
+            await this.bumpEntityStats(guild.id, this.makeEntityKey("user", context.userId), "user", {
+                riskDelta,
+                flagDelta: 1,
+                actionDelta: autoActionTaken ? 1 : 0,
+                lastFlagAt: Date.now(),
+                lastActionAt: autoActionTaken ? Date.now() : null
+            });
+        }
+        if (context.channelId) {
+            await this.bumpEntityStats(guild.id, this.makeEntityKey("channel", context.channelId), "channel", {
+                riskDelta: review.risk === "high" ? 2 : 1,
+                flagDelta: 1,
+                lastFlagAt: Date.now()
+            });
+        }
+        for (const domain of domains) {
+            await this.bumpEntityStats(guild.id, this.makeEntityKey("domain", domain), "domain", {
+                riskDelta,
+                flagDelta: 1,
+                actionDelta: autoActionTaken ? 1 : 0,
+                lastFlagAt: Date.now(),
+                lastActionAt: autoActionTaken ? Date.now() : null
+            });
+        }
 
         await this.sendLog(config, guild, {
             caseId,
@@ -1078,8 +1257,17 @@ export default class AiMonitorManager {
             messageContent,
             autoAction,
             confidence: review.confidence ?? triage.confidence,
+            profileSummary: this.summarizeRiskProfile(riskProfile),
             language: monitorLanguage
         });
+    }
+
+    private async handleEvent(eventType: string, guild: Guild, data: any, context: {
+        userId?: string | null;
+        channelId?: string | null;
+        messageId?: string | null;
+    }, configOverride?: MonitorConfig | null) {
+        await this.enqueueEvent({ eventType, guild, data, context, configOverride });
     }
 
     public async handleMessageCreate(message: Message) {
@@ -1502,7 +1690,7 @@ export default class AiMonitorManager {
     public async handleButton(interaction: any): Promise<boolean> {
         const [event, caseId] = interaction.customId.split("-");
         if (!caseId) return false;
-        if (event !== "aimon_action" && event !== "aimon_solve") return false;
+        if (event !== "aimon_action" && event !== "aimon_solve" && event !== "aimon_fp") return false;
         if (!interaction.deferred && !interaction.replied) {
             await interaction.deferReply({ ephemeral: true });
         }
@@ -1518,6 +1706,32 @@ export default class AiMonitorManager {
         }
         const config = await this.getConfig(record.guild_id);
         const labelConfig = await this.getLogLabels(config?.monitor_language ?? "en");
+        if (event === "aimon_fp") {
+            if (record.user_id) {
+                await this.bumpEntityStats(record.guild_id, this.makeEntityKey("user", record.user_id), "user", {
+                    riskDelta: -3,
+                    falsePositiveDelta: 1
+                });
+            }
+            if (record.channel_id) {
+                await this.bumpEntityStats(record.guild_id, this.makeEntityKey("channel", record.channel_id), "channel", {
+                    riskDelta: -1,
+                    falsePositiveDelta: 1
+                });
+            }
+            const payload = record.action_payload ? JSON.parse(record.action_payload) : {};
+            const domains: string[] = Array.isArray(payload?.url_domains) ? payload.url_domains : [];
+            for (const domain of domains.slice(0, 3)) {
+                await this.bumpEntityStats(record.guild_id, this.makeEntityKey("domain", domain), "domain", {
+                    riskDelta: -2,
+                    falsePositiveDelta: 1
+                });
+            }
+            await this.markCase(caseId, "solved", interaction.user.id);
+            await this.disableButtons(interaction, labelConfig.buttons);
+            await interaction.editReply({ content: "Marked as false positive." });
+            return true;
+        }
         if (event === "aimon_solve") {
             await this.markCase(caseId, "solved", interaction.user.id);
             await this.disableButtons(interaction, labelConfig.buttons);
@@ -1557,6 +1771,13 @@ export default class AiMonitorManager {
                 durationMs: payload.durationMs ?? null
             });
             results.push(`${action}: ${result.ok ? "ok" : "failed"} (${result.detail})`);
+            if (result.ok && record.user_id) {
+                await this.bumpEntityStats(record.guild_id, this.makeEntityKey("user", record.user_id), "user", {
+                    riskDelta: 3,
+                    actionDelta: 1,
+                    lastActionAt: Date.now()
+                });
+            }
         }
         await this.markCase(caseId, "actioned", interaction.user.id);
         await this.disableButtons(interaction, labelConfig.buttons);
@@ -1564,14 +1785,16 @@ export default class AiMonitorManager {
         return true;
     }
 
-    private async disableButtons(interaction: any, labels?: { actionLabel: string; solveLabel: string }) {
+    private async disableButtons(interaction: any, labels?: { actionLabel: string; solveLabel: string; falsePositiveLabel: string }) {
         const message = interaction.message;
         if (!message) return;
         const actionLabel = labels?.actionLabel ?? "Automatically take action";
         const solveLabel = labels?.solveLabel ?? "Mark as solved";
+        const falsePositiveLabel = labels?.falsePositiveLabel ?? "Mark false positive";
         const disabledRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder().setCustomId("aimon_action_disabled").setLabel(actionLabel).setStyle(ButtonStyle.Danger).setDisabled(true),
-            new ButtonBuilder().setCustomId("aimon_solve_disabled").setLabel(solveLabel).setStyle(ButtonStyle.Secondary).setDisabled(true)
+            new ButtonBuilder().setCustomId("aimon_solve_disabled").setLabel(solveLabel).setStyle(ButtonStyle.Secondary).setDisabled(true),
+            new ButtonBuilder().setCustomId("aimon_fp_disabled").setLabel(falsePositiveLabel).setStyle(ButtonStyle.Secondary).setDisabled(true)
         );
         await message.edit({ components: [disabledRow] });
     }

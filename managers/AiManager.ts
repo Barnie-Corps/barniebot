@@ -1,6 +1,6 @@
 import EventEmitter from "events";
 import utils from "../utils";
-import type { NIMChatSession, NIMToolCall } from "./NVIDIAModelsManager";
+import type { NIMChatSession, NIMToolCall } from "../types/nvidia";
 import Log from "../Log";
 import AIFunctions from "../AIFunctions";
 import { Message, ActionRowBuilder, ButtonBuilder } from "discord.js";
@@ -393,7 +393,7 @@ class AiManager extends EventEmitter {
                 maxTokens: 800,
                 temperature: 0.7,
                 topP: 0.8,
-                systemInstruction: "Before responding to any user message at the start of the conversation, call the tools get_user_data, get_memories, and fetch_ai_rules in that order. For support or policy questions, call search_knowledge first and cite source titles. Do not include <think> tags in responses. Never emit tool call markup like <|tool_call_begin|> in text; only use the tool calling interface. If a tool call fails, respond without tool markup."
+                systemInstruction: "Before responding to any user message at the start of the conversation, call the tools get_user_data, get_memory_graph, and fetch_ai_rules in that order. Use get_memory_graph instead of get_memories for enhanced context with memory types (personal, preferences, relationships, facts). When you learn important information about the user, use add_memory_to_graph with appropriate memoryType and subject to build a rich knowledge graph. For support or policy questions, call search_knowledge first and cite source titles. Do not include <think> tags in responses. Never emit tool call markup like <|tool_call_begin|> in text; only use the tool calling interface. If a tool call fails, respond without tool markup."
             });
             this.chats.set(id, chat);
         }
@@ -407,7 +407,7 @@ class AiManager extends EventEmitter {
                 maxTokens: 256,
                 temperature: 0.7,
                 topP: 0.8,
-                systemInstruction: "You are the assistant's voice mode. Respond concisely (ideally 1–2 short sentences or tight bullets). Use the user's language. Avoid long explanations, code blocks, and heavy markdown unless explicitly requested. Before responding to any user message, call the tools get_user_data, get_memories, and fetch_ai_rules in that order. For support or policy questions, call search_knowledge first. Do not include <think> tags in responses. Never emit tool call markup like <|tool_call_begin|> in text; only use the tool calling interface. If a tool call fails, respond without tool markup."
+                systemInstruction: "You are the assistant's voice mode. Respond concisely (ideally 1–2 short sentences or tight bullets). Use the user's language. Avoid long explanations, code blocks, and heavy markdown unless explicitly requested. Before responding to any user message, call the tools get_user_data, get_memory_graph, and fetch_ai_rules in that order. Use get_memory_graph for enhanced memory with types (personal, preferences, relationships, facts) instead of get_memories. For support or policy questions, call search_knowledge first. Do not include <think> tags in responses. Never emit tool call markup like <|tool_call_begin|> in text; only use the tool calling interface. If a tool call fails, respond without tool markup."
             });
             this.voiceChats.set(id, chat);
         }
@@ -439,10 +439,10 @@ class AiManager extends EventEmitter {
             toolResults.push({ name: "get_user_data", result: { error: error?.message || String(error) }, args: {} });
         }
         try {
-            const memories = await utils.AIFunctions.get_memories({ userId: id });
-            toolResults.push({ name: "get_memories", result: memories, args: { userId: id } });
+            const memoryGraph = await utils.AIFunctions.get_memory_graph({ userId: id, limit: 50 });
+            toolResults.push({ name: "get_memory_graph", result: memoryGraph, args: { userId: id, limit: 50 } });
         } catch (error: any) {
-            toolResults.push({ name: "get_memories", result: { error: error?.message || String(error) }, args: { userId: id } });
+            toolResults.push({ name: "get_memory_graph", result: { error: error?.message || String(error) }, args: { userId: id } });
         }
         try {
             const rules = await utils.AIFunctions.fetch_ai_rules();

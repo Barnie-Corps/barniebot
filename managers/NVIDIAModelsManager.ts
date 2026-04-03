@@ -5,24 +5,8 @@ import * as protoLoader from "@grpc/proto-loader";
 import * as path from "path";
 import { promises as fs } from "fs";
 import sharp from "sharp";
-
-export type NIMToolCall = { name: string; args: any };
-export type NIMChatResponse = { text: () => string; functionCalls: () => NIMToolCall[] | undefined };
-export type NIMChatResult = { response: NIMChatResponse };
-export type NIMChatMessage = ChatCompletionMessageParam;
-export type NIMToolDefinition = {
-    type: "function";
-    function: {
-        name: string;
-        description?: string;
-        parameters?: any;
-    };
-};
-export type NIMChatSession = {
-    sendMessage: (input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>) => Promise<NIMChatResult>;
-    primeTools?: (toolResults: Array<{ name: string; result: any; args?: any }>) => void;
-    addSystemMessage?: (content: string) => void;
-};
+import type { NIMChatMessage, NIMChatResult, NIMChatSession, NIMToolDefinition } from "../types/nvidia";
+export type { NIMToolCall, NIMChatResponse, NIMChatResult, NIMChatMessage, NIMToolDefinition, NIMChatSession } from "../types/nvidia";
 
 const stripThink = (text: string): string => {
     if (!text) return "";

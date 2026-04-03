@@ -1,11 +1,11 @@
 import * as crypto from "crypto";
 import * as async from "async";
 import Workers from "./Workers";
-import type { WorkerHandle } from "./managers/WorkerManager";
+import type { WorkerHandle } from "./types/worker";
 import StaffRanksManager from "./managers/StaffRanksManager";
 import path from "path";
 import db from "./mysql/database";
-import type { NIMChatSession } from "./managers/NVIDIAModelsManager";
+import type { NIMChatSession } from "./types/nvidia";
 import NVIDIAModels from "./NVIDIAModels";
 import * as nodemailer from "nodemailer";
 import * as os from "os";
@@ -33,12 +33,13 @@ const TRANSLATE_WORKER_POOL_SIZE = (() => {
 })();
 const TRANSLATE_TIMEOUT = process.platform === "win32" ? 25000 : 15000;
 const TRANSLATE_CACHE_TTL = 300000;
-const TRANSLATE_CACHE_LIMIT = 500;
 const TRANSLATE_MAX_RETRIES = 3;
 const TRANSLATE_RETRY_BASE_DELAY = 1000;
 const CIRCUIT_BREAKER_THRESHOLD = 10;
 const CIRCUIT_BREAKER_TIMEOUT = 60000;
-const translationCache = new Map<string, { value: string; expires: number }>();
+const TRANSLATION_CACHE_PREFIX = "barniebot:local:utils:translation:";
+const KNOWLEDGE_CACHE_KEY = "barniebot:local:utils:knowledge";
+const PROJECT_KNOWLEDGE_CACHE_KEY = "barniebot:local:utils:project-knowledge";
 const pendingTranslations = new Map<string, Promise<string>>();
 
 let circuitBreakerFailures = 0;
@@ -67,8 +68,6 @@ const execPromise = promisify(execCallback);
 const ALLOWED_SANDBOX_MODULES = new Map<string, unknown>([
   ["mathjs", mathjs]
 ]);
-let knowledgeCache: KnowledgeCache | null = null;
-let projectKnowledgeCache: ProjectKnowledgeCache | null = null;
 Workers.bulkCreateWorkers(TRANSLATE_WORKER_PATH, TRANSLATE_WORKER_TYPE, TRANSLATE_WORKER_POOL_SIZE);
 void (async () => {
   try {
@@ -84,16 +83,10 @@ async function processRateLimitsWorker(users: Array<{ uid: string; time_left: nu
   if (!worker) worker = await Workers.AwaitAvailableWorker(RATELIMIT_WORKER_TYPE, 2000);
   return await Workers.sendMessage(worker.id, { type: "process", users, limits, decrement: decrementMs }, 2000);
 }
-const trimTranslationCache = () => {
-  while (translationCache.size > TRANSLATE_CACHE_LIMIT) {
-    const firstKey = translationCache.keys().next().value;
-    if (!firstKey) break;
-    translationCache.delete(firstKey);
-  }
-};
-const resolveWorkspacePath = (targetPath = ".") => {
-  const resolved = path.resolve(AI_WORKSPACE_ROOT, targetPath);
-  if (!resolved.startsWith(AI_WORKSPACE_ROOT)) {
+const resolveWorkspacePath = (targetPath = ".", userId?: string) => {
+  const userWorkspace = userId ? path.join(AI_WORKSPACE_ROOT, userId) : AI_WORKSPACE_ROOT;
+  const resolved = path.resolve(userWorkspace, targetPath);
+  if (!resolved.startsWith(userWorkspace)) {
     throw new Error("Path escapes ai_workspace");
   }
   return resolved;
@@ -112,11 +105,42 @@ const resolveLogsPath = (targetPath = ".") => {
   }
   return resolved;
 };
+
+const getEncryptionKey = (): Buffer => {
+  const key = process.env.ENCRYPTION_KEY || "barniebot-default-encryption-key-change-in-production";
+  return crypto.scryptSync(key, "salt", 32);
+};
+
+const encryptText = (text: string): string => {
+  const iv = crypto.randomBytes(16);
+  const key = getEncryptionKey();
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  let encrypted = cipher.update(text, "utf8", "hex");
+  encrypted += cipher.final("hex");
+  const authTag = cipher.getAuthTag();
+  return `${iv.toString("hex")}:${authTag.toString("hex")}:${encrypted}`;
+};
+
+const decryptText = (encryptedData: string): string => {
+  const parts = encryptedData.split(":");
+  if (parts.length !== 3) return encryptedData;
+  const iv = Buffer.from(parts[0], "hex");
+  const authTag = Buffer.from(parts[1], "hex");
+  const encrypted = parts[2];
+  const key = getEncryptionKey();
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(authTag);
+  let decrypted = decipher.update(encrypted, "hex", "utf8");
+  decrypted += decipher.final("utf8");
+  return decrypted;
+};
+
 const resolveKnowledgePath = (source: KnowledgeSource): string => {
   return resolveProjectPath(source.path);
 };
-const ensureWorkspaceExists = async () => {
-  await fs.mkdir(AI_WORKSPACE_ROOT, { recursive: true });
+const ensureWorkspaceExists = async (userId?: string) => {
+  const workspacePath = userId ? path.join(AI_WORKSPACE_ROOT, userId) : AI_WORKSPACE_ROOT;
+  await fs.mkdir(workspacePath, { recursive: true });
 };
 const ensureKnowledgeExists = async () => {
   await fs.mkdir(KNOWLEDGE_ROOT, { recursive: true });
@@ -147,14 +171,14 @@ const readDirectoryRecursive = async (dir: string, limit: number, results: any[]
   }
   return results;
 };
-const collectSearchMatches = async (filePath: string, query: string, maxMatches: number) => {
+const collectSearchMatches = async (filePath: string, query: string, maxMatches: number, workspaceRoot: string) => {
   const content = await fs.readFile(filePath, "utf8");
   const lines = content.split(/\r?\n/);
   const matches: { path: string; line: number; snippet: string }[] = [];
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].toLowerCase().includes(query.toLowerCase())) {
       matches.push({
-        path: filePath.replace(AI_WORKSPACE_ROOT + path.sep, "").replace(/\\/g, "/"),
+        path: filePath.replace(workspaceRoot + path.sep, "").replace(/\\/g, "/"),
         line: i + 1,
         snippet: lines[i].trim().slice(0, 200)
       });
@@ -189,8 +213,9 @@ const loadKnowledgeSources = async (): Promise<KnowledgeSource[]> => {
   return parsed.filter((s: any) => s && typeof s.id === "string" && typeof s.path === "string");
 };
 const loadKnowledgeCache = async (): Promise<KnowledgeCache> => {
+  const cached = cacheManager.getLocal<KnowledgeCache>(KNOWLEDGE_CACHE_KEY);
+  if (cached && Date.now() - cached.loadedAt < KNOWLEDGE_CACHE_TTL_MS) return cached;
   const now = Date.now();
-  if (knowledgeCache && now - knowledgeCache.loadedAt < KNOWLEDGE_CACHE_TTL_MS) return knowledgeCache;
   const sources = await loadKnowledgeSources();
   const contents = new Map<string, string>();
   for (const source of sources) {
@@ -201,8 +226,9 @@ const loadKnowledgeCache = async (): Promise<KnowledgeCache> => {
       contents.set(source.id, "");
     }
   }
-  knowledgeCache = { loadedAt: now, sources, contents };
-  return knowledgeCache;
+  const nextCache = { loadedAt: now, sources, contents };
+  cacheManager.setLocal(KNOWLEDGE_CACHE_KEY, nextCache, KNOWLEDGE_CACHE_TTL_MS);
+  return nextCache;
 };
 const chunkText = (content: string, maxChars = 1200, overlap = 150): string[] => {
   if (!content) return [];
@@ -330,8 +356,9 @@ const buildSnippetFromTerms = (text: string, terms: string[], radius = 180): str
   return buildSnippet(text, firstMatch, radius);
 };
 const loadProjectKnowledgeCache = async (): Promise<ProjectKnowledgeCache> => {
+  const cached = cacheManager.getLocal<ProjectKnowledgeCache>(PROJECT_KNOWLEDGE_CACHE_KEY);
+  if (cached && Date.now() - cached.loadedAt < KNOWLEDGE_CACHE_TTL_MS) return cached;
   const now = Date.now();
-  if (projectKnowledgeCache && now - projectKnowledgeCache.loadedAt < KNOWLEDGE_CACHE_TTL_MS) return projectKnowledgeCache;
   const docs: ProjectKnowledgeDoc[] = [];
   for (const relativePath of HYBRID_PROJECT_KNOWLEDGE_PATHS) {
     const absolutePath = resolveProjectPath(relativePath);
@@ -350,8 +377,9 @@ const loadProjectKnowledgeCache = async (): Promise<ProjectKnowledgeCache> => {
       continue;
     }
   }
-  projectKnowledgeCache = { loadedAt: now, docs };
-  return projectKnowledgeCache;
+  const nextCache = { loadedAt: now, docs };
+  cacheManager.setLocal(PROJECT_KNOWLEDGE_CACHE_KEY, nextCache, KNOWLEDGE_CACHE_TTL_MS);
+  return nextCache;
 };
 const canAccessKnowledge = async (access: KnowledgeSource["access"], requesterId?: string) => {
   if (!access || access === "public") return true;
@@ -730,11 +758,16 @@ const utils = {
     get_memories: async (args: { userId: string }): Promise<{ error: string } | { memories: AIMemory[] }> => {
       if (!args.userId) return { error: "Missing userId parameter" };
       const memories = await db.query("SELECT * FROM ai_memories WHERE uid = ?", [args.userId]) as unknown as AIMemory[];
-      return { memories };
+      const decryptedMemories = memories.map((mem: any) => ({
+        ...mem,
+        memory: decryptText(mem.memory)
+      }));
+      return { memories: decryptedMemories };
     },
     insert_memory: async (args: { userId: string; memory: string }): Promise<any> => {
       if (!args.userId || !args.memory) return { error: "Missing parameters" };
-      await db.query("INSERT INTO ai_memories SET ?", [{ uid: args.userId, memory: args.memory }]);
+      const encryptedMemory = encryptText(args.memory);
+      await db.query("INSERT INTO ai_memories SET ?", [{ uid: args.userId, memory: encryptedMemory }]);
       return { success: true };
     },
     remove_memory: async (args: { userId: string; memoryId: number }): Promise<any> => {
@@ -1102,6 +1135,46 @@ const utils = {
           })) : []
         }
       };
+    },
+    get_monitor_entity_profile: async (args: { requesterId?: string; guildId?: string; entityType?: string; entityValue?: string }): Promise<any> => {
+      if (!args.guildId || !args.entityType || !args.entityValue) return { error: "Missing parameters" };
+      const entityType = String(args.entityType).toLowerCase();
+      if (!["user", "channel", "domain"].includes(entityType)) return { error: "Invalid entityType" };
+      if (!isSystemRequester(args.requesterId)) {
+        if (!args.requesterId) return { error: "Missing requesterId" };
+        const owner = isOwner(args.requesterId) === true;
+        const adminStaff = await isAdminStaffUser(args.requesterId);
+        const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+        if (guildInfo.error) return { error: guildInfo.error };
+        const member = guildInfo.member as any;
+        const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageMessages) || hasGuildPermission(member, PermissionFlagsBits.ModerateMembers);
+        if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      }
+      const entityKey = `${entityType}:${String(args.entityValue).toLowerCase()}`;
+      try {
+        const rows = await db.query(
+          "SELECT guild_id, entity_key, entity_type, risk_score, flag_count, action_count, false_positive_count, last_flag_at, last_action_at, updated_at FROM ai_monitor_entity_stats WHERE guild_id = ? AND entity_key = ? LIMIT 1",
+          [args.guildId, entityKey]
+        ) as unknown as any[];
+        if (!rows?.[0]) return { entityType, entityValue: args.entityValue, exists: false };
+        const row = rows[0];
+        return {
+          exists: true,
+          guildId: row.guild_id,
+          entityKey: row.entity_key,
+          entityType: row.entity_type,
+          entityValue: args.entityValue,
+          riskScore: Number(row.risk_score ?? 0),
+          flagCount: Number(row.flag_count ?? 0),
+          actionCount: Number(row.action_count ?? 0),
+          falsePositiveCount: Number(row.false_positive_count ?? 0),
+          lastFlagAt: row.last_flag_at ?? null,
+          lastActionAt: row.last_action_at ?? null,
+          updatedAt: row.updated_at ?? null
+        };
+      } catch (error: any) {
+        return { error: error?.message || String(error) };
+      }
     },
     list_guild_channels: async (args: { requesterId?: string; guildId?: string; type?: string; limit?: number }): Promise<any> => {
       if (!args?.requesterId || !args.guildId) return { error: "Missing parameters" };
@@ -1889,27 +1962,30 @@ const utils = {
         return { error: error.message ?? "Failed to move member" };
       }
     },
-    list_workspace_files: async (args: { path?: string; recursive?: boolean } = {}): Promise<any> => {
-      await ensureWorkspaceExists();
-      const directoryPath = resolveWorkspacePath(args.path ?? ".");
+    list_workspace_files: async (args: { path?: string; recursive?: boolean; requesterId?: string } = {}): Promise<any> => {
+      const userId = args.requesterId;
+      await ensureWorkspaceExists(userId);
+      const directoryPath = resolveWorkspacePath(args.path ?? ".", userId);
       const stats = await safeStat(directoryPath);
       if (!stats) return { error: "Path not found" };
       if (!stats.isDirectory()) return { error: "Target is not a directory" };
+      const userWorkspace = userId ? path.join(AI_WORKSPACE_ROOT, userId) : AI_WORKSPACE_ROOT;
       if (args.recursive) {
-        const entries = await readDirectoryRecursive(directoryPath, MAX_WORKSPACE_SCAN_RESULTS, [], path.relative(AI_WORKSPACE_ROOT, directoryPath) || "");
+        const entries = await readDirectoryRecursive(directoryPath, MAX_WORKSPACE_SCAN_RESULTS, [], path.relative(userWorkspace, directoryPath) || "");
         return { entries };
       }
       const items = await fs.readdir(directoryPath, { withFileTypes: true });
       return {
         entries: items.map(item => ({
-          path: path.join(path.relative(AI_WORKSPACE_ROOT, directoryPath), item.name).replace(/\\/g, "/"),
+          path: path.join(path.relative(userWorkspace, directoryPath), item.name).replace(/\\/g, "/"),
           type: item.isDirectory() ? "directory" : "file"
         }))
       };
     },
-    read_workspace_file: async (args: { path: string; encoding?: BufferEncoding }): Promise<any> => {
+    read_workspace_file: async (args: { path: string; encoding?: BufferEncoding; requesterId?: string }): Promise<any> => {
       if (!args?.path) return { error: "Missing path parameter" };
-      const filePath = resolveWorkspacePath(args.path);
+      const userId = args.requesterId;
+      const filePath = resolveWorkspacePath(args.path, userId);
       const stats = await safeStat(filePath);
       if (!stats) return { error: "File not found" };
       if (!stats.isFile()) return { error: "Path is not a file" };
@@ -1917,11 +1993,12 @@ const utils = {
       const content = await fs.readFile(filePath, encoding);
       return { content };
     },
-    write_workspace_file: async (args: { path: string; content: string; overwrite?: boolean }): Promise<any> => {
+    write_workspace_file: async (args: { path: string; content: string; overwrite?: boolean; requesterId?: string }): Promise<any> => {
       if (!args?.path) return { error: "Missing path parameter" };
       if (typeof args.content !== "string") return { error: "Missing content parameter" };
-      await ensureWorkspaceExists();
-      const filePath = resolveWorkspacePath(args.path);
+      const userId = args.requesterId;
+      await ensureWorkspaceExists(userId);
+      const filePath = resolveWorkspacePath(args.path, userId);
       const directory = path.dirname(filePath);
       await fs.mkdir(directory, { recursive: true });
       const stats = await safeStat(filePath);
@@ -1929,19 +2006,21 @@ const utils = {
       await fs.writeFile(filePath, args.content, "utf8");
       return { success: true };
     },
-    append_workspace_file: async (args: { path: string; content: string }): Promise<any> => {
+    append_workspace_file: async (args: { path: string; content: string; requesterId?: string }): Promise<any> => {
       if (!args?.path) return { error: "Missing path parameter" };
       if (typeof args.content !== "string") return { error: "Missing content parameter" };
-      await ensureWorkspaceExists();
-      const filePath = resolveWorkspacePath(args.path);
+      const userId = args.requesterId;
+      await ensureWorkspaceExists(userId);
+      const filePath = resolveWorkspacePath(args.path, userId);
       const directory = path.dirname(filePath);
       await fs.mkdir(directory, { recursive: true });
       await fs.appendFile(filePath, args.content, "utf8");
       return { success: true };
     },
-    delete_workspace_entry: async (args: { path: string; recursive?: boolean }): Promise<any> => {
+    delete_workspace_entry: async (args: { path: string; recursive?: boolean; requesterId?: string }): Promise<any> => {
       if (!args?.path) return { error: "Missing path parameter" };
-      const targetPath = resolveWorkspacePath(args.path);
+      const userId = args.requesterId;
+      const targetPath = resolveWorkspacePath(args.path, userId);
       const stats = await safeStat(targetPath);
       if (!stats) return { error: "Path not found" };
       if (stats.isDirectory()) {
@@ -1952,10 +2031,11 @@ const utils = {
       }
       return { success: true };
     },
-    move_workspace_entry: async (args: { from: string; to: string; overwrite?: boolean }): Promise<any> => {
+    move_workspace_entry: async (args: { from: string; to: string; overwrite?: boolean; requesterId?: string }): Promise<any> => {
       if (!args?.from || !args.to) return { error: "Missing path parameters" };
-      const source = resolveWorkspacePath(args.from);
-      const destination = resolveWorkspacePath(args.to);
+      const userId = args.requesterId;
+      const source = resolveWorkspacePath(args.from, userId);
+      const destination = resolveWorkspacePath(args.to, userId);
       const sourceStats = await safeStat(source);
       if (!sourceStats) return { error: "Source not found" };
       const destinationStats = await safeStat(destination);
@@ -1972,18 +2052,20 @@ const utils = {
       await fs.rename(source, destination);
       return { success: true };
     },
-    create_workspace_directory: async (args: { path: string }): Promise<any> => {
+    create_workspace_directory: async (args: { path: string; requesterId?: string }): Promise<any> => {
       if (!args?.path) return { error: "Missing path parameter" };
-      const directoryPath = resolveWorkspacePath(args.path);
+      const userId = args.requesterId;
+      const directoryPath = resolveWorkspacePath(args.path, userId);
       await fs.mkdir(directoryPath, { recursive: true });
       return { success: true };
     },
-    download_to_workspace: async (args: { url: string; path: string; overwrite?: boolean }): Promise<any> => {
+    download_to_workspace: async (args: { url: string; path: string; overwrite?: boolean; requesterId?: string }): Promise<any> => {
       if (!args?.url || !args.path) return { error: "Missing parameters" };
-      await ensureWorkspaceExists();
+      const userId = args.requesterId;
+      await ensureWorkspaceExists(userId);
       const response = await fetch(args.url);
       if (!response.ok) return { error: `Failed to download resource: ${response.status}` };
-      const filePath = resolveWorkspacePath(args.path);
+      const filePath = resolveWorkspacePath(args.path, userId);
       const stats = await safeStat(filePath);
       if (stats && !args.overwrite) return { error: "File already exists" };
       await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -1991,10 +2073,11 @@ const utils = {
       await fs.writeFile(filePath, new Uint8Array(arrayBuffer));
       return { success: true };
     },
-    search_workspace_text: async (args: { query: string; path?: string; maxResults?: number }): Promise<any> => {
+    search_workspace_text: async (args: { query: string; path?: string; maxResults?: number; requesterId?: string }): Promise<any> => {
       if (!args?.query) return { error: "Missing query parameter" };
-      await ensureWorkspaceExists();
-      const basePath = resolveWorkspacePath(args.path ?? ".");
+      const userId = args.requesterId;
+      await ensureWorkspaceExists(userId);
+      const basePath = resolveWorkspacePath(args.path ?? ".", userId);
       const stats = await safeStat(basePath);
       if (!stats) return { error: "Path not found" };
       const maxResults = Math.max(1, Math.min(args.maxResults ?? MAX_WORKSPACE_SCAN_RESULTS, MAX_WORKSPACE_SCAN_RESULTS));
@@ -2006,6 +2089,7 @@ const utils = {
       } else {
         return { error: "Unsupported file type" };
       }
+      const userWorkspace = userId ? path.join(AI_WORKSPACE_ROOT, userId) : AI_WORKSPACE_ROOT;
       const matches: { path: string; line: number; snippet: string }[] = [];
       while (queue.length > 0 && matches.length < maxResults) {
         const current = queue.shift() as string;
@@ -2016,15 +2100,16 @@ const utils = {
             queue.push(path.join(current, child));
           }
         } else if (currentStats.isFile() && currentStats.size <= MAX_FILE_SIZE_FOR_SEARCH) {
-          const fileMatches = await collectSearchMatches(current, args.query, maxResults - matches.length);
+          const fileMatches = await collectSearchMatches(current, args.query, maxResults - matches.length, userWorkspace);
           matches.push(...fileMatches);
         }
       }
       return { matches };
     },
-    workspace_file_info: async (args: { path: string }): Promise<any> => {
+    workspace_file_info: async (args: { path: string; requesterId?: string }): Promise<any> => {
       if (!args?.path) return { error: "Missing path parameter" };
-      const target = resolveWorkspacePath(args.path);
+      const userId = args.requesterId;
+      const target = resolveWorkspacePath(args.path, userId);
       const stats = await safeStat(target);
       if (!stats) return { error: "Path not found" };
       return {
@@ -2061,8 +2146,9 @@ const utils = {
     },
     attach_workspace_file: async (args: { path: string; requesterId?: string }): Promise<any> => {
       if (!args?.path) return { error: "Missing path parameter" };
-      await ensureWorkspaceExists();
-      const filePath = resolveWorkspacePath(args.path);
+      const userId = args.requesterId;
+      await ensureWorkspaceExists(userId);
+      const filePath = resolveWorkspacePath(args.path, userId);
       const stats = await safeStat(filePath);
       if (!stats) return { error: "File not found" };
       if (!stats.isFile()) return { error: "Path is not a file" };
@@ -2070,7 +2156,8 @@ const utils = {
         const limitMb = (MAX_ATTACHMENT_SIZE / (1024 * 1024)).toFixed(1);
         return { error: `File exceeds ${limitMb}MB limit` };
       }
-      const relativePath = path.relative(AI_WORKSPACE_ROOT, filePath).replace(/\\/g, "/");
+      const userWorkspace = userId ? path.join(AI_WORKSPACE_ROOT, userId) : AI_WORKSPACE_ROOT;
+      const relativePath = path.relative(userWorkspace, filePath).replace(/\\/g, "/");
       return {
         success: true,
         file: {
@@ -2214,10 +2301,12 @@ const utils = {
       if (!trimmedCommand) return { error: "Command cannot be empty" };
       if (trimmedCommand.length > 256) return { error: "Command is too long" };
       if (/[\r\n]/.test(trimmedCommand)) return { error: "Command cannot contain newline characters" };
-      await ensureWorkspaceExists();
+      const userId = args.requesterId;
+      await ensureWorkspaceExists(userId);
+      const userWorkspace = userId ? path.join(AI_WORKSPACE_ROOT, userId) : AI_WORKSPACE_ROOT;
       try {
         const { stdout, stderr } = await execPromise(trimmedCommand, {
-          cwd: AI_WORKSPACE_ROOT,
+          cwd: userWorkspace,
           timeout: 10000,
           maxBuffer: 1024 * 1024,
           windowsHide: true
@@ -2289,8 +2378,8 @@ const utils = {
     },
     clear_translation_cache: async (args: { requesterId?: string }): Promise<any> => {
       if (!isOwner(args?.requesterId)) return { error: "Requester is not authorized to clear cache" };
-      const beforeSize = translationCache.size;
-      translationCache.clear();
+      const beforeSize = cacheManager.countLocalByPrefix(TRANSLATION_CACHE_PREFIX);
+      cacheManager.deleteLocalByPrefix(TRANSLATION_CACHE_PREFIX);
       pendingTranslations.clear();
       return { success: true, clearedEntries: beforeSize };
     },
@@ -3364,6 +3453,181 @@ const utils = {
     },
     get_current_datetime: (): string => {
       return new Date().toISOString();
+    },
+    create_chat_session: async (args: { userId: string; title?: string }): Promise<any> => {
+      if (!args.userId) return { error: "Missing userId parameter" };
+      const sessionId = `chat_${args.userId}_${Date.now()}`;
+      const now = Date.now();
+      const title = args.title || "New Chat";
+      await db.query("INSERT INTO ai_chat_sessions SET ?", [{
+        session_id: sessionId,
+        user_id: args.userId,
+        title: title,
+        created_at: now,
+        updated_at: now,
+        message_count: 0,
+        is_active: true
+      }]);
+      return { sessionId, title, createdAt: now };
+    },
+    list_chat_sessions: async (args: { userId: string }): Promise<any> => {
+      if (!args.userId) return { error: "Missing userId parameter" };
+      const sessions = await db.query(
+        "SELECT session_id, title, created_at, updated_at, message_count, is_active FROM ai_chat_sessions WHERE user_id = ? AND is_active = TRUE ORDER BY updated_at DESC LIMIT 20",
+        [args.userId]
+      ) as unknown as any[];
+      return { sessions };
+    },
+    load_chat_session: async (args: { userId: string; sessionId: string }): Promise<any> => {
+      if (!args.userId || !args.sessionId) return { error: "Missing parameters" };
+      const sessions = await db.query(
+        "SELECT * FROM ai_chat_sessions WHERE session_id = ? AND user_id = ?",
+        [args.sessionId, args.userId]
+      ) as unknown as any[];
+      if (!sessions[0]) return { error: "Session not found" };
+      const messages = await db.query(
+        "SELECT role, content, tool_calls, tool_results, created_at, compressed FROM ai_chat_messages WHERE session_id = ? ORDER BY created_at ASC LIMIT 200",
+        [args.sessionId]
+      ) as unknown as any[];
+      const decryptedMessages = messages.map((msg: any) => ({
+        ...msg,
+        content: decryptText(msg.content),
+        tool_calls: msg.tool_calls ? decryptText(msg.tool_calls) : null,
+        tool_results: msg.tool_results ? decryptText(msg.tool_results) : null
+      }));
+      return { session: sessions[0], messages: decryptedMessages };
+    },
+    delete_chat_session: async (args: { userId: string; sessionId: string }): Promise<any> => {
+      if (!args.userId || !args.sessionId) return { error: "Missing parameters" };
+      const result: any = await db.query(
+        "UPDATE ai_chat_sessions SET is_active = FALSE WHERE session_id = ? AND user_id = ?",
+        [args.sessionId, args.userId]
+      );
+      if (result.affectedRows === 0) return { error: "Session not found" };
+      return { success: true };
+    },
+    save_chat_message: async (args: { sessionId: string; role: string; content: string; toolCalls?: any; toolResults?: any }): Promise<any> => {
+      if (!args.sessionId || !args.role || !args.content) return { error: "Missing parameters" };
+      const now = Date.now();
+      const encryptedContent = encryptText(args.content);
+      const encryptedToolCalls = args.toolCalls ? encryptText(JSON.stringify(args.toolCalls)) : null;
+      const encryptedToolResults = args.toolResults ? encryptText(JSON.stringify(args.toolResults)) : null;
+      await db.query("INSERT INTO ai_chat_messages SET ?", [{
+        session_id: args.sessionId,
+        role: args.role,
+        content: encryptedContent,
+        tool_calls: encryptedToolCalls,
+        tool_results: encryptedToolResults,
+        created_at: now,
+        compressed: false
+      }]);
+      await db.query(
+        "UPDATE ai_chat_sessions SET message_count = message_count + 1, updated_at = ? WHERE session_id = ?",
+        [now, args.sessionId]
+      );
+      return { success: true };
+    },
+    compress_chat_context: async (args: { sessionId: string }): Promise<any> => {
+      if (!args.sessionId) return { error: "Missing sessionId parameter" };
+      const messages = await db.query(
+        "SELECT id, role, content FROM ai_chat_messages WHERE session_id = ? AND compressed = FALSE ORDER BY created_at ASC LIMIT 100",
+        [args.sessionId]
+      ) as unknown as any[];
+      if (messages.length < 20) return { summary: "Not enough messages to compress", compressed: 0 };
+      const messagesToCompress = messages.slice(0, -10);
+      const conversationText = messagesToCompress.map((m: any) => `${m.role}: ${decryptText(m.content)}`).join("\n");
+      const summaryPrompt = `Summarize the following conversation, preserving key information, decisions, and context:\n\n${conversationText}`;
+      const summary = await NVIDIAModels.GetModelChatResponse([{ role: "user", content: summaryPrompt }], 5000, "chat", false);
+      const encryptedSummary = encryptText(summary.content);
+      await db.query(
+        "UPDATE ai_chat_sessions SET context_summary = ? WHERE session_id = ?",
+        [encryptedSummary, args.sessionId]
+      );
+      const idsToCompress = messagesToCompress.map((m: any) => m.id);
+      if (idsToCompress.length > 0) {
+        await db.query(
+          `UPDATE ai_chat_messages SET compressed = TRUE WHERE id IN (${idsToCompress.join(",")})`,
+          []
+        );
+      }
+      return { summary: summary.content, compressed: idsToCompress.length };
+    },
+    add_memory_to_graph: async (args: { userId: string; memoryType: string; subject: string; content: string; relatedEntities?: any[]; confidence?: number }): Promise<any> => {
+      if (!args.userId || !args.memoryType || !args.subject || !args.content) return { error: "Missing parameters" };
+      const now = Date.now();
+      const confidence = args.confidence || 1.0;
+      const encryptedContent = encryptText(args.content);
+      const relatedEntities = args.relatedEntities ? encryptText(JSON.stringify(args.relatedEntities)) : null;
+      const existing: any = await db.query(
+        "SELECT id FROM ai_memory_graph WHERE user_id = ? AND memory_type = ? AND subject = ?",
+        [args.userId, args.memoryType, args.subject]
+      );
+      if (existing && existing.length > 0) {
+        await db.query(
+          "UPDATE ai_memory_graph SET content = ?, related_entities = ?, confidence = ?, updated_at = ?, last_accessed = ?, access_count = access_count + 1 WHERE id = ?",
+          [encryptedContent, relatedEntities, confidence, now, now, existing[0].id]
+        );
+        return { success: true, updated: true, id: existing[0].id };
+      }
+      const result: any = await db.query("INSERT INTO ai_memory_graph SET ?", [{
+        user_id: args.userId,
+        memory_type: args.memoryType,
+        subject: args.subject,
+        content: encryptedContent,
+        related_entities: relatedEntities,
+        confidence: confidence,
+        created_at: now,
+        updated_at: now,
+        last_accessed: now,
+        access_count: 1
+      }]);
+      return { success: true, updated: false, id: result.insertId };
+    },
+    get_memory_graph: async (args: { userId: string; memoryType?: string; subject?: string; limit?: number }): Promise<any> => {
+      if (!args.userId) return { error: "Missing userId parameter" };
+      const limit = Math.min(args.limit || 50, 200);
+      let query = "SELECT * FROM ai_memory_graph WHERE user_id = ?";
+      const params: any[] = [args.userId];
+      if (args.memoryType) {
+        query += " AND memory_type = ?";
+        params.push(args.memoryType);
+      }
+      if (args.subject) {
+        query += " AND subject LIKE ?";
+        params.push(`%${args.subject}%`);
+      }
+      query += " ORDER BY confidence DESC, access_count DESC, updated_at DESC LIMIT ?";
+      params.push(limit);
+      const memories = await db.query(query, params) as unknown as any[];
+      const now = Date.now();
+      if (memories.length > 0) {
+        const ids = memories.map((m: any) => m.id);
+        await db.query(
+          `UPDATE ai_memory_graph SET last_accessed = ?, access_count = access_count + 1 WHERE id IN (${ids.join(",")})`,
+          [now]
+        );
+      }
+      const decryptedMemories = memories.map((mem: any) => ({
+        ...mem,
+        content: decryptText(mem.content),
+        related_entities: mem.related_entities ? decryptText(mem.related_entities) : null
+      }));
+      return { memories: decryptedMemories };
+    },
+    search_memory_graph: async (args: { userId: string; query: string; limit?: number }): Promise<any> => {
+      if (!args.userId || !args.query) return { error: "Missing parameters" };
+      const limit = Math.min(args.limit || 20, 100);
+      const searchTerm = `%${args.query}%`;
+      const memories = await db.query(
+        "SELECT * FROM ai_memory_graph WHERE user_id = ? AND (subject LIKE ? OR content LIKE ?) ORDER BY confidence DESC, access_count DESC LIMIT ?",
+        [args.userId, searchTerm, searchTerm, limit]
+      ) as unknown as any[];
+      const decryptedMemories = memories.map((mem: any) => ({
+        ...mem,
+        content: decryptText(mem.content),
+        related_entities: mem.related_entities ? decryptText(mem.related_entities) : null
+      }));
+      return { memories: decryptedMemories };
     }
   },
   createSpaces: (length: number): string => {
@@ -3382,9 +3646,10 @@ const utils = {
   },
   translate: async (text: string, from: string, target: string): Promise<any> => {
     const cacheKey = `${from}->${target}:${text}`;
-    const cached = translationCache.get(cacheKey);
+    const fullCacheKey = `${TRANSLATION_CACHE_PREFIX}${cacheKey}`;
+    const cached = cacheManager.getLocal<{ value: string }>(fullCacheKey);
     const now = Date.now();
-    if (cached && cached.expires > now) return { text: cached.value };
+    if (cached) return { text: cached.value };
     if (pendingTranslations.has(cacheKey)) {
       const shared = pendingTranslations.get(cacheKey) as Promise<string>;
       return { text: await shared };
@@ -3417,8 +3682,7 @@ const utils = {
           const response = await Workers.awaitResponse(worker.id, messageId, TRANSLATE_TIMEOUT);
           if (response.message?.error) throw new Error(response.message.error);
           const translatedText = String(response.message.translation ?? "");
-          translationCache.set(cacheKey, { value: translatedText, expires: Date.now() + TRANSLATE_CACHE_TTL });
-          trimTranslationCache();
+          cacheManager.setLocal(fullCacheKey, { value: translatedText }, TRANSLATE_CACHE_TTL);
           // Success - reset circuit breaker
           if (circuitBreakerFailures > 0) {
             circuitBreakerFailures = Math.max(0, circuitBreakerFailures - 1);

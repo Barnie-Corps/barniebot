@@ -11,6 +11,7 @@ import https from "https";
 import dns from "dns";
 import crypto from "crypto";
 import cacheManager from "./CacheManager";
+import type { QueuedMessage } from "../types/chat";
 if (process.platform === "win32") {
     dns.setDefaultResultOrder("verbatim");
 }
@@ -24,16 +25,9 @@ const blacklist = new Set<string>(["1204899276229058625"]);
 const GUILD_CACHE_TTL = 15000;
 const LANGUAGE_CACHE_TTL = 600000;
 const LINK_REGEX = /(http|https):\/\/[\w-]+(\.[\w-]+)+([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])?/g;
-const LANGUAGE_NAME_CACHE = new Map<string, string>();
-const RANK_CACHE = new Map<string, { rank: string | null, expires: number }>();
 const RANK_CACHE_TTL = 300000;
-const BLACKLIST_CACHE = new Map<string, { value: boolean, expires: number }>();
-const MUTE_CACHE = new Map<string, { value: boolean, until: number, expires: number }>();
 const MODERATION_CACHE_TTL = 60000;
-
-const APP_TRANSLATION_CACHE = new Map<string, { text: string, expires: number }>();
 const APP_TRANSLATION_CACHE_TTL = 600000;
-const APP_TRANSLATION_CACHE_LIMIT = 1000;
 
 const CACHE_GUILDS_KEY = "barniebot:chat:guilds:active";
 const CACHE_LANG_PREFIX = "barniebot:chat:lang:";
@@ -41,8 +35,17 @@ const CACHE_RANK_PREFIX = "barniebot:chat:rank:";
 const CACHE_BLACKLIST_PREFIX = "barniebot:chat:blacklist:";
 const CACHE_MUTE_PREFIX = "barniebot:chat:mute:";
 const CACHE_TRANSLATION_PREFIX = "barniebot:chat:translation:";
+const CACHE_LOCAL_GUILDS_KEY = "barniebot:local:chat:guilds:active";
+const CACHE_LOCAL_LANG_PREFIX = "barniebot:local:chat:lang:";
+const CACHE_LOCAL_WEBHOOK_PREFIX = "barniebot:local:chat:webhook:";
+const CACHE_LOCAL_LANGUAGE_NAME_PREFIX = "barniebot:local:chat:language-name:";
+const CACHE_LOCAL_APP_TRANSLATION_PREFIX = "barniebot:local:chat:app-translation:";
+const CACHE_LOCAL_RANK_PREFIX = "barniebot:local:chat:rank:";
+const CACHE_LOCAL_BLACKLIST_PREFIX = "barniebot:local:chat:blacklist:";
+const CACHE_LOCAL_MUTE_PREFIX = "barniebot:local:chat:mute:";
 const RATE_COUNTER_PREFIX = "barniebot:chat:rate:count:";
 const RATE_LIMIT_PREFIX = "barniebot:chat:rate:limit:";
+const WEBHOOK_USERNAME_LIMIT = 80;
 
 let translationFailureCount = 0;
 let lastTranslationFailure = 0;
@@ -57,24 +60,18 @@ const httpsAgent = new https.Agent({
     keepAliveMsecs: 30000,
     scheduling: 'fifo'
 });
-interface QueuedMessage {
-    message: Message<true>;
-    priority: number;
-    timestamp: number;
-}
-
 export default class ChatManager extends EventEmitter {
     private cache = new Collection<string, any>();
     private ratelimits = new Collection<string, any>();
     private normal_interval: NodeJS.Timer | null = null;
     private ratelimit_interval: NodeJS.Timer | null = null;
-    private guildCache: { expires: number, data: any[] } | null = null;
-    private languageCache = new Collection<string, { expires: number, lang: string }>();
-    private webhookCache = new Collection<string, WebhookClient>();
     private messageQueueHigh: QueuedMessage[] = [];
     private messageQueueLow: QueuedMessage[] = [];
     private isProcessingQueue = false;
     private queueScheduled = false;
+    private activeGuildsPromise: Promise<any[]> | null = null;
+    private userLanguagePromises = new Map<string, Promise<string>>();
+    private userRankPromises = new Map<string, Promise<string | null>>();
     constructor(public options: ChatManagerOptions = DefaultChatManagerOptions) {
         super();
         this.clear_times_function = this.clear_times_function.bind(this);
@@ -89,7 +86,7 @@ export default class ChatManager extends EventEmitter {
         try {
             await db.query("DELETE FROM globalchats WHERE guild = ?", [guildId]);
             this.invalidateGuildCache();
-            if (webhookId) this.webhookCache.delete(webhookId);
+            if (webhookId) cacheManager.deleteLocal(`${CACHE_LOCAL_WEBHOOK_PREFIX}${webhookId}`);
             Log.warn("Removed invalid globalchat target after delivery failure", { guildId, webhookId: webhookId ?? null });
         } catch (error) {
             Log.warn("Failed to cleanup invalid globalchat target", { guildId, error });
@@ -143,9 +140,10 @@ export default class ChatManager extends EventEmitter {
         if (await this.isRatelimited(message.author.id)) return Log.info(`Ignoring user ${message.author.username} as they're ratelimited.`, { userId: message.author.id, username: message.author.username });
 
         const now = Date.now();
-        const cachedGuildCount = this.guildCache && this.guildCache.expires > now ? this.guildCache.data.length : 0;
+        const cachedGuilds = cacheManager.getLocal<any[]>(CACHE_LOCAL_GUILDS_KEY);
+        const cachedGuildCount = Array.isArray(cachedGuilds) ? cachedGuilds.length : 0;
         const priority = cachedGuildCount > 50 ? 1 : 0;
-        if (!this.guildCache || this.guildCache.expires <= now) {
+        if (!cachedGuilds) {
             Promise.resolve(this.getActiveGuilds()).catch(() => { });
         }
 
@@ -179,9 +177,11 @@ export default class ChatManager extends EventEmitter {
         this.isProcessingQueue = true;
         try {
             while (this.messageQueueHigh.length > 0 || this.messageQueueLow.length > 0) {
-                const highCount = Math.min(this.messageQueueHigh.length, 5);
+                const queueDepth = this.messageQueueHigh.length + this.messageQueueLow.length;
+                const perTick = queueDepth >= 30 ? 8 : queueDepth >= 12 ? 6 : 4;
+                const highCount = Math.min(this.messageQueueHigh.length, perTick);
                 const highBatch = highCount > 0 ? this.messageQueueHigh.splice(0, highCount) : [];
-                const lowCount = Math.min(this.messageQueueLow.length, 5 - highBatch.length);
+                const lowCount = Math.min(this.messageQueueLow.length, perTick - highBatch.length);
                 const lowBatch = lowCount > 0 ? this.messageQueueLow.splice(0, lowCount) : [];
                 const batch = highBatch.length > 0 ? highBatch.concat(lowBatch) : lowBatch;
                 if (batch.length === 0) break;
@@ -197,10 +197,11 @@ export default class ChatManager extends EventEmitter {
 
     private async dispatchMessage(message: Message<true>): Promise<any> {
         const start = Date.now();
-        const [guilds, userLanguage, baseContent] = await Promise.all([
+        const [guilds, userLanguage, baseContent, rank] = await Promise.all([
             this.getActiveGuilds(),
             this.getUserLanguage(message.author.id),
-            this.resolveMessageContent(message)
+            this.resolveMessageContent(message),
+            this.getUserStaffRankCached(message.author.id)
         ]);
         const normalizedUserLanguage = userLanguage.toLowerCase();
         const languageName = this.resolveLanguageName(userLanguage);
@@ -219,10 +220,7 @@ export default class ChatManager extends EventEmitter {
         if (!sanitizedDefaultContent || !sanitizedDefaultContent.trim().length) {
             sanitizedDefaultContent = "*Empty message*";
         }
-        const rank = await this.getUserStaffRankCached(message.author.id);
-        const suffix = utils.getRankSuffix(rank);
-        const baseName = message.member?.nickname ?? message.author.displayName;
-        const senderUsername = suffix ? `[${suffix}] ${baseName}` : utils.sanitizeStaffImpersonation(baseName);
+        const senderUsername = this.normalizeWebhookUsername(rank, message.member?.nickname ?? message.author.displayName);
         const senderAvatarURL = message.author.displayAvatarURL();
         const getTranslatedContent = this.createTranslationResolver(
             baseContent,
@@ -234,40 +232,32 @@ export default class ChatManager extends EventEmitter {
         let failed = false;
 
         const filtered = guilds.filter((graw: any) => graw.guild !== message.guildId);
-        const BATCH_SIZE = 30;
-        const batches: any[][] = [];
-        for (let i = 0; i < filtered.length; i += BATCH_SIZE) {
-            batches.push(filtered.slice(i, i + BATCH_SIZE));
-        }
-
-        for (const batch of batches) {
-            const batchTasks = batch.map(async (graw: any) => {
-                const guild = client.guilds.cache.get(graw.guild) as Guild | undefined;
-                if (!guild) {
-                    Promise.resolve(db.query("DELETE FROM globalchats WHERE guild = ?", [graw.guild])).catch(() => { });
-                    this.invalidateGuildCache();
-                    return;
-                }
-                const targetLanguage = typeof graw.language === "string" ? graw.language : String(graw.language ?? "");
-                const shouldTranslate = Boolean(graw.autotranslate) && targetLanguage && targetLanguage.toLowerCase() !== normalizedUserLanguage;
-                const webhook = this.getWebhook(graw);
-                const contentToSend = shouldTranslate ? await getTranslatedContent(targetLanguage) : sanitizedDefaultContent;
-                try {
-                    await webhook.send({
-                        username: senderUsername,
-                        avatarURL: senderAvatarURL,
-                        content: contentToSend,
-                        allowedMentions: { parse: [] }
-                    });
-                }
-                catch (error: any) {
-                    failed = true;
-                    this.webhookCache.delete(graw.webhook_id);
-                    await this.cleanupFailedGlobalChat(graw.guild, graw.webhook_id);
-                }
-            });
-            await Promise.allSettled(batchTasks);
-        }
+        const guildConcurrency = filtered.length >= 150 ? 48 : filtered.length >= 80 ? 36 : 24;
+        await this.runWithConcurrency(filtered, guildConcurrency, async (graw: any) => {
+            const guild = client.guilds.cache.get(graw.guild) as Guild | undefined;
+            if (!guild) {
+                Promise.resolve(db.query("DELETE FROM globalchats WHERE guild = ?", [graw.guild])).catch(() => { });
+                this.invalidateGuildCache();
+                return;
+            }
+            const targetLanguage = typeof graw.language === "string" ? graw.language : String(graw.language ?? "");
+            const shouldTranslate = Boolean(graw.autotranslate) && targetLanguage && targetLanguage.toLowerCase() !== normalizedUserLanguage;
+            const webhook = this.getWebhook(graw);
+            const contentToSend = shouldTranslate ? await getTranslatedContent(targetLanguage) : sanitizedDefaultContent;
+            try {
+                await webhook.send({
+                    username: senderUsername,
+                    avatarURL: senderAvatarURL,
+                    content: contentToSend,
+                    allowedMentions: { parse: [] }
+                });
+            }
+            catch (error: any) {
+                failed = true;
+                cacheManager.deleteLocal(`${CACHE_LOCAL_WEBHOOK_PREFIX}${graw.webhook_id}`);
+                await this.cleanupFailedGlobalChat(graw.guild, graw.webhook_id);
+            }
+        });
         const dispatchEnd = Date.now();
         const content = utils.encryptWithAES(data.bot.encryption_key, message.content);
         Promise.resolve(db.query("INSERT INTO global_messages SET ?", [{ uid: message.author.id, content: content || "[EMPTY MESSAGE]", language: userLanguage }])).catch(() => { });
@@ -324,7 +314,8 @@ export default class ChatManager extends EventEmitter {
         );
         const botUsername = client.user?.username;
         const botAvatarURL = client.user?.displayAvatarURL();
-        const tasks = guilds.map(async (graw: any) => {
+        const guildConcurrency = guilds.length >= 150 ? 48 : guilds.length >= 80 ? 36 : 24;
+        await this.runWithConcurrency(guilds, guildConcurrency, async (graw: any) => {
             const guild = client.guilds.cache.get(graw.guild) as Guild | undefined;
             if (!guild) {
                 Promise.resolve(db.query("DELETE FROM globalchats WHERE guild = ?", [graw.guild])).catch(() => { });
@@ -346,11 +337,26 @@ export default class ChatManager extends EventEmitter {
             }
             catch (error: any) {
                 Log.warn(`Couldn't send global message to guild ${guild.name}`, { guildId: guild.id, guildName: guild.name });
-                this.webhookCache.delete(graw.webhook_id);
+                cacheManager.deleteLocal(`${CACHE_LOCAL_WEBHOOK_PREFIX}${graw.webhook_id}`);
                 await this.cleanupFailedGlobalChat(graw.guild, graw.webhook_id);
             }
         });
-        await Promise.allSettled(tasks);
+    }
+    private async runWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
+        if (items.length === 0) return;
+        const concurrency = Math.max(1, Math.min(limit, items.length));
+        let index = 0;
+        const runners = Array.from({ length: concurrency }, async () => {
+            while (true) {
+                const current = index;
+                index += 1;
+                if (current >= items.length) break;
+                try {
+                    await worker(items[current]);
+                } catch {}
+            }
+        });
+        await Promise.allSettled(runners);
     }
     private async clear_times_function(): Promise<void> {
         try {
@@ -418,21 +424,32 @@ export default class ChatManager extends EventEmitter {
     private sanitizeContent(content: string): string {
         return content.replace(LINK_REGEX, "[LINK]");
     }
+    private normalizeWebhookUsername(rank: string | null, rawName: string): string {
+        const baseName = utils.sanitizeStaffImpersonation(rawName).trim() || "Unknown User";
+        const suffix = utils.getRankSuffix(rank);
+        if (!suffix) return baseName.slice(0, WEBHOOK_USERNAME_LIMIT);
+        const prefix = `[${suffix}] `;
+        const remaining = Math.max(1, WEBHOOK_USERNAME_LIMIT - prefix.length);
+        return `${prefix}${baseName.slice(0, remaining)}`;
+    }
     private resolveLanguageName(languageCode: string): string {
         if (!languageCode) return languageCode;
         const normalized = languageCode.toLowerCase();
-        const cached = LANGUAGE_NAME_CACHE.get(normalized);
+        const cacheKey = `${CACHE_LOCAL_LANGUAGE_NAME_PREFIX}${normalized}`;
+        const cached = cacheManager.getLocal<string>(cacheKey);
         if (cached) return cached;
         const resolved = langs.where("1", languageCode)?.name ?? languageCode;
-        LANGUAGE_NAME_CACHE.set(normalized, resolved);
+        cacheManager.setLocal(cacheKey, resolved, 86400000);
         return resolved;
     }
     private async getActiveGuilds(): Promise<any[]> {
-        const now = Date.now();
-        if (this.guildCache && this.guildCache.expires > now) return this.guildCache.data;
+        const localCached = cacheManager.getLocal<any[]>(CACHE_LOCAL_GUILDS_KEY);
+        if (Array.isArray(localCached)) return localCached;
+        if (this.activeGuildsPromise) return this.activeGuildsPromise;
+        this.activeGuildsPromise = (async () => {
         const cached = await cacheManager.get<any[]>(CACHE_GUILDS_KEY);
         if (Array.isArray(cached)) {
-            this.guildCache = { data: cached, expires: now + GUILD_CACHE_TTL };
+            cacheManager.setLocal(CACHE_LOCAL_GUILDS_KEY, cached, GUILD_CACHE_TTL);
             return cached;
         }
         const guildsRaw: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
@@ -442,12 +459,18 @@ export default class ChatManager extends EventEmitter {
             if (Number(g2.autotranslate) === 1 && Number(g1.autotranslate) !== 1) return -1;
             return 0;
         });
-        this.guildCache = { data: sorted, expires: now + GUILD_CACHE_TTL };
+        cacheManager.setLocal(CACHE_LOCAL_GUILDS_KEY, sorted, GUILD_CACHE_TTL);
         Promise.resolve(cacheManager.set(CACHE_GUILDS_KEY, sorted, GUILD_CACHE_TTL)).catch(() => { });
         return sorted;
+        })();
+        try {
+            return await this.activeGuildsPromise;
+        } finally {
+            this.activeGuildsPromise = null;
+        }
     }
     private invalidateGuildCache(): void {
-        this.guildCache = null;
+        cacheManager.deleteLocal(CACHE_LOCAL_GUILDS_KEY);
         Promise.resolve(cacheManager.delete(CACHE_GUILDS_KEY)).catch(() => { });
     }
     private createTranslationResolver(baseContent: string, sourceLanguage: string, sourceLanguageName: string, sanitizedFallback: string, hasTextContent: boolean): (targetLanguage: string) => Promise<string> {
@@ -466,14 +489,12 @@ export default class ChatManager extends EventEmitter {
             if (localCached) return localCached;
             const appCacheKey = `${sourceLanguage}:${targetLanguage}:${baseContent.substring(0, 100)}`;
             const now = Date.now();
-            const appCached = APP_TRANSLATION_CACHE.get(appCacheKey);
-            if (appCached && appCached.expires > now) {
-                return appCached.text;
-            }
+            const appCached = cacheManager.getLocal<{ text: string }>(`${CACHE_LOCAL_APP_TRANSLATION_PREFIX}${appCacheKey}`);
+            if (appCached?.text) return appCached.text;
             const cacheKey = this.translationCacheKey(sourceLanguage, targetLanguage, baseContent);
             const cached = await cacheManager.get<{ text: string }>(cacheKey);
             if (cached?.text) {
-                APP_TRANSLATION_CACHE.set(appCacheKey, { text: cached.text, expires: now + APP_TRANSLATION_CACHE_TTL });
+                cacheManager.setLocal(`${CACHE_LOCAL_APP_TRANSLATION_PREFIX}${appCacheKey}`, { text: cached.text }, APP_TRANSLATION_CACHE_TTL);
                 return cached.text;
             }
             if (translationFailureCount >= TRANSLATION_CIRCUIT_THRESHOLD) {
@@ -498,16 +519,8 @@ export default class ChatManager extends EventEmitter {
                         ? `${translatedContent.text}\n${noticeText}`
                         : noticeText;
                     const sanitized = this.sanitizeContent(combined) || sanitizedFallback;
-                    APP_TRANSLATION_CACHE.set(appCacheKey, { text: sanitized, expires: now + APP_TRANSLATION_CACHE_TTL });
+                    cacheManager.setLocal(`${CACHE_LOCAL_APP_TRANSLATION_PREFIX}${appCacheKey}`, { text: sanitized }, APP_TRANSLATION_CACHE_TTL);
                     Promise.resolve(cacheManager.set(cacheKey, { text: sanitized }, APP_TRANSLATION_CACHE_TTL)).catch(() => { });
-                    if (APP_TRANSLATION_CACHE.size > APP_TRANSLATION_CACHE_LIMIT) {
-                        const toDelete: string[] = [];
-                        for (const [key, val] of APP_TRANSLATION_CACHE.entries()) {
-                            if (val.expires <= now) toDelete.push(key);
-                            if (toDelete.length >= 100) break;
-                        }
-                        toDelete.forEach(k => APP_TRANSLATION_CACHE.delete(k));
-                    }
                     if (translationFailureCount > 0) {
                         translationFailureCount = Math.max(0, translationFailureCount - 1);
                     }
@@ -525,29 +538,40 @@ export default class ChatManager extends EventEmitter {
         };
     }
     private async getUserLanguage(userId: string): Promise<string> {
-        const now = Date.now();
-        const cached = this.languageCache.get(userId);
-        if (cached && cached.expires > now) return cached.lang;
+        const localCacheKey = `${CACHE_LOCAL_LANG_PREFIX}${userId}`;
+        const localCached = cacheManager.getLocal<{ lang: string }>(localCacheKey);
+        if (localCached?.lang) return localCached.lang;
+        const inflight = this.userLanguagePromises.get(userId);
+        if (inflight) return inflight;
+        const task = (async () => {
         const cacheKey = `${CACHE_LANG_PREFIX}${userId}`;
         const globalCached = await cacheManager.get<{ lang: string }>(cacheKey);
         if (globalCached?.lang) {
-            this.languageCache.set(userId, { lang: globalCached.lang, expires: now + LANGUAGE_CACHE_TTL });
+            cacheManager.setLocal(localCacheKey, { lang: globalCached.lang }, LANGUAGE_CACHE_TTL);
             return globalCached.lang;
         }
         const result: any = await db.query("SELECT * FROM languages WHERE userid = ?", [userId]);
         const language = result?.[0]?.lang ?? "en";
-        this.languageCache.set(userId, { lang: language, expires: now + LANGUAGE_CACHE_TTL });
+        cacheManager.setLocal(localCacheKey, { lang: language }, LANGUAGE_CACHE_TTL);
         Promise.resolve(cacheManager.set(cacheKey, { lang: language }, LANGUAGE_CACHE_TTL)).catch(() => { });
         return language;
+        })();
+        this.userLanguagePromises.set(userId, task);
+        try {
+            return await task;
+        } finally {
+            this.userLanguagePromises.delete(userId);
+        }
     }
     private getWebhook(graw: any): WebhookClient {
-        const cached = this.webhookCache.get(graw.webhook_id);
+        const cacheKey = `${CACHE_LOCAL_WEBHOOK_PREFIX}${graw.webhook_id}`;
+        const cached = cacheManager.getLocal<WebhookClient>(cacheKey);
         if (cached) return cached;
         const webhook = new WebhookClient({
             id: graw.webhook_id,
             token: graw.webhook_token
         });
-        this.webhookCache.set(graw.webhook_id, webhook);
+        cacheManager.setLocal(cacheKey, webhook, 3600000);
         return webhook;
     }
     private async resolveMessageContent(message: Message<true>): Promise<string> {
@@ -561,60 +585,71 @@ export default class ChatManager extends EventEmitter {
         }
     }
     private async getUserStaffRankCached(userId: string): Promise<string | null> {
-        const now = Date.now();
-        const cached = RANK_CACHE.get(userId);
-        if (cached && cached.expires > now) return cached.rank;
+        const localCacheKey = `${CACHE_LOCAL_RANK_PREFIX}${userId}`;
+        const localCached = cacheManager.getLocal<{ rank: string | null }>(localCacheKey);
+        if (localCached && Object.prototype.hasOwnProperty.call(localCached, "rank")) return localCached.rank;
+        const inflight = this.userRankPromises.get(userId);
+        if (inflight) return inflight;
+        const task = (async () => {
         const cacheKey = `${CACHE_RANK_PREFIX}${userId}`;
         const globalCached = await cacheManager.get<{ rank: string | null }>(cacheKey);
         if (globalCached && Object.prototype.hasOwnProperty.call(globalCached, "rank")) {
-            RANK_CACHE.set(userId, { rank: globalCached.rank, expires: now + RANK_CACHE_TTL });
+            cacheManager.setLocal(localCacheKey, { rank: globalCached.rank }, RANK_CACHE_TTL);
             return globalCached.rank;
         }
         const rank = await utils.getUserStaffRank(userId);
-        RANK_CACHE.set(userId, { rank, expires: now + RANK_CACHE_TTL });
+        cacheManager.setLocal(localCacheKey, { rank }, RANK_CACHE_TTL);
         Promise.resolve(cacheManager.set(cacheKey, { rank }, RANK_CACHE_TTL)).catch(() => { });
         return rank;
+        })();
+        this.userRankPromises.set(userId, task);
+        try {
+            return await task;
+        } finally {
+            this.userRankPromises.delete(userId);
+        }
     }
     private async isUserBlacklistedCached(userId: string): Promise<boolean> {
-        const now = Date.now();
-        const cached = BLACKLIST_CACHE.get(userId);
-        if (cached && cached.expires > now) return cached.value;
+        const localCacheKey = `${CACHE_LOCAL_BLACKLIST_PREFIX}${userId}`;
+        const localCached = cacheManager.getLocal<{ value: boolean }>(localCacheKey);
+        if (localCached && typeof localCached.value === "boolean") return localCached.value;
         const cacheKey = `${CACHE_BLACKLIST_PREFIX}${userId}`;
         const globalCached = await cacheManager.get<{ value: boolean }>(cacheKey);
         if (globalCached && typeof globalCached.value === "boolean") {
-            BLACKLIST_CACHE.set(userId, { value: globalCached.value, expires: now + MODERATION_CACHE_TTL });
+            cacheManager.setLocal(localCacheKey, { value: globalCached.value }, MODERATION_CACHE_TTL);
             return globalCached.value;
         }
         const value = await utils.isUserBlacklisted(userId);
-        BLACKLIST_CACHE.set(userId, { value, expires: now + MODERATION_CACHE_TTL });
+        cacheManager.setLocal(localCacheKey, { value }, MODERATION_CACHE_TTL);
         Promise.resolve(cacheManager.set(cacheKey, { value }, MODERATION_CACHE_TTL)).catch(() => { });
         return value;
     }
     private async isUserMutedCached(userId: string): Promise<boolean> {
         const now = Date.now();
-        const cached = MUTE_CACHE.get(userId);
-        if (cached && cached.expires > now) {
-            if (cached.until > 0 && now >= cached.until) {
-                MUTE_CACHE.delete(userId);
+        const localCacheKey = `${CACHE_LOCAL_MUTE_PREFIX}${userId}`;
+        const localCached = cacheManager.getLocal<{ value: boolean, until: number }>(localCacheKey);
+        if (localCached && typeof localCached.value === "boolean") {
+            if (localCached.until > 0 && now >= localCached.until) {
+                cacheManager.deleteLocal(localCacheKey);
                 return false;
             }
-            return cached.value;
+            return localCached.value;
         }
         const cacheKey = `${CACHE_MUTE_PREFIX}${userId}`;
         const globalCached = await cacheManager.get<{ value: boolean, until: number }>(cacheKey);
         if (globalCached && typeof globalCached.value === "boolean") {
             const until = Number(globalCached.until) || 0;
             if (until > 0 && now >= until) {
-                MUTE_CACHE.delete(userId);
+                cacheManager.deleteLocal(localCacheKey);
                 Promise.resolve(cacheManager.delete(cacheKey)).catch(() => { });
                 return false;
             }
-            MUTE_CACHE.set(userId, { value: globalCached.value, until, expires: now + MODERATION_CACHE_TTL });
+            cacheManager.setLocal(localCacheKey, { value: globalCached.value, until }, MODERATION_CACHE_TTL);
             return globalCached.value;
         }
         const res: any = await db.query("SELECT * FROM global_mutes WHERE id = ?", [userId]);
         if (!Array.isArray(res) || !res[0]) {
-            MUTE_CACHE.set(userId, { value: false, until: 0, expires: now + MODERATION_CACHE_TTL });
+            cacheManager.setLocal(localCacheKey, { value: false, until: 0 }, MODERATION_CACHE_TTL);
             Promise.resolve(cacheManager.set(cacheKey, { value: false, until: 0 }, MODERATION_CACHE_TTL)).catch(() => { });
             return false;
         }
@@ -622,11 +657,11 @@ export default class ChatManager extends EventEmitter {
         const until = Number(mute.until) || 0;
         if (until > 0 && now >= until) {
             Promise.resolve(db.query("DELETE FROM global_mutes WHERE id = ?", [userId])).catch(() => { });
-            MUTE_CACHE.set(userId, { value: false, until: 0, expires: now + MODERATION_CACHE_TTL });
+            cacheManager.setLocal(localCacheKey, { value: false, until: 0 }, MODERATION_CACHE_TTL);
             Promise.resolve(cacheManager.set(cacheKey, { value: false, until: 0 }, MODERATION_CACHE_TTL)).catch(() => { });
             return false;
         }
-        MUTE_CACHE.set(userId, { value: true, until, expires: now + MODERATION_CACHE_TTL });
+        cacheManager.setLocal(localCacheKey, { value: true, until }, MODERATION_CACHE_TTL);
         Promise.resolve(cacheManager.set(cacheKey, { value: true, until }, MODERATION_CACHE_TTL)).catch(() => { });
         return true;
     }

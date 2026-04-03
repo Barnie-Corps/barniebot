@@ -2,20 +2,8 @@ import { Worker, WorkerOptions } from "worker_threads";
 import Log from "../Log";
 import EventEmitter from "events";
 import { Collection } from "discord.js";
-
-export type WorkerHandle = { type: string; worker: Worker; id: string };
-
-type WorkerWaiter = {
-    resolve: (worker: WorkerHandle) => void;
-    reject: (error: Error) => void;
-    timeoutHandle?: NodeJS.Timeout;
-};
-
-type PendingResponse = {
-    resolve: (value: { id: string; message: any }) => void;
-    reject: (error: Error) => void;
-    timeoutHandle?: NodeJS.Timeout;
-};
+import type { PendingResponse, WorkerHandle, WorkerWaiter } from "../types/worker";
+export type { WorkerHandle } from "../types/worker";
 
 export default class WorkerManager extends EventEmitter {
     private Cache: Collection<string, WorkerHandle> = new Collection();

@@ -2,11 +2,7 @@ import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "
 import db from "../mysql/database";
 import utils from "../utils";
 import { RPGSession, RPGCharacter, RPGGuild, RPGGuildMember } from "../types/interfaces";
-
-type GuildWithCounts = RPGGuild & { member_count?: number };
-type GuildCountRow = { count: number };
-type GuildInsertResult = { insertId: number };
-type GuildMemberRow = RPGGuildMember & { name: string; level: number; class: string };
+import type { GuildCountRow, GuildInsertResult, GuildMemberRow, GuildWithCounts } from "../types/guildCommand";
 
 async function getSession(userId: string) {
     const session = (await db.query(

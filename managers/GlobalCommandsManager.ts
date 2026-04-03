@@ -1,13 +1,7 @@
 import { Message } from "discord.js";
 import utils from "../utils";
 import Log from "../Log";
-
-interface GlobalCommand {
-    trigger: string;
-    requiresLanguage: boolean;
-    defaultLanguage: string;
-    content: string;
-}
+import type { GlobalCommand } from "../types/globalCommands";
 
 export default class GlobalCommandsManager {
     private commands: Map<string, GlobalCommand> = new Map();

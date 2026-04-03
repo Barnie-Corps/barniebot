@@ -1,6 +1,6 @@
 # BarnieBot Privacy Policy
 
-Last Updated: February 12, 2026
+Last Updated: April 3, 2026
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -239,16 +239,106 @@ Collected automatically when you interact with the Bot:
 - Access: Any staff member via `/stafftools notes`
 - Retention: Indefinite (case management requires historical context)
 
-**AI Chat Memories**:
-- Table: `ai_memories`
+**AI Chat Features**:
+- Tables: `ai_memories`, `ai_memory_graph`, `ai_chat_sessions`, `ai_chat_messages`, `ai_chat_daily_usage`
 - Data collected:
+
+**Legacy AI Memories** (`ai_memories`):
   - User ID
   - Memory content (user-provided context strings)
   - Creation timestamp
-- Purpose: Persistent context for AI conversations, user-controlled information
-- User control: Add via AI commands, delete anytime
-- Retention: Until user deletes or requests data removal
-- Note: Conversation history NOT stored; only user-added memories persist
+  - Encryption: AES-256-GCM (content encrypted at rest)
+  - Purpose: Backward compatibility for basic AI context
+  - User control: View, add, delete via AI commands
+  - Retention: Until user deletes or requests data removal
+
+**Enhanced Memory Graph** (`ai_memory_graph`):
+  - User ID
+  - Memory type (personal, preferences, relationships, facts, skills)
+  - Subject (topic or key of the memory)
+  - Content (encrypted memory data)
+  - Related entities (JSON array of connected topics/people, encrypted)
+  - Confidence score (0.0-1.0, accuracy/reliability indicator)
+  - Created at, updated at, last accessed timestamps
+  - Access count (frequency tracking for relevance)
+  - Encryption: AES-256-GCM (content and related entities encrypted at rest)
+  - Purpose: Structured learning about users, relationship tracking, personalized AI responses
+  - Data usage: Retrieved automatically during AI conversations for context
+  - User control: AI manages based on conversations; user can request deletion
+  - Retention: Until user requests data removal or account deletion
+
+**Chat Session Persistence** (`ai_chat_sessions`):
+  - Session ID (unique identifier: chat_{userId}_{timestamp})
+  - User ID
+  - Title (optional session name)
+  - Created at, updated at timestamps
+  - Message count (total messages in session)
+  - Context summary (encrypted compressed conversation summary)
+  - Active status (boolean)
+  - Encryption: AES-256-GCM (context summaries encrypted at rest)
+  - Purpose: Resume previous AI conversations, maintain context across sessions
+  - User control: Create, list, resume, and delete sessions via AI commands
+  - Retention: Until user deletes session or requests data removal
+  - Limit: Up to 20 active sessions per user displayed
+
+**Chat Messages** (`ai_chat_messages`):
+  - Session ID (foreign key to ai_chat_sessions)
+  - Role (user, assistant, system)
+  - Content (encrypted message text)
+  - Tool calls (encrypted JSON of AI function calls, if any)
+  - Tool results (encrypted JSON of function results, if any)
+  - Created at timestamp
+  - Compressed flag (indicates if message was summarized)
+  - Encryption: AES-256-GCM (all content, tool calls, and results encrypted at rest)
+  - Purpose: Conversation history for session resume, context compression
+  - Retention: Up to 200 messages per session loaded; older messages compressed
+  - Compression: After 20+ messages, older messages summarized to save storage
+  - User control: Messages deleted when session is deleted
+
+**AI Workspace Files** (`filesystem: ai_workspace/{userId}/`):
+  - User-specific directories for file storage
+  - Structure: `ai_workspace/{discord_user_id}/[files and folders]`
+  - Purpose: Isolated file storage for AI-generated content, downloads, scripts
+  - User control: Full control via AI workspace commands
+  - Retention: Until user deletes files or requests data removal
+  - Isolation: Complete separation between users; cannot access others' workspaces
+  - Security: Path traversal protection, size limits enforced
+
+**Daily Usage Tracking** (`ai_chat_daily_usage`):
+  - User ID
+  - Usage date (YYYY-MM-DD format)
+  - Messages used (counter)
+  - Updated at timestamp
+  - Purpose: Free tier quota enforcement, usage analytics
+  - Retention: Rolling 30-day window
+  - Quota: Free tier limited to daily message count, VIP/Staff unlimited
+
+**Security Measures for AI Data**:
+- Encryption algorithm: AES-256-GCM (Authenticated Encryption)
+- Key derivation: scrypt with salt
+- IV generation: Random 16-byte IV per encryption operation
+- Authentication: Auth tags prevent data tampering
+- Storage format: `IV:AuthTag:EncryptedData` (hex-encoded)
+- Key management: `ENCRYPTION_KEY` environment variable
+- Decryption: Only on retrieval for authorized users
+
+**Data NOT Stored**:
+- Real-time AI conversation turns (not persisted unless in saved session)
+- Temporary chat context (cleared on chat end unless session saved)
+- AI model responses outside saved sessions
+- Voice conversation audio (processed in real-time only)
+
+**User Control**:
+- View all memories: AI commands to list memories
+- Add memories: AI automatically creates based on conversations
+- Delete specific memories: Request via AI or manual deletion
+- Create chat sessions: `/ai chat` with save option
+- Resume sessions: Load previous conversations by session ID
+- Delete sessions: Remove all messages and context
+- Clear all AI data: Request via data deletion commands
+- Workspace isolation: Private file area per user
+
+- Note: Enhanced security with encryption, structured memory graphs, and chat persistence
 - VIP subscriptions (`vip_users`): Discord ID, start/end epoch.
 - Staff ranks (`staff`): user ID and rank string.
 - Moderation actions:
@@ -548,24 +638,66 @@ When ticket closed, two formats generated:
 - All: Access transcripts in transcripts channel after closure
 
 #### AI Features
-**Session Data** (ephemeral, not stored):
-- Active AI chat sessions maintained in memory only
-- Session contents:
+**Session Data** (now persistent):
+- AI chat sessions can be saved and resumed across bot restarts
+- Session storage tables: `ai_chat_sessions`, `ai_chat_messages`
+- Ephemeral sessions (default):
   - User ID
   - Conversation history (NVIDIA model context, not user messages)
   - Turn count
   - VIP status check
   - Last activity timestamp
-- Lifecycle: Created on `/ai chat`, cleared on session end or bot restart
-- Purpose: Contextual conversation continuity
-- Storage: None - entirely in-process memory
-- Note: NO conversation history saved to database
+  - Lifecycle: Cleared on session end or bot restart
+  - Storage: In-process memory only
+- Persistent sessions (user-created):
+  - Session ID format: `chat_{userId}_{timestamp}`
+  - Title (optional user-provided name)
+  - Message history with encrypted content, tool calls, tool results
+  - Context summaries (encrypted) for compression
+  - Message limit: 200 messages loaded per session
+  - Compression: Older messages (beyond 20) automatically summarized
+  - User control: Create, list, resume, delete via AI commands
+  - Retention: Until user deletes or requests data removal
+  - Maximum: 20 active sessions displayed per user
+- Purpose: Contextual conversation continuity, resume past conversations
+- Storage: Encrypted in database (AES-256-GCM)
 
-**AI Memories** (persistent, see above):
-- User-controlled contextual strings
-- User adds via AI commands
-- Used to augment prompts with persistent user preferences
-- User can delete anytime
+**AI Memories** (enhanced with memory graphs):
+- Legacy system (`ai_memories`): Basic user-provided context strings
+  - User control: Add, view, delete via AI commands
+  - Encryption: AES-256-GCM at rest
+  - Backward compatible
+- Enhanced Memory Graph (`ai_memory_graph`):
+  - Structured memory types: personal, preferences, relationships, facts, skills
+  - Memory attributes:
+    - Subject (key/topic of memory)
+    - Content (encrypted detailed information)
+    - Related entities (encrypted JSON array of connected topics)
+    - Confidence score (0.0-1.0 reliability indicator)
+    - Access tracking (count and timestamps)
+  - AI-managed: Automatically created during conversations
+  - Retrieval: Sorted by confidence, access frequency, recency
+  - Search: Subject and content matching with automatic access updates
+  - Encryption: AES-256-GCM for content and related entities
+  - User control: AI manages based on conversations; user can request deletion
+  - Purpose: Deep learning about users, relationship mapping, personalized responses
+  - Retention: Until user requests data removal
+
+**AI Workspace Files** (user-isolated):
+- Directory structure: `ai_workspace/{discord_user_id}/[files]`
+- Isolation: Each user has private workspace directory
+  - Cannot access other users' files
+  - Path traversal protection enforced
+- Storage: Local filesystem (not database)
+- User control: Full control via AI workspace commands
+  - List, read, write, append, delete, move files
+  - Create directories, download content
+  - Search file contents
+  - Execute commands in workspace
+- Size limits: Enforced per operation
+- Retention: Until user deletes files or requests data removal
+- Purpose: AI-generated content, downloads, scripts, personal file storage
+- Backward compatibility: Falls back to `ai_workspace/` if no userId
 
 **AI Function Calls** (logged for diagnostics):
 - Function name (e.g., "get_server_info", "get_user", "manage_guild")
@@ -813,8 +945,13 @@ We use the collected information for the following specific purposes, always lim
 - Provide conversational AI via NVIDIA AI models with contextual understanding and function calling capabilities
 - Execute function calls for server information retrieval, user lookups, guild management
 - Store user-defined memories for persistent context across sessions
-- Generate AI responses tailored to conversation history (session-only, not stored)
+- Build and maintain memory graphs with relationships, facts, and preferences
+- Save and resume chat sessions with encrypted message history
+- Compress older conversation context using AI summarization
+- Provide user-isolated workspace directories for AI-generated files
+- Generate AI responses tailored to conversation history and user memories
 - Process voice conversations with speech-to-text and text-to-speech
+- Track daily usage for free tier quota enforcement (VIP/Staff unlimited)
 
 **Global Chat Network**:
 - Relay messages across all connected guilds in real-time
@@ -1193,6 +1330,21 @@ We implement multiple layers of security controls to protect your data from unau
 ### Encryption
 
 **Data at Rest**:
+- **AI Chat Data**: AES-256-GCM encryption (Authenticated Encryption)
+  - Algorithm: Advanced Encryption Standard with 256-bit key in Galois/Counter Mode
+  - Authentication: Built-in authentication tags prevent data tampering
+  - Key storage: 32-byte encryption key derived from environment variable using scrypt
+  - Initialization Vector: Unique random 16-byte IV generated per encryption operation
+  - Format: `IV:AuthTag:ciphertext` stored in database (hex-encoded)
+  - Encrypted data:
+    - AI memory graph content and related entities
+    - Chat session context summaries
+    - Chat message content, tool calls, and tool results
+    - Legacy AI memories
+  - Key derivation: scrypt with salt for enhanced security
+  - Decryption: Only on retrieval for authorized user access
+  - Key rotation: Not performed (would invalidate all historical data)
+
 - **Global Chat Messages**: AES-256-CBC encryption
   - Algorithm: Advanced Encryption Standard with 256-bit key in Cipher Block Chaining mode
   - Key storage: 32-byte encryption key stored in environment variable, never transmitted or logged
@@ -1210,7 +1362,7 @@ We implement multiple layers of security controls to protect your data from unau
   
 - **Database Encryption**:
   - Connection: TLS 1.2+ encryption for all database connections
-  - Storage: Encrypted fields stored as binary blobs
+  - Storage: Encrypted fields stored as binary blobs or hex strings
   - Backup encryption: Database backups encrypted with same AES-256 key
   - Key management: Encryption keys stored separately from database
 
@@ -1987,8 +2139,14 @@ If you are a parent or guardian and believe your child has provided personal inf
 
 **AI Chat Features**:
 - Children may inadvertently share personal information with AI
+- AI chat sessions and memories may persist beyond individual conversations
+- Memory graph system learns personal details, preferences, and relationships
+- Chat sessions can be saved and resumed (may contain sensitive information)
+- AI workspace provides file storage that persists until deleted
 - AI responses not specifically tailored for children
 - Parents should monitor or restrict use of `/ai` commands
+- Parents should review and manage saved chat sessions and memories
+- Parents should supervise AI workspace file creation
 
 **RPG System**:
 - Requires email address for verification (child or parent's email)

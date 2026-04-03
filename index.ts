@@ -33,9 +33,11 @@ import GlobalCommandsManager from "./managers/GlobalCommandsManager";
 import WarningCleanup from "./WarningCleanup";
 import Workers from "./Workers";
 import path from "path";
+import { canManageLocalTicket, closeLocalTicket, createLocalTicket, getLocalTicketByChannel, getLocalTicketConfig } from "./localTickets";
 import { inspect } from "util";
 import AiMonitorManager from "./managers/AiMonitorManager";
 import cacheManager from "./managers/CacheManager";
+import type { FilterSetupState } from "./types/filter";
 const manager = new ChatManager();
 const globalCommandsManager = new GlobalCommandsManager();
 
@@ -75,7 +77,7 @@ client.on("clientReady", async (): Promise<any> => {
     });
     await cacheManager.initialize();
     Log.info("Cache backend initialized", { component: "Cache", redisAvailable: cacheManager.isRedisAvailable(), mode: cacheManager.isRedisAvailable() ? "redis" : "memory" });
-    queries();
+    await queries();
     await manager.initialize();
     await StaffRanksManager.initialize();
     initializeShopItems();
@@ -158,15 +160,6 @@ const markShutdownMode = (mode: "shutdown" | "reboot") => {
     updateEnvFlag("SAFELY_SHUTTED_DOWN", "1");
     updateEnvFlag("REBOOTING", mode === "reboot" ? "1" : "0");
 };
-interface FilterSetupState {
-    step: number;
-    values: { enabled: boolean; logs_enabled: boolean; logs_channel: string; lang: string };
-    messageId: string;
-    guildId: string;
-    userId: string;
-    createdAt: number;
-    awaitingChannelMention?: boolean;
-}
 const filterSetupSessions = new Map<string, FilterSetupState>();
 
 client.on("messageCreate", async (message): Promise<any> => {
@@ -1449,6 +1442,136 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
             }
             case "staffcases":
                 break;
+            case "localticket_close": {
+                const [ticketIdStr] = args;
+                const ticketId = parseInt(ticketIdStr);
+                const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
+                const lang = foundLang[0]?.lang || "en";
+                let texts = {
+                    not_open: "This local ticket is not open anymore.",
+                    no_permission: "You don't have permission to close this local ticket.",
+                    closing: "Closing local ticket...",
+                    title: "Ticket",
+                    closed_title: "Ticket Closed",
+                    closed_description: "Closed by {closer}",
+                    delete_button: "Delete Channel",
+                    transcript_title: "Local Ticket Closed",
+                    transcript_description: "Closed by {closer}",
+                    transcript_user: "User",
+                    transcript_messages: "Messages",
+                    transcript_duration: "Duration",
+                    not_found_error: "Ticket not found.",
+                    already_closed_error: "Ticket is already closed.",
+                    channel_not_found_error: "Ticket channel not found.",
+                    success: "Local ticket closed successfully.",
+                    error: "Failed to close the local ticket."
+                };
+                if (lang !== "en") texts = await utils.autoTranslate(texts, "en", lang);
+                const channelTicket = await getLocalTicketByChannel(interaction.channelId);
+                if (!channelTicket || channelTicket.id !== ticketId || channelTicket.status !== "open") {
+                    if (interaction.isRepliable()) await interaction.reply({ content: texts.not_open, ephemeral: true });
+                    return;
+                }
+                const guild = interaction.guild;
+                const member = interaction.member && guild ? await guild.members.fetch(interaction.user.id).catch(() => null) : null;
+                const config = guild ? await getLocalTicketConfig(guild.id) : null;
+                if (!member || !canManageLocalTicket(member, channelTicket, config)) {
+                    if (interaction.isRepliable()) await interaction.reply({ content: texts.no_permission, ephemeral: true });
+                    return;
+                }
+                if (interaction.isRepliable()) await interaction.deferReply({ ephemeral: true });
+                const result = await closeLocalTicket(ticketId, interaction.user.id, interaction.user.tag, texts);
+                if ((result as any).success) {
+                    await interaction.editReply({ content: texts.success });
+                } else {
+                    await interaction.editReply({ content: (result as any).error ?? texts.error });
+                }
+                return;
+            }
+            case "localticket_delete": {
+                const [ticketIdStr] = args;
+                const ticketId = parseInt(ticketIdStr);
+                const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
+                const lang = foundLang[0]?.lang || "en";
+                let texts = {
+                    not_found: "Ticket channel not found.",
+                    no_permission: "You don't have permission to delete this local ticket channel.",
+                    deleting: "Deleting this local ticket channel in 5 seconds..."
+                };
+                if (lang !== "en") texts = await utils.autoTranslate(texts, "en", lang);
+                const ticket = await getLocalTicketByChannel(interaction.channelId);
+                if (!ticket || ticket.id !== ticketId) {
+                    if (interaction.isRepliable()) await interaction.reply({ content: texts.not_found, ephemeral: true });
+                    return;
+                }
+                const guild = interaction.guild;
+                const member = interaction.member && guild ? await guild.members.fetch(interaction.user.id).catch(() => null) : null;
+                const config = guild ? await getLocalTicketConfig(guild.id) : null;
+                if (!member || !canManageLocalTicket(member, ticket, config)) {
+                    if (interaction.isRepliable()) await interaction.reply({ content: texts.no_permission, ephemeral: true });
+                    return;
+                }
+                if (interaction.isRepliable()) await interaction.reply({ content: texts.deleting, ephemeral: true });
+                setTimeout(async () => {
+                    try {
+                        const channel = interaction.channel;
+                        if (channel && channel.isTextBased()) {
+                            await (channel as TextChannel).delete();
+                        }
+                    } catch {}
+                }, 5000);
+                return;
+            }
+            case "localticket_openpanel": {
+                let texts = {
+                    not_guild: "This button can only be used inside a server.",
+                    not_configured: "The local ticket system is not configured for this server.",
+                    not_enabled: "The local ticket system is disabled for this server.",
+                    default_message: "Opened from the ticket panel.",
+                    ticket_title: "Ticket",
+                    ticket_user: "User",
+                    ticket_status: "Status",
+                    ticket_open: "Open",
+                    ticket_close_button: "Close Ticket",
+                    created: "Your local ticket has been created:",
+                    already_open: "You already have an open local ticket:",
+                    failed: "Failed to create the local ticket."
+                };
+                if (Lang !== "en") texts = await utils.autoTranslate(texts, "en", Lang);
+                if (!interaction.guildId) {
+                    if (interaction.isRepliable()) await interaction.reply({ content: texts.not_guild, ephemeral: true });
+                    return;
+                }
+                const config = await getLocalTicketConfig(interaction.guildId);
+                if (!config) {
+                    if (interaction.isRepliable()) await interaction.reply({ content: texts.not_configured, ephemeral: true });
+                    return;
+                }
+                if (!config.enabled) {
+                    if (interaction.isRepliable()) await interaction.reply({ content: texts.not_enabled, ephemeral: true });
+                    return;
+                }
+                if (interaction.isRepliable()) await interaction.deferReply({ ephemeral: true });
+                const result = await createLocalTicket(interaction.guildId, interaction.user.id, texts.default_message, {
+                    title: texts.ticket_title,
+                    user: texts.ticket_user,
+                    status: texts.ticket_status,
+                    open: texts.ticket_open,
+                    close_button: texts.ticket_close_button,
+                    not_enabled_error: texts.not_enabled,
+                    already_open_error: texts.already_open
+                });
+                if ((result as any).ticket) {
+                    await interaction.editReply({ content: `${texts.already_open} <#${(result as any).ticket.channel_id}>` });
+                    return;
+                }
+                if (!(result as any).success) {
+                    await interaction.editReply({ content: (result as any).error ?? texts.failed });
+                    return;
+                }
+                await interaction.editReply({ content: `${texts.created} <#${(result as any).channelId}>` });
+                return;
+            }
             case "close_ticket": {
                 const [ticketIdStr, originalUserId] = args;
                 const ticketId = parseInt(ticketIdStr);

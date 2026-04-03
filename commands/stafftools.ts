@@ -54,38 +54,13 @@ export default {
                     { name: "All Open", value: "all" },
                     { name: "Unassigned", value: "unassigned" },
                     { name: "My Tickets", value: "mine" },
-                    { name: "High Priority", value: "priority" }
+                    { name: "Awaiting First Response", value: "awaiting_response" }
                 )
                 .setRequired(false)))
         .addSubcommand(s => s.setName("assign")
             .setDescription("Assign a ticket to a staff member")
             .addIntegerOption(o => o.setName("ticket_id").setDescription("Ticket ID").setRequired(true))
             .addUserOption(o => o.setName("staff").setDescription("Staff member to assign").setRequired(false)))
-        .addSubcommand(s => s.setName("priority")
-            .setDescription("Set ticket priority")
-            .addIntegerOption(o => o.setName("ticket_id").setDescription("Ticket ID").setRequired(true))
-            .addStringOption(o => o.setName("level")
-                .setDescription("Priority level")
-                .addChoices(
-                    { name: "Low", value: "low" },
-                    { name: "Medium", value: "medium" },
-                    { name: "High", value: "high" },
-                    { name: "Urgent", value: "urgent" }
-                )
-                .setRequired(true)))
-        .addSubcommand(s => s.setName("category")
-            .setDescription("Set ticket category")
-            .addIntegerOption(o => o.setName("ticket_id").setDescription("Ticket ID").setRequired(true))
-            .addStringOption(o => o.setName("type")
-                .setDescription("Category type")
-                .addChoices(
-                    { name: "General", value: "general" },
-                    { name: "Technical", value: "technical" },
-                    { name: "Billing", value: "billing" },
-                    { name: "Report", value: "report" },
-                    { name: "Appeal", value: "appeal" }
-                )
-                .setRequired(true)))
         .addSubcommand(s => s.setName("status")
             .setDescription("Set your staff status")
             .addStringOption(o => o.setName("state")
@@ -98,6 +73,11 @@ export default {
                 )
                 .setRequired(true))
             .addStringOption(o => o.setName("message").setDescription("Status message (optional)").setRequired(false)))
+        .addSubcommand(s => s.setName("workload")
+            .setDescription("View current staff workload and availability"))
+        .addSubcommand(s => s.setName("sla")
+            .setDescription("View support queue SLA and response metrics")
+            .addIntegerOption(o => o.setName("hours").setDescription("Overdue threshold in hours").setRequired(false).setMinValue(1).setMaxValue(168)))
         .addSubcommand(s => s.setName("note")
             .setDescription("Add a staff note about a user")
             .addUserOption(o => o.setName("user").setDescription("User").setRequired(true))
@@ -196,6 +176,28 @@ export default {
         const sub = interaction.options.getSubcommand();
         const executor = interaction.user;
         const executorRank = await utils.getUserStaffRank(executor.id);
+        let texts = {
+            workload_title: "Staff Workload",
+            workload_description: "Current ticket ownership and availability snapshot.",
+            workload_none: "No staff data found.",
+            sla_title: "Support SLA",
+            sla_description: "Current support queue and first-response metrics.",
+            open_tickets: "Open tickets",
+            assigned_tickets: "Assigned",
+            unassigned_tickets: "Unassigned",
+            awaiting_first_response: "Awaiting first response",
+            overdue_tickets: "Overdue",
+            average_first_response: "Average first response",
+            median_first_response: "Median first response",
+            status_label: "Status",
+            rank_label: "Rank",
+            tickets_label: "Tickets",
+            age_label: "Oldest open",
+            none: "None",
+            unavailable: "Unavailable",
+            no_metrics: "No recent response metrics."
+        };
+        if (lang !== "en") texts = await utils.autoTranslate(texts, "en", lang);
 
         const perm = ensureStaff(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
@@ -215,8 +217,8 @@ export default {
                         query += " AND assigned_to = ?";
                         params.push(executor.id);
                         break;
-                    case "priority":
-                        query += " AND priority IN ('high', 'urgent')";
+                    case "awaiting_response":
+                        query += " AND first_response_at IS NULL";
                         break;
                 }
 
@@ -237,20 +239,12 @@ export default {
                 for (const ticket of tickets.slice(0, 10)) {
                     const user = await client.users.fetch(ticket.user_id).catch(() => null);
                     const assignedUser = ticket.assigned_to ? await client.users.fetch(ticket.assigned_to).catch(() => null) : null;
-
-                    const priorityEmoji: Record<string, string> = {
-                        low: "🟢",
-                        medium: "🟡",
-                        high: "🟠",
-                        urgent: "🔴"
-                    };
-                    const emoji = priorityEmoji[ticket.priority] || "⚪";
-
                     const age = Math.floor((Date.now() - ticket.created_at) / 60000); // minutes
                     const ageText = age < 60 ? `${age}m ago` : `${Math.floor(age / 60)}h ago`;
+                    const awaitingResponse = !ticket.first_response_at;
 
                     embed.addFields({
-                        name: `${emoji} #${ticket.id} - ${ticket.category}`,
+                        name: `#${ticket.id}${awaitingResponse ? " • Awaiting response" : ""}`,
                         value: `User: ${user ? user.tag : "Unknown"} | Age: ${ageText}\nAssigned: ${assignedUser ? assignedUser.tag : "None"}\n${ticket.initial_message.substring(0, 100)}...`,
                         inline: false
                     });
@@ -291,54 +285,6 @@ export default {
                 return utils.safeInteractionRespond(interaction, `✅ Ticket #${ticketId} has been assigned to ${staffUser.tag}.`);
             }
 
-            case "priority": {
-                const ticketId = interaction.options.getInteger("ticket_id", true);
-                const priority = interaction.options.getString("level", true);
-
-                const ticket: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [ticketId]);
-                if (!ticket[0]) {
-                    return utils.safeInteractionRespond(interaction, `Ticket #${ticketId} not found.`);
-                }
-
-                await db.query("UPDATE support_tickets SET priority = ? WHERE id = ?", [priority, ticketId]);
-
-                const priorityEmoji: Record<string, string> = {
-                    low: "🟢",
-                    medium: "🟡",
-                    high: "🟠",
-                    urgent: "🔴"
-                };
-                const emoji = priorityEmoji[priority] || "⚪";
-
-                // Notify in ticket channel
-                try {
-                    const ticketChannel = await client.channels.fetch(ticket[0].channel_id);
-                    if (ticketChannel && ticketChannel.isTextBased()) {
-                        await (ticketChannel as any).send(`${emoji} Priority set to **${priority.toUpperCase()}** by ${executor.tag}.`);
-                    }
-                } catch (error) {
-                    console.error("Failed to notify in ticket channel:", error);
-                }
-
-                await logStaffAction(executor.id, "SET_PRIORITY", ticket[0].user_id, `Set ticket #${ticketId} priority to ${priority}`, { ticket_id: ticketId, priority });
-                return utils.safeInteractionRespond(interaction, `${emoji} Ticket #${ticketId} priority set to **${priority.toUpperCase()}**.`);
-            }
-
-            case "category": {
-                const ticketId = interaction.options.getInteger("ticket_id", true);
-                const category = interaction.options.getString("type", true);
-
-                const ticket: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [ticketId]);
-                if (!ticket[0]) {
-                    return utils.safeInteractionRespond(interaction, `Ticket #${ticketId} not found.`);
-                }
-
-                await db.query("UPDATE support_tickets SET category = ? WHERE id = ?", [category, ticketId]);
-
-                await logStaffAction(executor.id, "SET_CATEGORY", ticket[0].user_id, `Set ticket #${ticketId} category to ${category}`, { ticket_id: ticketId, category });
-                return utils.safeInteractionRespond(interaction, `📁 Ticket #${ticketId} category set to **${category}**.`);
-            }
-
             case "status": {
                 const status = interaction.options.getString("state", true);
                 const message = interaction.options.getString("message") || null;
@@ -358,6 +304,78 @@ export default {
 
                 await logStaffAction(executor.id, "SET_STATUS", null, `Changed status to ${status}${message ? `: ${message}` : ""}`, { status, message });
                 return utils.safeInteractionRespond(interaction, `${emoji} Your status has been set to **${status.toUpperCase()}**${message ? `\nMessage: ${message}` : ""}`);
+            }
+
+            case "workload": {
+                const rows: any = await db.query(`
+                    SELECT s.uid, s.rank, ss.status, ss.status_message, ss.updated_at,
+                           COUNT(CASE WHEN st.status = 'open' THEN 1 END) AS open_count,
+                           MIN(CASE WHEN st.status = 'open' THEN st.created_at END) AS oldest_open_at
+                    FROM staff s
+                    LEFT JOIN staff_status ss ON ss.user_id = s.uid
+                    LEFT JOIN support_tickets st ON st.assigned_to = s.uid AND st.status = 'open'
+                    GROUP BY s.uid, s.rank, ss.status, ss.status_message, ss.updated_at
+                    ORDER BY open_count DESC, s.rank ASC
+                    LIMIT 15
+                `);
+                if (!rows || rows.length === 0) {
+                    return utils.safeInteractionRespond(interaction, texts.workload_none);
+                }
+                const embed = new EmbedBuilder()
+                    .setColor("Purple")
+                    .setTitle(texts.workload_title)
+                    .setDescription(texts.workload_description)
+                    .setTimestamp();
+                for (const row of rows) {
+                    const user = await client.users.fetch(row.uid).catch(() => null);
+                    const oldest = row.oldest_open_at ? Math.floor((Date.now() - Number(row.oldest_open_at)) / 60000) : null;
+                    embed.addFields({
+                        name: user?.tag ?? row.uid,
+                        value: [
+                            `${texts.rank_label}: ${row.rank ?? texts.none}`,
+                            `${texts.status_label}: ${row.status ?? "offline"}${row.status_message ? ` (${row.status_message})` : ""}`,
+                            `${texts.tickets_label}: ${row.open_count ?? 0}`,
+                            `${texts.age_label}: ${oldest === null ? texts.none : `${oldest}m`}`
+                        ].join("\n"),
+                        inline: true
+                    });
+                }
+                await logStaffAction(executor.id, "VIEW_WORKLOAD", null, "Viewed staff workload");
+                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
+            }
+
+            case "sla": {
+                const thresholdHours = interaction.options.getInteger("hours") || 4;
+                const thresholdMs = thresholdHours * 60 * 60 * 1000;
+                const since = Date.now() - (7 * 24 * 60 * 60 * 1000);
+                const [openRows, unassignedRows, awaitingRows, overdueRows, oldestRows, responseRows] = await Promise.all([
+                    db.query("SELECT COUNT(*) AS count FROM support_tickets WHERE status = 'open'"),
+                    db.query("SELECT COUNT(*) AS count FROM support_tickets WHERE status = 'open' AND (assigned_to IS NULL OR assigned_to = '')"),
+                    db.query("SELECT COUNT(*) AS count FROM support_tickets WHERE status = 'open' AND first_response_at IS NULL"),
+                    db.query("SELECT COUNT(*) AS count FROM support_tickets WHERE status = 'open' AND first_response_at IS NULL AND created_at <= ?", [Date.now() - thresholdMs]),
+                    db.query("SELECT MIN(created_at) AS oldest FROM support_tickets WHERE status = 'open'"),
+                    db.query("SELECT created_at, first_response_at FROM support_tickets WHERE first_response_at IS NOT NULL AND created_at >= ?", [since])
+                ]) as any;
+                const responseTimes = (responseRows as any[]).map(row => Number(row.first_response_at) - Number(row.created_at)).filter(value => Number.isFinite(value) && value >= 0).sort((a, b) => a - b);
+                const avg = responseTimes.length ? Math.round(responseTimes.reduce((sum, value) => sum + value, 0) / responseTimes.length / 60000) : null;
+                const median = responseTimes.length ? Math.round(responseTimes[Math.floor(responseTimes.length / 2)] / 60000) : null;
+                const oldestOpen = oldestRows?.[0]?.oldest ? Math.floor((Date.now() - Number(oldestRows[0].oldest)) / 60000) : null;
+                const embed = new EmbedBuilder()
+                    .setColor("Purple")
+                    .setTitle(texts.sla_title)
+                    .setDescription(`${texts.sla_description}\nThreshold: ${thresholdHours}h`)
+                    .addFields(
+                        { name: texts.open_tickets, value: String(openRows?.[0]?.count ?? 0), inline: true },
+                        { name: texts.unassigned_tickets, value: String(unassignedRows?.[0]?.count ?? 0), inline: true },
+                        { name: texts.awaiting_first_response, value: String(awaitingRows?.[0]?.count ?? 0), inline: true },
+                        { name: texts.overdue_tickets, value: String(overdueRows?.[0]?.count ?? 0), inline: true },
+                        { name: texts.age_label, value: oldestOpen === null ? texts.none : `${oldestOpen}m`, inline: true },
+                        { name: texts.average_first_response, value: avg === null ? texts.no_metrics : `${avg}m`, inline: true },
+                        { name: texts.median_first_response, value: median === null ? texts.no_metrics : `${median}m`, inline: true }
+                    )
+                    .setTimestamp();
+                await logStaffAction(executor.id, "VIEW_SLA", null, `Viewed support SLA with threshold ${thresholdHours}h`, { thresholdHours });
+                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
             case "note": {
@@ -428,9 +446,10 @@ export default {
                 for (const ticket of tickets.slice(0, 5)) {
                     const user = await client.users.fetch(ticket.user_id).catch(() => null);
                     const assignedUser = ticket.assigned_to ? await client.users.fetch(ticket.assigned_to).catch(() => null) : null;
+                    const awaitingResponse = !ticket.first_response_at;
 
                     embed.addFields({
-                        name: `#${ticket.id} - ${ticket.category} [${ticket.priority}]`,
+                        name: `#${ticket.id}${awaitingResponse ? " • Awaiting response" : ""}`,
                         value: `User: ${user ? user.tag : "Unknown"}\nAssigned: ${assignedUser ? assignedUser.tag : "None"}\n${ticket.initial_message.substring(0, 150)}...`,
                         inline: false
                     });
