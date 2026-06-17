@@ -8,6 +8,8 @@ import * as fs from "fs";
 import path from "path";
 import data from "../data";
 import NVIDIAModels from "../NVIDIAModels";
+import { Ollama } from "ollama";
+import OpenAI from "openai";
 
 const AI_DEBUG = process.env.AI_DEBUG === "1";
 
@@ -17,10 +19,14 @@ class AiManager extends EventEmitter {
     private voiceChats: Map<string, NIMChatSession> = new Map();
     private localFunctionHandlers: Map<string, Record<string, (args: any, message: Message) => Promise<any>>> = new Map();
     private bootstrappedChats: Set<string> = new Set();
-    constructor(private ratelimit: number, private max: number, private timeout: number) {
+    private ollamaClient: Ollama;
+    constructor(private ratelimit: number, private max: number, private timeout: number, private enableOllama: boolean, private ollamaSettings?: { host: string, port: number, baseUrl: string }) {
+        super();
         Log.info("AiManager initialized", { component: "AiManager" });
         setInterval(() => this.ClearTimeouts(), 1000);
-        super();
+        this.ollamaClient = new Ollama({
+            host: `${ollamaSettings?.host}:${ollamaSettings?.port}` || "localhost:11436",
+        });
     }
     public setLocalFunctionHandlers(id: string, handlers: Record<string, (args: any, message: Message) => Promise<any>>): void {
         this.localFunctionHandlers.set(id, handlers);
@@ -28,6 +34,38 @@ class AiManager extends EventEmitter {
     public clearLocalFunctionHandlers(id: string): void {
         this.localFunctionHandlers.delete(id);
     }
+    public get OllamaClient(): Ollama {
+        return this.ollamaClient;
+    }
+    public get OllamaEnabled(): boolean {
+        return this.enableOllama;
+    }
+    public GetSingleOllamaResponse(model: string, messages: Array<any>, timeoutMs?: number): Promise<string> {
+        if (!this.enableOllama) {
+            return Promise.reject(new Error("Ollama integration is disabled"));
+        }
+        return new Promise(async (resolve, reject) => {
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => {
+                    controller.abort();
+                }, timeoutMs ?? 60000);
+                const response = await this.ollamaClient.chat({
+                    model,
+                    messages,
+                    stream: false
+                });
+                clearTimeout(timeout);
+                if (typeof response.message?.content === "string") {
+                    resolve(response.message.content);
+                } else {
+                    reject(new Error("No response from Ollama"));
+                }
+            } catch (error) {
+                reject(error instanceof Error ? error : new Error(String(error)));
+            }
+        });
+    };
     private isPromptRateLimited(id: string): boolean {
         const now = Date.now();
         const windowStart = now - this.timeout;
@@ -131,7 +169,7 @@ class AiManager extends EventEmitter {
         reply = rsp.response.text();
         const toolParse = utils.parseToolCalls(reply);
         if (toolParse.toolCalls.length > 0) {
-            const toolLines = toolParse.toolCalls.map(call => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
+            const toolLines = toolParse.toolCalls.map((call: { name: string }) => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
             const combined = toolParse.cleanedText ? `${toolParse.cleanedText}\n\n${toolLines}` : toolLines;
             if (message && !suppressProgress) {
                 await message.edit(combined);
@@ -323,7 +361,7 @@ class AiManager extends EventEmitter {
             reply = rsp.response.text();
             const toolParse = utils.parseToolCalls(reply);
             if (toolParse.toolCalls.length > 0) {
-                const toolLines = toolParse.toolCalls.map(call => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
+                const toolLines = toolParse.toolCalls.map((call: { name: string }) => `Executing command ${call.name} ${data.bot.loadingEmoji.mention}`).join("\n");
                 const combined = toolParse.cleanedText ? `${toolParse.cleanedText}\n\n${toolLines}` : toolLines;
                 if (message && !suppressProgress) {
                     await message.edit(combined);

@@ -9,6 +9,7 @@ import cacheManager from "./CacheManager";
 import { executeAiMonitorTool, getAiMonitorTools } from "../AIMonitorFunctions";
 import type { AIMonitorToolName } from "../types/aiMonitorTools";
 import type { MonitorConfig, TriageResult, ActionType, ReviewResult, EntityStats, QueuedMonitorEvent } from "../types/aiMonitor";
+import ai from "../ai";
 
 const LOG_LABEL_CACHE_PREFIX = "barniebot:local:aimonitor:log-labels:";
 
@@ -28,7 +29,28 @@ export default class AiMonitorManager {
     private queuedEvents = new Map<string, QueuedMonitorEvent[]>();
     private activeGuildProcessing = new Set<string>();
     private recentFingerprints = new Map<string, number>();
-    constructor(private client: Client) {}
+    private useLocalModel: boolean;
+    private localModel: string;
+    private localModelReady: boolean = true;
+    constructor(private client: Client, private useLocal?: boolean, private wlocalModel?: string) {
+        this.useLocalModel = Boolean(useLocal);
+        this.localModel = typeof wlocalModel === "string" && wlocalModel.trim() ? wlocalModel.trim() : "llama3:latest";
+        if (this.useLocalModel) this.intializeLocalModel().catch(error => {
+            Log.warn("Failed to initialize local AI model", { component: "AiMonitor", error: error.message });
+            this.localModelReady = false;
+        });
+    }
+
+    private async intializeLocalModel(): Promise<void> {
+        if (!ai.OllamaEnabled) throw new Error("Ollama integration is not enabled");
+        try {
+            const response = await ai.GetSingleOllamaResponse("llama3:latest", [{ role: "system", content: "Respond with only true or false to this statement: you're ready." }], 100000);
+            Log.info("Successfully initialized local AI model", { component: "AiMonitor", model: this.localModel, testResponse: response });
+        } catch (error: any) {
+            Log.warn("Failed to initialize local AI model", { component: "AiMonitor", error: error.message });
+            this.localModelReady = false;
+        }
+    }
 
     private parseIdJson(value: any): string[] {
         if (!value) return [];
@@ -755,8 +777,17 @@ export default class AiMonitorManager {
             eventType,
             data
         });
-        const response = await NVIDIAModels.GetModelChatResponse([{ role: "user", content: prompt }], 8000, "monitor_small", false);
-        return this.parseJson<TriageResult>(response.content, {
+        if (this.useLocalModel && !this.localModelReady) {
+            Log.warn("Local model not ready, falling back to cloud model", { component: "AiMonitor" });
+        }
+        else if (AI_DEBUG) {
+            Log.debug("Using local model for triage", { component: "AiMonitor" });
+        }
+        const response = this.useLocalModel && this.localModelReady ? await ai.GetSingleOllamaResponse(this.localModel, [{ role: "user", content: prompt }], 8000) : await NVIDIAModels.GetModelChatResponse([{ role: "system", content: prompt }], 8000, "monitor_small", false);
+        if (AI_DEBUG) {
+            Log.debug("Triage response", { component: "AiMonitor", response: this.useLocalModel && this.localModelReady ? response : (response as any).content, local: this.useLocalModel && this.localModelReady });
+        }
+        return this.parseJson<TriageResult>(this.useLocalModel ? response : (response as any).content, {
             suspicious: false,
             risk: "low",
             summary: "not suspicious",
@@ -801,7 +832,7 @@ export default class AiMonitorManager {
         });
         const chat = NVIDIAModels.CreateChatSession({
             tools: tools as any,
-            model: "deepseek-ai/deepseek-v3.1-terminus",
+            model: "minimaxai/minimax-m2.7",
             maxTokens: 1024,
             temperature: 0.4,
             topP: 0.8,
@@ -1015,7 +1046,7 @@ export default class AiMonitorManager {
         reason?: string | null;
         warnMessage?: string | null;
         durationMs?: number | null;
-    }): Promise<{ ok: boolean; detail: string }>{
+    }): Promise<{ ok: boolean; detail: string }> {
         const reason = context.reason || "AI Monitor";
         try {
             const deleteMessage = async () => {

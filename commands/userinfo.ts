@@ -27,8 +27,8 @@ export default {
         }
         const user = interaction.options.getUser("user") as User;
         const member = interaction.guild?.members.cache.get(user.id);
-        const allMessageCount: any = await db.query("SELECT * FROM message_count WHERE uid = ?", [user.id]);
-        const globalChatCount: any = await db.query("SELECT * FROM global_messages WHERE uid = ?", [user.id]);
+        const allMessageCount: any = await db.query("SELECT count FROM message_count WHERE uid = ?", [user.id]);
+        const globalChatCount: any = await db.query("SELECT COUNT(*) AS count FROM global_messages WHERE uid = ?", [user.id]);
         const embed = new EmbedBuilder()
             .setAuthor({ name: user.tag, iconURL: user.displayAvatarURL() })
             .addFields(
@@ -64,7 +64,7 @@ export default {
                 },
                 {
                     name: texts.common.global_messages,
-                    value: globalChatCount[0] ? globalChatCount.length.toLocaleString() : "-----//-----",
+                    value: globalChatCount[0] ? globalChatCount[0].count.toLocaleString() : "-----//-----",
                     inline: true
                 },
                 {

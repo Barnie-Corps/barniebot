@@ -132,7 +132,7 @@ export default {
                     const notifId = parseInt(value);
                     await utils.markNotificationRead(interaction.user.id, notifId);
 
-                    notifications.splice(notifications.findIndex(n => n.id === notifId), 1);
+                    notifications.splice(notifications.findIndex((n: any) => n.id === notifId), 1);
 
                     if (notifications.length === 0) {
                         await utils.safeComponentUpdate(i, {

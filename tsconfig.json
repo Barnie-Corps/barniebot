@@ -5,6 +5,8 @@
       "moduleDetection": "auto",
       "module": "commonjs",
       "moduleResolution": "node",
+      "ignoreDeprecations": "6.0",
+      "typeRoots": ["./types", "./node_modules/@types"],
       "declaration": true,
       "outDir": "./dist",
       "esModuleInterop": true,

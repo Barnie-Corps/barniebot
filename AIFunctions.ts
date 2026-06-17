@@ -32,7 +32,7 @@ const functionDeclarations = {
     },
     fetch_url: {
         name: "fetch_url",
-        description: "Fetches the content of a URL and returns the text content. Useful for retrieving information from web pages.",
+        description: "Fetches the content of an HTTP or HTTPS URL using the safe URL fetch path. Useful for retrieving text from web pages.",
         parameters: {
             type: SchemaType.OBJECT,
             properties: {

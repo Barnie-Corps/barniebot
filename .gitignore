@@ -12,6 +12,7 @@ protos/
 database_backups/
 temp/
 .vscode/
+barniebot.runtime.json
 
 #Ignore vscode AI rules
 .github\instructions\codacy.instructions.md

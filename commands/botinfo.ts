@@ -100,6 +100,8 @@ export default {
             freeAiTodayRowsRaw,
             lastCommandRowsRaw,
             messageCountRowsRaw,
+            activeUsersRowsRaw,
+            activeGuildsRowsRaw,
             globalMessagesRowsRaw,
             openTicketsRowsRaw,
             staffRowsRaw,
@@ -111,8 +113,10 @@ export default {
             db.query("SELECT COUNT(*) AS count FROM vip_users WHERE end_date > ?", [now]),
             db.query("SELECT COUNT(*) AS count FROM vip_guilds WHERE end_date > ?", [now]),
             db.query("SELECT COALESCE(SUM(messages_used), 0) AS count FROM ai_chat_daily_usage WHERE usage_date = ?", [todayKey]),
-            db.query("SELECT * FROM executed_commands WHERE is_last = TRUE"),
+            db.query("SELECT command, uid, at FROM executed_commands ORDER BY at DESC LIMIT 1"),
             db.query("SELECT COALESCE(SUM(count), 0) AS count FROM message_count"),
+            db.query("SELECT COUNT(*) AS count FROM daily_distinct_metrics WHERE metric_date = ? AND metric_name = 'active_users'", [todayKey]),
+            db.query("SELECT COUNT(*) AS count FROM daily_distinct_metrics WHERE metric_date = ? AND metric_name = 'active_guilds'", [todayKey]),
             db.query("SELECT COUNT(*) AS count FROM global_messages"),
             db.query("SELECT COUNT(*) AS count FROM support_tickets WHERE status = 'open'"),
             db.query("SELECT COUNT(*) AS count FROM staff"),
@@ -126,6 +130,8 @@ export default {
         const freeAiTodayRows = freeAiTodayRowsRaw as unknown as Array<{ count: number }>;
         const lastCommandRows = lastCommandRowsRaw as unknown as ExecutedCommand[];
         const messageCountRows = messageCountRowsRaw as unknown as Array<{ count: number }>;
+        const activeUsersRows = activeUsersRowsRaw as unknown as Array<{ count: number }>;
+        const activeGuildsRows = activeGuildsRowsRaw as unknown as Array<{ count: number }>;
         const globalMessagesRows = globalMessagesRowsRaw as unknown as Array<{ count: number }>;
         const openTicketsRows = openTicketsRowsRaw as unknown as Array<{ count: number }>;
         const staffRows = staffRowsRaw as unknown as Array<{ count: number }>;
@@ -150,7 +156,7 @@ export default {
         const lastCommand = lastCommandRows[0];
         const lastUser = lastCommand?.uid ? await interaction.client.users.fetch(lastCommand.uid).catch(() => null) : null;
         const lastCommandText = lastCommand
-            ? `/${lastCommand.command} • ${lastUser?.username ?? "Unknown"} • ${lastCommand.at ? time(lastCommand.at, TimestampStyles.RelativeTime) : texts.common.none}`
+            ? `/${lastCommand.command} • ${lastUser?.username ?? "Unknown"} • ${lastCommand.at ? time(Math.floor(lastCommand.at / 1000), TimestampStyles.RelativeTime) : texts.common.none}`
             : texts.common.none;
 
         const embed = new EmbedBuilder()
@@ -187,6 +193,8 @@ export default {
                         `${texts.fields.vip_users}: ${vipUsers[0]?.count ?? 0}`,
                         `${texts.fields.vip_guilds}: ${vipGuilds[0]?.count ?? 0}`,
                         `${texts.fields.free_ai_today}: ${freeAiTodayRows[0]?.count ?? 0}`,
+                        `Active users today: ${activeUsersRows[0]?.count ?? 0}`,
+                        `Active guilds today: ${activeGuildsRows[0]?.count ?? 0}`,
                         `${texts.fields.db_guilds}: ${dbGuilds[0]?.count ?? 0}`,
                         `Staff: ${staffRows[0]?.count ?? 0}`
                     ].join("\n"),

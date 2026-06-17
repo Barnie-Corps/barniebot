@@ -1,7 +1,6 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
-import data from "../data";
 import * as fs from "fs";
 
 export default {
@@ -47,6 +46,25 @@ export default {
         .addSubcommand(s =>
             s.setName("info")
                 .setDescription("View your account information")
+        )
+        .addSubcommand(s =>
+            s.setName("reset")
+                .setDescription("Reset your password with a staff-issued token")
+                .addStringOption(option =>
+                    option.setName("username")
+                        .setDescription("Your account username")
+                        .setRequired(true)
+                )
+                .addStringOption(option =>
+                    option.setName("token")
+                        .setDescription("Password reset token")
+                        .setRequired(true)
+                )
+                .addStringOption(option =>
+                    option.setName("password")
+                        .setDescription("Your new password")
+                        .setRequired(true)
+                )
         ),
     category: "RPG",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
@@ -204,17 +222,19 @@ export default {
                 const token = Buffer.from(`${email}:${Date.now()}:${Math.random()}`).toString("base64");
                 
                 await db.query(
-                    "INSERT INTO registered_accounts SET ? ON DUPLICATE KEY UPDATE password = VALUES(password), verification_code = VALUES(verification_code), created_at = VALUES(created_at), token = VALUES(token), verified = FALSE",
+                    "INSERT INTO registered_accounts SET ? ON DUPLICATE KEY UPDATE password = VALUES(password), verification_code = VALUES(verification_code), created_at = VALUES(created_at), token = VALUES(token), verified = FALSE, password_reset_token = VALUES(password_reset_token), password_reset_expires_at = VALUES(password_reset_expires_at)",
                     [{
                         uid: interaction.user.id,
                         email,
                         username,
-                        password: utils.encryptWithAES(data.bot.encryption_key, password),
+                        password: await utils.hashPassword(password),
                         verification_code,
                         created_at: Date.now(),
                         token,
                         verified: false,
-                        verified_at: 0
+                        verified_at: 0,
+                        password_reset_token: null,
+                        password_reset_expires_at: 0
                     }]
                 );
 
@@ -267,6 +287,40 @@ export default {
                 } catch {}
 
                 break;
+            }
+
+            case "reset": {
+                const username = interaction.options.getString("username", true).trim();
+                const token = interaction.options.getString("token", true).trim();
+                const password = interaction.options.getString("password", true).trim();
+
+                if (password.length < 8) {
+                    return utils.safeInteractionRespond(interaction, `❌ ${texts.errors.password_too_short}`);
+                }
+
+                const account: any = await db.query(
+                    "SELECT * FROM registered_accounts WHERE username = ? AND password_reset_token = ? AND password_reset_expires_at > ? LIMIT 1",
+                    [username, token, Date.now()]
+                );
+
+                if (!account[0]) {
+                    return utils.safeInteractionRespond(interaction, `❌ ${texts.errors.invalid_code}`);
+                }
+
+                await db.query(
+                    "UPDATE registered_accounts SET password = ?, password_reset_token = NULL, password_reset_expires_at = 0 WHERE id = ?",
+                    [await utils.hashPassword(password), account[0].id]
+                );
+
+                await db.query("UPDATE rpg_sessions SET active = FALSE WHERE account_id = ?", [account[0].id]);
+
+                return utils.safeInteractionRespond(interaction, {
+                    embeds: [new EmbedBuilder()
+                        .setColor("#2ECC71")
+                        .setTitle("🔐 Password Reset Complete")
+                        .setDescription(`Your password for **${username}** has been updated.`)
+                        .setTimestamp()]
+                });
             }
 
             case "verify": {

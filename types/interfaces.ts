@@ -336,12 +336,18 @@ export interface StaffNote {
 
 export interface RegisteredAccount {
     id: number;
+    uid: string;
     username: string;
     email: string;
     password: string;
     verified: boolean;
     verification_code?: number;
     created_at: number;
+    last_login?: number;
+    last_user_logged?: string;
+    token?: string;
+    password_reset_token?: string | null;
+    password_reset_expires_at?: number;
 }
 
 export interface RPGDailyReward {

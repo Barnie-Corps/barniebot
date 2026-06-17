@@ -35,7 +35,7 @@ export default {
                 },
                 {
                     name: "⚖️ Your Rights",
-                    value: "• **Access**: Request your data\n• **Rectification**: Correct inaccuracies\n• **Erasure**: Delete your data\n• **Portability**: Export your data\n• **Objection**: Limit processing",
+                    value: "• **Access**: Request your data\n• **Rectification**: Correct inaccuracies\n• **Erasure**: Delete your data\n• **Portability**: Export your data\n• **Objection**: Limit processing\n• Admins can use `/data export` and `/data delete`",
                     inline: false
                 },
                 {

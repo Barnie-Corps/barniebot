@@ -1,7 +1,6 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
-import data from "../data";
 
 export default {
     data: new SlashCommandBuilder()
@@ -56,15 +55,28 @@ export default {
             return utils.safeInteractionRespond(interaction, { embeds: [failEmbed], content: "" });
         }
 
-        const decryptedPassword = utils.decryptWithAES(data.bot.encryption_key, account[0].password);
+        if (account[0].password_reset_token && Number(account[0].password_reset_expires_at ?? 0) > Date.now()) {
+            const failEmbed = new EmbedBuilder()
+                .setColor("#FFA500")
+                .setTitle(texts.titles.login_failed)
+                .setDescription("This account has a pending password reset. Please complete the reset flow before logging in.")
+                .setTimestamp();
+            return utils.safeInteractionRespond(interaction, { embeds: [failEmbed], content: "" });
+        }
 
-        if (decryptedPassword !== password) {
+        const passwordResult = await utils.verifyPassword(account[0].password, password);
+
+        if (!passwordResult.valid) {
             const failEmbed = new EmbedBuilder()
                 .setColor("#FF0000")
                 .setTitle(texts.titles.login_failed)
                 .setDescription(texts.errors.invalid_credentials)
                 .setTimestamp();
             return utils.safeInteractionRespond(interaction, { embeds: [failEmbed], content: "" });
+        }
+
+        if (passwordResult.migrated) {
+            await db.query("UPDATE registered_accounts SET password = ? WHERE id = ?", [await utils.hashPassword(password), account[0].id]);
         }
 
         if (!account[0].verified) {

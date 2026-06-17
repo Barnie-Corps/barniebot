@@ -40,6 +40,28 @@ import cacheManager from "./managers/CacheManager";
 import type { FilterSetupState } from "./types/filter";
 const manager = new ChatManager();
 const globalCommandsManager = new GlobalCommandsManager();
+const runtimeStatePath = path.join(process.cwd(), "barniebot.runtime.json");
+
+const loadRuntimeState = (): { safeShutdown?: boolean; rebooting?: boolean } => {
+    try {
+        if (!fs.existsSync(runtimeStatePath)) return {};
+        return JSON.parse(fs.readFileSync(runtimeStatePath, "utf8"));
+    } catch {
+        return {};
+    }
+};
+
+const saveRuntimeState = (state: { safeShutdown?: boolean; rebooting?: boolean }) => {
+    try {
+        fs.writeFileSync(runtimeStatePath, JSON.stringify(state));
+    } catch (error: any) {
+        Log.warn("Failed to persist runtime state", { component: "Shutdown", error: error?.message || String(error) });
+    }
+};
+
+const runtimeState = loadRuntimeState();
+if (typeof runtimeState.safeShutdown === "boolean") process.env.SAFELY_SHUTTED_DOWN = runtimeState.safeShutdown ? "1" : "0";
+if (typeof runtimeState.rebooting === "boolean") process.env.REBOOTING = runtimeState.rebooting ? "1" : "0";
 
 process.on("uncaughtException", (err: any) => {
     Log.error("Unhandled exception", err);
@@ -51,7 +73,7 @@ const client = new Client({
     intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.GuildMessageTyping, GatewayIntentBits.GuildEmojisAndStickers, GatewayIntentBits.DirectMessages, GatewayIntentBits.DirectMessageTyping, GatewayIntentBits.DirectMessageReactions, GatewayIntentBits.GuildVoiceStates],
     partials: [Partials.Channel, Partials.GuildMember, Partials.Message, Partials.User]
 });
-const aiMonitor = new AiMonitorManager(client);
+const aiMonitor = new AiMonitorManager(client, true, "phi3:latest");
 (async function () {
     const commandsDir = fs.readdirSync("./commands").filter(f => f.endsWith(".ts"));
     for (const cmdFile of commandsDir) {
@@ -118,16 +140,11 @@ client.on("clientReady", async (): Promise<any> => {
             Log.warn("Failed to send reboot completion announcement", { component: "Startup" });
         }
         process.env.REBOOTING = "0";
-        try {
-            const envContents = fs.readFileSync('./.env').toString();
-            let updated = envContents;
-            if (updated.includes("REBOOTING=1")) updated = updated.replace("REBOOTING=1", "REBOOTING=0");
-            else if (!updated.includes("REBOOTING=")) updated += "\nREBOOTING=0";
-            fs.writeFileSync('./.env', updated);
-        } catch { }
+        saveRuntimeState({ safeShutdown: false, rebooting: false });
     }
     Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", 5);
-    fs.writeFileSync("./.env", fs.readFileSync('./.env').toString().replace("SAFELY_SHUTTED_DOWN=1", "SAFELY_SHUTTED_DOWN=0"));
+    process.env.SAFELY_SHUTTED_DOWN = "0";
+    saveRuntimeState({ safeShutdown: false, rebooting: false });
     Log.info("Workers loaded", { component: "WorkerSystem" });
 
     WarningCleanup.startWarningCleanupScheduler();
@@ -138,27 +155,10 @@ client.on("clientReady", async (): Promise<any> => {
 const activeGuilds: Collection<string, number> = new Collection();
 const shutdownState = { inProgress: false, mode: "" };
 
-const updateEnvFlag = (key: string, value: string) => {
-    try {
-        const envPath = './.env';
-        const envContents = fs.existsSync(envPath) ? fs.readFileSync(envPath).toString() : "";
-        const line = `${key}=${value}`;
-        let updated = envContents;
-        if (updated.includes(`${key}=`)) {
-            updated = updated.replace(new RegExp(`${key}=.*`, "m"), line);
-        } else {
-            updated = updated.trim().length ? `${updated}\n${line}` : line;
-        }
-        fs.writeFileSync(envPath, updated);
-        process.env[key] = value;
-    } catch (e: any) {
-        Log.warn("Failed to update env flag", { component: "Shutdown", key, error: e?.message || String(e) });
-    }
-};
-
 const markShutdownMode = (mode: "shutdown" | "reboot") => {
-    updateEnvFlag("SAFELY_SHUTTED_DOWN", "1");
-    updateEnvFlag("REBOOTING", mode === "reboot" ? "1" : "0");
+    process.env.SAFELY_SHUTTED_DOWN = "1";
+    process.env.REBOOTING = mode === "reboot" ? "1" : "0";
+    saveRuntimeState({ safeShutdown: true, rebooting: mode === "reboot" });
 };
 const filterSetupSessions = new Map<string, FilterSetupState>();
 
@@ -166,13 +166,10 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(message.author.id)) return;
     if (message.author.bot) return;
     if (!message.inGuild()) return;
-    const foundCount: any = await db.query("SELECT * FROM message_count WHERE uid = ?", [message.author.id]);
-    if (!foundCount[0]) {
-        await db.query("INSERT INTO message_count SET ?", [{ uid: message.author.id }]);
-    }
-    else {
-        await db.query("UPDATE message_count SET count = ? WHERE uid = ?", [(foundCount[0].count as number) + 1, message.author.id]);
-    }
+    await db.query("INSERT INTO message_count SET ? ON DUPLICATE KEY UPDATE count = count + 1", [{ uid: message.author.id }]);
+    await utils.recordDailyMetric("messages_received", 1);
+    await utils.recordDailyDistinctMetric("active_users", message.author.id);
+    await utils.recordDailyDistinctMetric("active_guilds", message.guildId);
     if (activeGuilds.has(message.guildId as string)) {
         const agValue = activeGuilds.get(message.guildId as string);
         activeGuilds.set(message.guildId as string, (agValue as number) + 1);
@@ -1096,8 +1093,10 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 await interaction.reply({ content: data.bot.loadingEmoji.mention, flags: cmd.ephemeral ? MessageFlags.Ephemeral : undefined });
             }
             await cmd.execute(interaction, Lang);
-            await db.query("UPDATE executed_commands SET is_last = FALSE WHERE is_last = TRUE");
-            await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Math.round(Date.now() / 1000) }]);
+            await db.query("INSERT INTO executed_commands SET ?", [{ command: interaction.commandName, uid: interaction.user.id, at: Date.now(), is_last: true }]);
+            await utils.recordDailyMetric("commands_executed", 1);
+            await utils.recordDailyDistinctMetric("active_users", interaction.user.id);
+            if (interaction.guildId) await utils.recordDailyDistinctMetric("active_guilds", interaction.guildId);
             const foundU: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [interaction.user.id]);
             const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ?", [interaction.user.id]);
             if (foundVip[0] && foundVip[0].end_date <= Date.now()) {
@@ -1138,15 +1137,14 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 ].join("\n");
                 fs.writeFileSync(logPath, logContents);
 
-                const errMessage = `⚠️ **Unexpected Error**\nYour request \`/${interaction.commandName}\` failed internally.\nReference: \
-\`${errorId}\`\nA detailed log has been saved and attached. If this keeps happening, open \`/support\` and provide the reference ID.`;
+                const errMessage = `⚠️ **Unexpected Error**\nYour request \`/${interaction.commandName}\` failed internally.\nReference: \`${errorId}\`\nThe detailed log was saved privately. If this keeps happening, open \`/support\` and provide the reference ID.`;
 
                 if (interaction.deferred || interaction.replied) {
                     try {
-                        await interaction.editReply({ content: errMessage, files: [logPath] });
+                        await interaction.editReply({ content: errMessage });
                     } catch (sendErr: any) {
                         try {
-                            await interaction.followUp({ content: errMessage, files: [logPath], ephemeral: true });
+                            await interaction.followUp({ content: errMessage, ephemeral: true });
                         } catch (followErr: any) {
                             await (interaction.channel as TextChannel)?.send(`<@${interaction.user.id}> ${texts.error} (Ref: ${errorId})`);
                             Log.warn("Failed to attach error log to interaction", { component: "ErrorHandler", reason: followErr?.message });
@@ -1154,10 +1152,10 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     }
                 } else {
                     try {
-                        await interaction.reply({ content: errMessage, files: [logPath], ephemeral: true });
+                        await interaction.reply({ content: errMessage, ephemeral: true });
                     } catch (replyErr: any) {
                         try {
-                            await interaction.followUp({ content: errMessage, files: [logPath], ephemeral: true });
+                            await interaction.followUp({ content: errMessage, ephemeral: true });
                         } catch (followErr: any) {
                             await (interaction.channel as TextChannel)?.send(`<@${interaction.user.id}> ${texts.error} (Ref: ${errorId})`);
                             Log.warn("Failed to send error reply with log file", { component: "ErrorHandler", reason: followErr?.message });

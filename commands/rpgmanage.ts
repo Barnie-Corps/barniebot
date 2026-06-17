@@ -1,16 +1,13 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, AutocompleteInteraction } from "discord.js";
 import utils from "../utils";
 import db from "../mysql/database";
-import client from "..";
 
-// Helper to check if user is staff
 function ensureStaff(executorRank: string | null): { ok: boolean; error?: string } {
     const idx = utils.getStaffRankIndex(executorRank);
     if (idx < 0) return { ok: false, error: "You must be staff to use this command." };
     return { ok: true };
 }
 
-// Helper to check if user is moderator+
 function ensureModPlus(executorRank: string | null): { ok: boolean; error?: string } {
     const idx = utils.getStaffRankIndex(executorRank);
     const min = utils.getStaffRankIndex("Moderator");
@@ -25,7 +22,6 @@ function ensureAdminPlus(executorRank: string | null): { ok: boolean; error?: st
     return { ok: true };
 }
 
-// Helper to log staff actions
 async function logStaffAction(staffId: string, actionType: string, targetId: string | null, details: string, metadata?: any) {
     try {
         await db.query("INSERT INTO staff_audit_log SET ?", [{

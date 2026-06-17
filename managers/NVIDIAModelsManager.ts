@@ -8,6 +8,8 @@ import sharp from "sharp";
 import type { NIMChatMessage, NIMChatResult, NIMChatSession, NIMToolDefinition } from "../types/nvidia";
 export type { NIMToolCall, NIMChatResponse, NIMChatResult, NIMChatMessage, NIMToolDefinition, NIMChatSession } from "../types/nvidia";
 
+const AI_DEBUG = process.env.AI_DEBUG === "1";
+
 const stripThink = (text: string): string => {
     if (!text) return "";
     return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
@@ -188,7 +190,7 @@ export default class NVIDIAModelsManager {
         );
     }
     private GetTaskBasedModel = (task: string): { name: string, hasReasoning: boolean, hasThinkMode: boolean } => {
-        const base = { name: "deepseek-ai/deepseek-v3.1-terminus", hasReasoning: false, hasThinkMode: true };
+        const base = { name: "minimaxai/minimax-m2.7", hasReasoning: false, hasThinkMode: true };
         const monitorSmall = { name: "meta/llama-3.1-8b-instruct", hasReasoning: false, hasThinkMode: false };
         const taskModels: { [key: string]: { name: string, hasReasoning: boolean, hasThinkMode: boolean } } = {
             "chat": base,
@@ -203,7 +205,7 @@ export default class NVIDIAModelsManager {
                 hasThinkMode: false
             },
             "programming": {
-                name: "minimaxai/minimax-m2.1",
+                name: "minimaxai/minimax-m2.7",
                 hasReasoning: false,
                 hasThinkMode: false
             },
@@ -689,7 +691,7 @@ enum AudioEncoding {
 
             const b64 = resizedBuffer.toString("base64");
             const mime = "image/png";
-            console.log("[Vision] Resized image base64 length:", b64.length, "chars (~", Math.round(b64.length / 4), "tokens)");
+            if (AI_DEBUG) console.log("[Vision] Resized image base64 length:", b64.length, "chars (~", Math.round(b64.length / 4), "tokens)");
             const payload = {
                 model: "meta/llama-4-maverick-17b-128e-instruct",
                 messages: [{ role: "user", content: `Describe this image in detail, including any text, UI elements, games, apps, or websites shown (use this language: ${language}): <img src=\"data:${mime};base64,${b64}\" />` }],
@@ -710,7 +712,7 @@ enum AudioEncoding {
                 body: JSON.stringify(payload),
                 signal: controller.signal as any
             });
-            console.log("[Vision] Response status:", visionResp.status, visionResp.statusText);
+            if (AI_DEBUG) console.log("[Vision] Response status:", visionResp.status, visionResp.statusText);
             clearTimeout(timer);
 
             if (!visionResp.ok) {
@@ -721,7 +723,7 @@ enum AudioEncoding {
 
             const json: any = await visionResp.json();
             const result = String(json?.choices?.[0]?.message?.content || "").trim();
-            console.log("[Vision] Result:", result.length, "chars -", result.substring(0, 100));
+            if (AI_DEBUG) console.log("[Vision] Result:", result.length, "chars -", result.substring(0, 100));
             return result || "No visual details detected.";
         } catch (err) {
             clearTimeout(timer);

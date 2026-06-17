@@ -1,7 +1,7 @@
 ﻿import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, Message, TextChannel } from "discord.js";
+import { randomBytes } from "crypto";
 import utils from "../utils";
 import db from "../mysql/database";
-import data from "../data";
 import client from "..";
 
 // Helper to check if user is staff
@@ -151,9 +151,8 @@ export default {
                 .setRequired(true))
             .addIntegerOption(o => o.setName("value").setDescription("New value").setRequired(true)))
         .addSubcommand(s => s.setName("rpg_password")
-            .setDescription("Change account password (Admin+)")
-            .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true))
-            .addStringOption(o => o.setName("new_password").setDescription("New password").setRequired(true)))
+            .setDescription("Issue a password reset token (Admin+)")
+            .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true)))
         .addSubcommand(s => s.setName("rpg_logout")
             .setDescription("Force logout an account (Admin+)")
             .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true)))
@@ -929,15 +928,13 @@ export default {
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
-                const newPassword = interaction.options.getString("new_password", true);
-
                 const account: any = await db.query("SELECT * FROM registered_accounts WHERE username = ?", [username]);
                 if (!account[0]) {
                     return utils.safeInteractionRespond(interaction, `❌ Account **${username}** not found.`);
                 }
 
-                const encryptedPassword = utils.encryptWithAES(data.bot.encryption_key, newPassword);
-                await db.query("UPDATE registered_accounts SET password = ? WHERE id = ?", [encryptedPassword, account[0].id]);
+                const resetToken = randomBytes(18).toString("hex");
+                await db.query("UPDATE registered_accounts SET password = ?, password_reset_token = ?, password_reset_expires_at = ? WHERE id = ?", [await utils.hashPassword(randomBytes(24).toString("hex")), resetToken, Date.now() + 24 * 60 * 60 * 1000, account[0].id]);
 
                 await db.query("UPDATE rpg_sessions SET active = FALSE WHERE account_id = ?", [account[0].id]);
 
@@ -946,17 +943,18 @@ export default {
                     try {
                         const passwordEmbed = new EmbedBuilder()
                             .setColor("#FFA500")
-                            .setTitle("🔐 Password Changed")
-                            .setDescription(`Your RPG account password has been changed by staff.\n\n**New Password:** ||${newPassword}||`)
+                            .setTitle("🔐 Password Reset Required")
+                            .setDescription(`Your RPG account has been reset by staff. Use the token below with \`/register reset\` to set a new password.`)
+                            .addFields({ name: "Reset Token", value: `||${resetToken}||`, inline: false })
                             .addFields({ name: "Changed by", value: executor.username })
-                            .setFooter({ text: "Please log in again with your new password" })
+                            .setFooter({ text: "Complete the reset before the token expires in 24 hours" })
                             .setTimestamp();
                         await user.send({ embeds: [passwordEmbed], content: "" });
                     } catch { }
                 }
 
-                await logStaffAction(executor.id, "RPG_CHANGE_PASSWORD", account[0].last_user_logged, `Changed password for ${username}`, { username, accountId: account[0].id });
-                return utils.safeInteractionRespond(interaction, `🔐 **Password changed for ${username}**\nThe account has been logged out. User has been notified.`);
+                await logStaffAction(executor.id, "RPG_RESET_PASSWORD", account[0].last_user_logged, `Issued password reset for ${username}`, { username, accountId: account[0].id });
+                return utils.safeInteractionRespond(interaction, `🔐 **Password reset issued for ${username}**\nThe account has been logged out and a reset token was sent.`);
             }
 
             case "rpg_logout": {

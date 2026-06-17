@@ -1,4 +1,4 @@
-import { Attachment, Collection, Guild, JSONEncodable, Message, TextChannel, User, WebhookClient } from "discord.js";
+import { Attachment, Collection, EmbedBuilder, Guild, JSONEncodable, Message, TextChannel, User, WebhookClient } from "discord.js";
 import client from "..";
 import db from "../mysql/database";
 import EventEmitter from "events";
@@ -12,6 +12,8 @@ import dns from "dns";
 import crypto from "crypto";
 import cacheManager from "./CacheManager";
 import type { QueuedMessage } from "../types/chat";
+import NVIDIAModels from "../NVIDIAModels";
+import ai from "../ai";
 if (process.platform === "win32") {
     dns.setDefaultResultOrder("verbatim");
 }
@@ -146,7 +148,6 @@ export default class ChatManager extends EventEmitter {
         if (!cachedGuilds) {
             Promise.resolve(this.getActiveGuilds()).catch(() => { });
         }
-
         const entry = {
             message,
             priority,
@@ -160,6 +161,136 @@ export default class ChatManager extends EventEmitter {
         this.scheduleQueueProcess();
 
         message.react(data.bot.loadingEmoji.id).catch(() => { });
+    }
+
+    private async ParseContent(message: Message<true>): Promise<string> {
+        const userLanguage = await this.getUserLanguage(message.author.id);
+        let content = message.content;
+        if (message.attachments.size > 0) {
+            const imageDescriptions = await Promise.all(message.attachments.map(att => NVIDIAModels.GetVisualDescription(att.url, message.id, userLanguage).catch(() => null)));
+            const combinedDescriptions = imageDescriptions.map((desc, index) => desc ? `Attachment ${index + 1} description: ${desc}` : `Attachment ${index + 1} description: [Failed to generate description]`).join("\n\n");
+            content = content ? `${combinedDescriptions}\n\n${content}` : combinedDescriptions;
+        }
+        return content;
+    }
+
+    private async FilterContent(message: Message<true>, userLanguage: string): Promise<boolean> {
+        Log.debug("Filtering message content with AI", { component: "ChatManager", messageId: message.id, authorId: message.author.id, username: message.author.username });
+        const content = await this.ParseContent(message);
+        let initialCheck: string;
+        let response: string;
+        Log.debug("Initial content for AI filter", { component: "ChatManager", content });
+        if (ai.OllamaEnabled) {
+            Log.debug("Using Ollama for initial content check", { component: "ChatManager" });
+            initialCheck = (await ai.GetSingleOllamaResponse("qwen2.5:0.5b", [{ role: "system", content: `Is the following content potentially harmful or against community guidelines? Respond with "yes" or "no". Avoid anything else, just one word: "yes" or "no". Content: ${content}` }], 5000));
+        }
+        else initialCheck = (await NVIDIAModels.GetModelChatResponse([{ role: "system", content: `Is the following content potentially harmful or against community guidelines? Respond with "yes" or "no". Avoid anything else, just one word: "yes" or "no".  Content: ${content}` }], 5000, "monitor_small", false)).content;
+        Log.debug("Initial AI filter response", { component: "ChatManager", initialCheck });
+        const normalized = initialCheck.trim().toLowerCase();
+        if (normalized.startsWith("no")) return false;
+        if (ai.OllamaEnabled) {
+            response = await ai.GetSingleOllamaResponse("phi3:latest", [{ role: "system", content: `Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 1 from [\"warn\",\"timeout\",\"blacklist\"]), warning_message(optional string for warn action), action_duration_ms(optional number), confidence(number 0-1). Never output compound actions. Prefer notify for uncertain cases. Reserve kick/ban for high risk with clear malicious evidence. Use recent_cases only as context; do not recommend punitive actions if the current content appears benign. If current content is benign, set suspicious=false, risk=low, recommended_actions=[]. Use language: ${userLanguage} for summary, reason, and warning_message.` }, { role: "system", content: `Content to analyze: ${content}` }]);
+        }
+        else response = (await NVIDIAModels.GetModelChatResponse([{ role: "system", content: `Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 1 from [\"warn\",\"timeout\",\"blacklist\"]), warning_message(optional string for warn action), action_duration_ms(optional number), confidence(number 0-1). Never output compound actions. Prefer notify for uncertain cases. Reserve kick/ban for high risk with clear malicious evidence. Use recent_cases only as context; do not recommend punitive actions if the current content appears benign. If current content is benign, set suspicious=false, risk=low, recommended_actions=[]. Use language: ${userLanguage} for summary, reason, and warning_message.` }, { role: "system", content: `Content to analyze: ${content}` }], 8000, "monitor_small", false)).content;
+        Log.debug("AI filter response", { component: "ChatManager", response });
+        const triagedResult = await this.ParseJson<{ suspicious: boolean; risk: "low" | "medium" | "high"; summary: string; reason: string; recommended_actions: string[]; warning_message?: string; action_duration_ms?: number; confidence: number }>(response, {
+            suspicious: false,
+            risk: "low",
+            summary: "",
+            reason: "",
+            recommended_actions: [],
+            warning_message: undefined,
+            action_duration_ms: undefined,
+            confidence: 0
+        });
+        Log.debug("Parsed triage result", { component: "ChatManager", result: triagedResult });
+        if (triagedResult.suspicious) {
+            this.HandleFilteredMessage(message, triagedResult).catch(() => { });
+            return true;
+        }
+        else return false;
+    }
+
+    private async HandleFilteredMessage(message: Message<true>, triagedResult: { suspicious: boolean; risk: "low" | "medium" | "high"; summary: string; reason: string; recommended_actions: string[]; warning_message?: string; action_duration_ms?: number; confidence: number }): Promise<void> {
+        const logChannel = message.client.channels.cache.get(data.bot.log_channel) as TextChannel;
+        if (logChannel && logChannel.isTextBased()) {
+            const embed = new EmbedBuilder()
+                .setTitle("Suspicious Message Detected")
+                .addFields(
+                    {
+                        name: "Author",
+                        value: `${message.author.displayName} (@${message.author.username}) (${message.author.id})`,
+                        inline: true
+                    },
+                    {
+                        name: "Guild",
+                        value: `${message.guild?.name} (${message.guildId})`,
+                        inline: true
+                    },
+                    {
+                        name: "Summary",
+                        value: triagedResult.summary || "No summary provided",
+                        inline: true
+                    },
+                    {
+                        name: "Reason",
+                        value: triagedResult.reason || "No reason provided",
+                        inline: true
+                    },
+                    {
+                        name: "Actions taken",
+                        value: triagedResult.recommended_actions.length > 0 ? triagedResult.recommended_actions.join(", ") : "No actions taken",
+                        inline: false
+                    }
+                )
+                .setColor(triagedResult.risk === "high" ? 0xFF0000 : triagedResult.risk === "medium" ? 0xFFA500 : 0xFFFF00)
+                .setTimestamp();
+            await logChannel.send({ embeds: [embed] });
+        }
+        const action = triagedResult.recommended_actions[0];
+        Log.debug("AI recommended action", { component: "ChatManager", action, reason: triagedResult.reason, confidence: triagedResult.confidence });
+        switch (action) {
+            case "warn": {
+                await message.author.send(`You have received an automatic warning from the AI for the following reason: ${triagedResult.reason}\n\nMessage content: ${message.content}\n\nWarning message from the AI: ${triagedResult.warning_message}\n\n-# Be aware that although this warning will NOT be saved to your warnings registry, we may still consider it in future decisions.`).catch(() => { });
+                await this.announce(`User ${message.author.username} has been automatically warned by the AI for suspicious content.`, "en");
+                break;
+            }
+            case "timeout": {
+                const duration = triagedResult.action_duration_ms && triagedResult.action_duration_ms > 0 ? triagedResult.action_duration_ms : 60000;
+                const minutes = Math.ceil(duration / 60000);
+                await db.query("INSERT INTO global_mutes SET ? ON DUPLICATE KEY UPDATE reason = VALUES(reason), authorid = VALUES(authorid), createdAt = VALUES(createdAt), until = VALUES(until)", {
+                    uid: message.author.id,
+                    reason: triagedResult.reason,
+                    authorid: "AI Monitor",
+                    createdAt: new Date(),
+                    until: new Date(Date.now() + duration)
+                });
+                await this.announce(`User ${message.author.username} has been automatically timed out by the AI for suspicious content. Duration: ${minutes} minutes`, "en");
+                break;
+            }
+            case "blacklist": {
+                await message.author.send(`You have been automatically blacklisted by the AI for the following reason: ${triagedResult.reason}\n\nMessage content: ${message.content}\n\n-# This means you will be blocked from using the global chat feature. If you believe this was a mistake, please contact the support server and provide the following information:\n\nMessage ID: ${message.id}\nUser ID: ${message.author.id}\nSummary from AI: ${triagedResult.summary}\nReason from AI: ${triagedResult.reason}`).catch(() => { });
+                await db.query("INSERT INTO global_bans (id, active, times) VALUES (?, TRUE, 1) ON DUPLICATE KEY UPDATE active = TRUE, times = times + 1", [message.author.id]);
+                await this.announce(`User ${message.author.username} has been automatically blacklisted by the AI for suspicious content.`, "en");
+                break;
+            }
+        }
+    }
+
+    private async ParseJson<T>(input: string, defaultValue: T): Promise<T> {
+        try {
+            const jsonStart = input.indexOf("{");
+            const jsonEnd = input.lastIndexOf("}");
+            if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+                Log.warn("Failed to parse JSON from model response - no JSON object found", { input });
+                return defaultValue;
+            }
+            const jsonString = input.substring(jsonStart, jsonEnd + 1);
+            return JSON.parse(jsonString) as T;
+        } catch (error) {
+            Log.warn("Failed to parse JSON from model response", { input, error: (error as Error).message });
+            return defaultValue;
+        }
     }
 
     public async Log(message: string, metadata?: any): Promise<void> {
@@ -207,6 +338,14 @@ export default class ChatManager extends EventEmitter {
         const languageName = this.resolveLanguageName(userLanguage);
         const hasTextContent = baseContent.trim().length > 0;
         let sanitizedDefaultContent = this.sanitizeContent(baseContent);
+        /*if (message.author.id === "1427772579774468259") {
+            const isFiltered = await this.FilterContent(message, normalizedUserLanguage);
+            if (isFiltered) {
+                message.react("800125816633557043").catch(() => { });
+                Log.debug("Test message was flagged as suspicious by the AI filter.", { messageId: message.id, authorId: message.author.id, username: message.author.username, content: baseContent });
+                return;
+            }
+        }*/
 
         const hasAttachments = message.attachments.size > 0;
         const attachmentUrls = hasAttachments ? message.attachments.map(att => att.url).join('\n') : '';
@@ -261,6 +400,10 @@ export default class ChatManager extends EventEmitter {
         const dispatchEnd = Date.now();
         const content = utils.encryptWithAES(data.bot.encryption_key, message.content);
         Promise.resolve(db.query("INSERT INTO global_messages SET ?", [{ uid: message.author.id, content: content || "[EMPTY MESSAGE]", language: userLanguage }])).catch(() => { });
+        Promise.resolve(utils.recordDailyMetric("global_chat_messages", 1)).catch(() => { });
+        Promise.resolve(utils.recordDailyDistinctMetric("active_users", message.author.id)).catch(() => { });
+        Promise.resolve(utils.recordDailyDistinctMetric("active_guilds", message.guildId ?? "unknown")).catch(() => { });
+        Promise.resolve(utils.recordDailyMetric(failed ? "global_chat_failures" : "global_chat_deliveries", 1)).catch(() => { });
         Promise.resolve(message.reactions.removeAll()).catch(() => null);
         if (failed) {
             message.react("800125816633557043").catch(() => { });
@@ -353,7 +496,7 @@ export default class ChatManager extends EventEmitter {
                 if (current >= items.length) break;
                 try {
                     await worker(items[current]);
-                } catch {}
+                } catch { }
             }
         });
         await Promise.allSettled(runners);
@@ -447,21 +590,21 @@ export default class ChatManager extends EventEmitter {
         if (Array.isArray(localCached)) return localCached;
         if (this.activeGuildsPromise) return this.activeGuildsPromise;
         this.activeGuildsPromise = (async () => {
-        const cached = await cacheManager.get<any[]>(CACHE_GUILDS_KEY);
-        if (Array.isArray(cached)) {
-            cacheManager.setLocal(CACHE_LOCAL_GUILDS_KEY, cached, GUILD_CACHE_TTL);
-            return cached;
-        }
-        const guildsRaw: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
-        const guilds: any[] = Array.isArray(guildsRaw) ? [...guildsRaw] : [];
-        const sorted = guilds.sort((g1: any, g2: any) => {
-            if (Number(g1.autotranslate) === 1 && Number(g2.autotranslate) !== 1) return 1;
-            if (Number(g2.autotranslate) === 1 && Number(g1.autotranslate) !== 1) return -1;
-            return 0;
-        });
-        cacheManager.setLocal(CACHE_LOCAL_GUILDS_KEY, sorted, GUILD_CACHE_TTL);
-        Promise.resolve(cacheManager.set(CACHE_GUILDS_KEY, sorted, GUILD_CACHE_TTL)).catch(() => { });
-        return sorted;
+            const cached = await cacheManager.get<any[]>(CACHE_GUILDS_KEY);
+            if (Array.isArray(cached)) {
+                cacheManager.setLocal(CACHE_LOCAL_GUILDS_KEY, cached, GUILD_CACHE_TTL);
+                return cached;
+            }
+            const guildsRaw: any = await db.query("SELECT * FROM globalchats WHERE enabled = TRUE");
+            const guilds: any[] = Array.isArray(guildsRaw) ? [...guildsRaw] : [];
+            const sorted = guilds.sort((g1: any, g2: any) => {
+                if (Number(g1.autotranslate) === 1 && Number(g2.autotranslate) !== 1) return 1;
+                if (Number(g2.autotranslate) === 1 && Number(g1.autotranslate) !== 1) return -1;
+                return 0;
+            });
+            cacheManager.setLocal(CACHE_LOCAL_GUILDS_KEY, sorted, GUILD_CACHE_TTL);
+            Promise.resolve(cacheManager.set(CACHE_GUILDS_KEY, sorted, GUILD_CACHE_TTL)).catch(() => { });
+            return sorted;
         })();
         try {
             return await this.activeGuildsPromise;
@@ -544,17 +687,17 @@ export default class ChatManager extends EventEmitter {
         const inflight = this.userLanguagePromises.get(userId);
         if (inflight) return inflight;
         const task = (async () => {
-        const cacheKey = `${CACHE_LANG_PREFIX}${userId}`;
-        const globalCached = await cacheManager.get<{ lang: string }>(cacheKey);
-        if (globalCached?.lang) {
-            cacheManager.setLocal(localCacheKey, { lang: globalCached.lang }, LANGUAGE_CACHE_TTL);
-            return globalCached.lang;
-        }
-        const result: any = await db.query("SELECT * FROM languages WHERE userid = ?", [userId]);
-        const language = result?.[0]?.lang ?? "en";
-        cacheManager.setLocal(localCacheKey, { lang: language }, LANGUAGE_CACHE_TTL);
-        Promise.resolve(cacheManager.set(cacheKey, { lang: language }, LANGUAGE_CACHE_TTL)).catch(() => { });
-        return language;
+            const cacheKey = `${CACHE_LANG_PREFIX}${userId}`;
+            const globalCached = await cacheManager.get<{ lang: string }>(cacheKey);
+            if (globalCached?.lang) {
+                cacheManager.setLocal(localCacheKey, { lang: globalCached.lang }, LANGUAGE_CACHE_TTL);
+                return globalCached.lang;
+            }
+            const result: any = await db.query("SELECT * FROM languages WHERE userid = ?", [userId]);
+            const language = result?.[0]?.lang ?? "en";
+            cacheManager.setLocal(localCacheKey, { lang: language }, LANGUAGE_CACHE_TTL);
+            Promise.resolve(cacheManager.set(cacheKey, { lang: language }, LANGUAGE_CACHE_TTL)).catch(() => { });
+            return language;
         })();
         this.userLanguagePromises.set(userId, task);
         try {
@@ -591,16 +734,16 @@ export default class ChatManager extends EventEmitter {
         const inflight = this.userRankPromises.get(userId);
         if (inflight) return inflight;
         const task = (async () => {
-        const cacheKey = `${CACHE_RANK_PREFIX}${userId}`;
-        const globalCached = await cacheManager.get<{ rank: string | null }>(cacheKey);
-        if (globalCached && Object.prototype.hasOwnProperty.call(globalCached, "rank")) {
-            cacheManager.setLocal(localCacheKey, { rank: globalCached.rank }, RANK_CACHE_TTL);
-            return globalCached.rank;
-        }
-        const rank = await utils.getUserStaffRank(userId);
-        cacheManager.setLocal(localCacheKey, { rank }, RANK_CACHE_TTL);
-        Promise.resolve(cacheManager.set(cacheKey, { rank }, RANK_CACHE_TTL)).catch(() => { });
-        return rank;
+            const cacheKey = `${CACHE_RANK_PREFIX}${userId}`;
+            const globalCached = await cacheManager.get<{ rank: string | null }>(cacheKey);
+            if (globalCached && Object.prototype.hasOwnProperty.call(globalCached, "rank")) {
+                cacheManager.setLocal(localCacheKey, { rank: globalCached.rank }, RANK_CACHE_TTL);
+                return globalCached.rank;
+            }
+            const rank = await utils.getUserStaffRank(userId);
+            cacheManager.setLocal(localCacheKey, { rank }, RANK_CACHE_TTL);
+            Promise.resolve(cacheManager.set(cacheKey, { rank }, RANK_CACHE_TTL)).catch(() => { });
+            return rank;
         })();
         this.userRankPromises.set(userId, task);
         try {

@@ -1,5 +1,6 @@
 import * as crypto from "crypto";
 import * as async from "async";
+import * as bcrypt from "bcryptjs";
 import Workers from "./Workers";
 import type { WorkerHandle } from "./types/worker";
 import StaffRanksManager from "./managers/StaffRanksManager";
@@ -109,6 +110,107 @@ const resolveLogsPath = (targetPath = ".") => {
 const getEncryptionKey = (): Buffer => {
   const key = process.env.ENCRYPTION_KEY || "barniebot-default-encryption-key-change-in-production";
   return crypto.scryptSync(key, "salt", 32);
+};
+
+const isBcryptPasswordHash = (value: string): boolean => /^\$2[aby]\$\d\d\$/.test(value);
+
+const decryptWithAESLegacy = (key: string, data: string): string | null => {
+  const textParts = data.split(":");
+  const ivHex = textParts.shift();
+  if (!ivHex) return null;
+  const encrypted = textParts.join(":");
+  if (!encrypted) return null;
+  const iv = Uint8Array.from(Buffer.from(ivHex, "hex"));
+  const decipher = crypto.createDecipheriv(
+    "aes-256-cbc",
+    Buffer.from(key, "base64") as crypto.CipherKey,
+    iv
+  );
+  let decrypted = decipher.update(encrypted, "hex", "utf8");
+  decrypted += decipher.final("utf8");
+  return decrypted;
+};
+
+const hashPassword = async (password: string): Promise<string> => {
+  return await bcrypt.hash(password, 12);
+};
+
+const verifyPassword = async (storedPassword: string, plainPassword: string): Promise<{ valid: boolean; migrated: boolean }> => {
+  if (!storedPassword) return { valid: false, migrated: false };
+  if (isBcryptPasswordHash(storedPassword)) {
+    return { valid: await bcrypt.compare(plainPassword, storedPassword), migrated: false };
+  }
+  try {
+    const legacy = decryptWithAESLegacy(data.bot.encryption_key, storedPassword);
+    if (legacy === plainPassword) return { valid: true, migrated: true };
+  } catch { }
+  return { valid: storedPassword === plainPassword, migrated: false };
+};
+
+const recordDailyMetric = async (metricName: string, increment = 1, timestamp = Date.now()): Promise<void> => {
+  if (!metricName) return;
+  const metricDate = utils.getUtcDateKey(timestamp);
+  await db.query("INSERT INTO daily_metrics SET ? ON DUPLICATE KEY UPDATE total = total + VALUES(total), updated_at = VALUES(updated_at)", [{
+    metric_date: metricDate,
+    metric_name: metricName,
+    total: increment,
+    updated_at: timestamp
+  }]);
+};
+
+const recordDailyDistinctMetric = async (metricName: string, entityId: string, timestamp = Date.now()): Promise<void> => {
+  if (!metricName || !entityId) return;
+  const metricDate = utils.getUtcDateKey(timestamp);
+  await db.query("INSERT IGNORE INTO daily_distinct_metrics SET ?", [{
+    metric_date: metricDate,
+    metric_name: metricName,
+    entity_id: entityId,
+    updated_at: timestamp
+  }]);
+};
+
+const fetchUrlSafe = async (args: { url: string; maxChars?: number; timeoutMs?: number }): Promise<any> => {
+  if (!args.url) return { error: "Missing url parameter" };
+  let parsed: URL;
+  try {
+    parsed = new URL(args.url);
+  } catch {
+    return { error: "Invalid URL" };
+  }
+  if (!/^https?:$/.test(parsed.protocol)) return { error: "Only http/https URLs are allowed" };
+  const maxBytes = 200 * 1024;
+  const maxChars = Math.min(Math.max(args.maxChars ?? 50000, 1000), 50000);
+  const timeoutMs = Math.min(Math.max(args.timeoutMs ?? 4000, 1000), 8000);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(parsed.toString(), {
+      method: "GET",
+      redirect: "manual",
+      headers: { "User-Agent": "BarnieBot-AIMonitor/1.0" },
+      signal: controller.signal as any
+    });
+    const status = response.status;
+    const contentType = response.headers.get("content-type") || "";
+    const contentLength = Number(response.headers.get("content-length") || 0);
+    if (status >= 300 && status < 400) {
+      const location = response.headers.get("location") || "";
+      return { error: "Redirect blocked", status, location };
+    }
+    if (status < 200 || status >= 300) return { error: `HTTP ${status}`, status };
+    if (contentLength && contentLength > maxBytes) return { error: "Content too large", status, contentLength };
+    if (!/^text\//i.test(contentType) && !/application\/(json|xml)/i.test(contentType)) {
+      return { error: "Unsupported content type", status, contentType };
+    }
+    const buf = Buffer.from(await response.arrayBuffer());
+    if (buf.length > maxBytes) return { error: "Content too large", status, contentLength: buf.length };
+    const text = buf.toString("utf8").slice(0, maxChars);
+    return { url: parsed.toString(), status, contentType, truncated: text.length >= maxChars, content: text };
+  } catch (error: any) {
+    return { error: error?.name === "AbortError" ? "Request timed out" : "Failed to fetch URL" };
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 const encryptText = (text: string): string => {
@@ -564,7 +666,7 @@ const transporter = nodemailer.createTransport({
     pass: process.env.EMAIL_PASSWORD
   },
 });
-const utils = {
+const utils: any = {
   createArrows: (length: number): string => "^".repeat(length),
   parseToolCalls,
   AIFunctions: {
@@ -664,57 +766,9 @@ const utils = {
     },
     fetch_url: async (args: { url: string }): Promise<any> => {
       if (!args.url) return { error: "Missing url parameter" };
-      try {
-        const response = await fetch(args.url);
-        const text = await response.text();
-        return { content: text };
-      } catch (error) {
-        return { error: "Failed to fetch URL" };
-      }
+      return await fetchUrlSafe({ url: args.url });
     },
-    fetch_url_safe: async (args: { url: string; maxChars?: number; timeoutMs?: number }): Promise<any> => {
-      if (!args.url) return { error: "Missing url parameter" };
-      let parsed: URL;
-      try {
-        parsed = new URL(args.url);
-      } catch {
-        return { error: "Invalid URL" };
-      }
-      if (!/^https?:$/.test(parsed.protocol)) return { error: "Only http/https URLs are allowed" };
-      const maxBytes = 200 * 1024;
-      const maxChars = Math.min(Math.max(args.maxChars ?? 50000, 1000), 50000);
-      const timeoutMs = Math.min(Math.max(args.timeoutMs ?? 4000, 1000), 8000);
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        const response = await fetch(parsed.toString(), {
-          method: "GET",
-          redirect: "manual",
-          headers: { "User-Agent": "BarnieBot-AIMonitor/1.0" },
-          signal: controller.signal as any
-        });
-        const status = response.status;
-        const contentType = response.headers.get("content-type") || "";
-        const contentLength = Number(response.headers.get("content-length") || 0);
-        if (status >= 300 && status < 400) {
-          const location = response.headers.get("location") || "";
-          return { error: "Redirect blocked", status, location };
-        }
-        if (status < 200 || status >= 300) return { error: `HTTP ${status}`, status };
-        if (contentLength && contentLength > maxBytes) return { error: "Content too large", status, contentLength };
-        if (!/^text\//i.test(contentType) && !/application\/(json|xml)/i.test(contentType)) {
-          return { error: "Unsupported content type", status, contentType };
-        }
-        const buf = Buffer.from(await response.arrayBuffer());
-        if (buf.length > maxBytes) return { error: "Content too large", status, contentLength: buf.length };
-        const text = buf.toString("utf8").slice(0, maxChars);
-        return { url: parsed.toString(), status, contentType, truncated: text.length >= maxChars, content: text };
-      } catch (error: any) {
-        return { error: error?.name === "AbortError" ? "Request timed out" : "Failed to fetch URL" };
-      } finally {
-        clearTimeout(timer);
-      }
-    },
+    fetch_url_safe: fetchUrlSafe,
     generate_code: async (args: { prompt: string }): Promise<{ code?: string; reasoning?: string; error?: string }> => {
       const prompt = args?.prompt?.trim();
       if (!prompt) return { error: "Missing prompt parameter" };
@@ -3752,18 +3806,18 @@ const utils = {
   getRankSuffix: (rank?: string | null): string => {
     if (!rank) return "";
     const map: Record<string, string> = {
-      "Trial Support": "Trial SUPPORT",
+      "Trial Support": "TR SUPPORT",
       "Support": "SUPPORT",
       "Intern": "INTERN",
-      "Trial Moderator": "Trial MOD",
+      "Trial Moderator": "TR MOD",
       "Moderator": "MOD",
       "Senior Moderator": "SR MOD",
-      "Chief of Moderation": "CoM",
-      "Probationary Administrator": "pADMIN",
+      "Chief of Moderation": "CHIEF MOD",
+      "Probationary Administrator": "PROB ADMIN",
       "Administrator": "ADMIN",
-      "Head Administrator": "Head ADMIN",
-      "Chief of Staff": "CoS",
-      "Co-Owner": "Co-OWNER",
+      "Head Administrator": "HEAD ADMIN",
+      "Chief of Staff": "CHIEF STAFF",
+      "Co-Owner": "CO-OWNER",
       "Owner": "OWNER"
     };
     return map[rank] ?? rank.toUpperCase();
@@ -3873,37 +3927,38 @@ const utils = {
     return root;
   },
   encryptWithAES: (key: string, data: string): string => {
-    const iv = Uint8Array.from(crypto.randomBytes(16));
-    const cipher = crypto.createCipheriv(
-      "aes-256-cbc",
-      Buffer.from(key, "base64") as crypto.CipherKey,
-      iv
-    );
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", Buffer.from(key, "base64") as crypto.CipherKey, iv);
     let crypted = cipher.update(data, "utf8", "hex");
     crypted += cipher.final("hex");
-    return Buffer.from(iv).toString('hex') + ":" + crypted;
+    const authTag = cipher.getAuthTag();
+    return `${iv.toString("hex")}:${authTag.toString("hex")}:${crypted}`;
   },
   decryptWithAES: (key: string, data: string): string | null => {
     const textParts = data.split(":");
-    const ivHex = textParts.shift();
-    if (!ivHex) return null;
-    const encrypted = textParts.join(":");
-    if (!encrypted) return null;
-    const iv = Uint8Array.from(Buffer.from(ivHex, "hex"));
-    const decipher = crypto.createDecipheriv(
-      "aes-256-cbc",
-      Buffer.from(key, "base64") as crypto.CipherKey,
-      iv
-    );
-    let decrypted = decipher.update(encrypted, "hex", "utf8");
-    decrypted += decipher.final("utf8");
-    return decrypted;
+    if (textParts.length === 3) {
+      const [ivHex, authTagHex, encrypted] = textParts;
+      if (!ivHex || !authTagHex || !encrypted) return null;
+      const iv = Buffer.from(ivHex, "hex");
+      const authTag = Buffer.from(authTagHex, "hex");
+      const decipher = crypto.createDecipheriv("aes-256-gcm", Buffer.from(key, "base64") as crypto.CipherKey, iv);
+      decipher.setAuthTag(authTag);
+      let decrypted = decipher.update(encrypted, "hex", "utf8");
+      decrypted += decipher.final("utf8");
+      return decrypted;
+    }
+    return decryptWithAESLegacy(key, data);
   },
   replaceNonLetters: (input: string): string => {
     const regex = /\*\*(.*?)\*\*/g;
     const result = input.replace(regex, "$1");
     return result;
   },
+  hashPassword,
+  verifyPassword,
+  isBcryptPasswordHash,
+  recordDailyMetric,
+  recordDailyDistinctMetric,
   // getAiResponse: async (text: string, lang: string, id: string, isStart: boolean): Promise<string> => {
   //   const modelId = "ChitChatterLdJSpZu";
   //   let texts = {
@@ -4038,6 +4093,8 @@ const utils = {
         updated_at: now
       }]);
     }
+    await utils.recordDailyMetric("ai_chat_messages", 1, now);
+    await utils.recordDailyDistinctMetric("ai_chat_users", userId, now);
     return await utils.getAiChatTierStatus(userId);
   },
   getAiResponse: async (prompt: string, chat: NIMChatSession) => {
