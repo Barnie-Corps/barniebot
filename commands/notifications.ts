@@ -56,7 +56,7 @@ export default {
             }
 
             let displayContent = baseContent;
-            if (lang !== "en" && notif.language !== lang) {
+            if (notif.language !== lang) {
                 try {
                     const translated = await utils.translate(baseContent, notif.language, lang);
                     displayContent = normalize(translated.text).trim();

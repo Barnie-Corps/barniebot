@@ -17,7 +17,6 @@ import * as fs from "fs";
 import * as path from "path";
 import { FunctionCall } from "@google/genai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
-import langs from "langs";
 import NVIDIAModels from "../NVIDIAModels";
 import { prepareAudioForASR, stereoToMono, resampleAudio } from "../utils/audioUtils";
 import { Writable, PassThrough } from "stream";
@@ -366,6 +365,7 @@ export default {
                     filter: (m: { author: { id: string } }) => m.author.id === convoOwnerId || (addedUserId !== null && m.author.id === addedUserId)
                 });
                 let isWaitingForResponse = false;
+                let chatEnded = false;
                 const startLines = [
                     `${texts.common.started_chat} \`stop ai, ai stop, stop chat, end ai\``,
                     texts.common.can_take_time
@@ -381,12 +381,14 @@ export default {
                     try {
                         if (["stop ai", "ai stop", "stop chat", "end ai"].some(stop => message.content.toLowerCase().includes(stop))) {
                             conversationEndedBy = message.author.id;
-                            if (conversationEndedBy === convoOwnerId) {
-                                await reply(texts.common.stopped_ai);
-                            } else {
-                                await reply(`${texts.common.stopped_ai} Ended by <@${conversationEndedBy}>.`);
-                            }
-                            await message.react("🛑");
+                            try {
+                                if (conversationEndedBy === convoOwnerId) {
+                                    await reply(texts.common.stopped_ai);
+                                } else {
+                                    await reply(`${texts.common.stopped_ai} Ended by <@${conversationEndedBy}>.`);
+                                }
+                                await message.react("🛑");
+                            } catch {}
                             collector?.stop();
                             return;
                         }
@@ -440,7 +442,7 @@ export default {
                         }, 10000);
                         let response;
                         try {
-                            response = await withTimeout(ai.GetResponse(interaction.user.id, userContent), 120000);
+                            response = await withTimeout(ai.getResponse(interaction.user.id, userContent), 120000);
                             if (!response) {
                                 console.warn("AI response timeout");
                                 return await message.reply(texts.errors.no_response);
@@ -477,7 +479,7 @@ export default {
                                 const call = toolCalls[i];
                                 const remaining = toolCalls.slice(i + 1);
                                 const deferEdit = i < toolCalls.length - 1;
-                                lastResult = await ai.ExecuteFunction(interaction.user.id, call.name, call.args, msg, remaining, { suppressProgress: true, deferEdit });
+                                lastResult = await ai.executeFunction(interaction.user.id, call.name, call.args, msg, remaining, { suppressProgress: true, deferEdit });
                             }
                             if (typeof lastResult === "string" && !lastResult.trim()) {
                                 await msg.edit(texts.errors.no_response);
@@ -490,6 +492,7 @@ export default {
                         }
                         await message.reply(cleanedResponseText || response.text);
                     } catch (error) {
+                        if (chatEnded) return;
                         console.error("AI chat handling failed:", error);
                         isWaitingForResponse = false;
                         await message.reply(texts.errors.no_response);
@@ -499,7 +502,7 @@ export default {
                 });
                 collector?.on("end", () => {
                     ai.clearLocalFunctionHandlers(convoOwnerId);
-                    ai.ClearChat(interaction.user.id);
+                    ai.clearChat(interaction.user.id);
                 });
                 break;
             }
@@ -526,7 +529,7 @@ export default {
                 if (alertsLanguageRaw) {
                     const normalized = alertsLanguageRaw.trim().toLowerCase();
                     if (normalized.length > 2) return await reply(texts.errors.language_too_long);
-                    if (!langs.has(1, normalized) || ["ch", "br", "wa"].some(v => normalized === v)) {
+                    if (!utils.isValidLanguageCode(normalized)) {
                         return await reply(texts.errors.invalid_language);
                     }
                     alertsLanguage = normalized;
@@ -981,7 +984,7 @@ export default {
                                     console.log(`[Voice AI] User requested to end conversation`);
                                     if (statusMessage) await safeEdit(statusMessage, texts.voice.ending);
                                     connection.destroy();
-                                    ai.ClearChat(interaction.user.id);
+                                    ai.clearChat(interaction.user.id);
                                     return;
                                 }
 
@@ -995,7 +998,7 @@ export default {
                                     console.log(`[Voice AI] Safety check failed, ending conversation`);
                                     if (statusMessage) await safeEdit(statusMessage, `${texts.errors.unsafe_message}`);
                                     connection.destroy();
-                                    ai.ClearChat(interaction.user.id);
+                                    ai.clearChat(interaction.user.id);
                                     try {
                                         const me = interaction.guild?.members.me;
                                         if (me && me.voice.serverDeaf) {
@@ -1010,7 +1013,7 @@ export default {
 
                                 if (statusMessage) await safeEdit(statusMessage, texts.voice.thinking);
                                 console.log(`[Voice AI] Getting AI response...`);
-                                const response = await ai.GetVoiceResponse(interaction.user.id, transcript);
+                                const response = await ai.getVoiceResponse(interaction.user.id, transcript);
                                 console.log(`[Voice AI] AI response received: ${response.text.substring(0, 100)}... (call: ${!!response.call})`);
 
                                 if (response.text.length < 1 && !response.call) {
@@ -1026,7 +1029,7 @@ export default {
                                     console.log(`[Voice AI] AI requested to end conversation`);
                                     if (statusMessage) await safeEdit(statusMessage, `${texts.common.ai_left}\n${(response.call as FunctionCall).args?.reason || texts.common.no_reasons}`);
                                     connection.destroy();
-                                    ai.ClearChat(interaction.user.id);
+                                    ai.clearChat(interaction.user.id);
                                     return;
                                 }
 
@@ -1036,7 +1039,7 @@ export default {
                                     console.log(`[Voice AI] Executing function: ${(response.call as FunctionCall).name}`);
                                     if (statusMessage) await safeEdit(statusMessage, `⚙️ Executing ${(response.call as FunctionCall).name}...`);
 
-                                    const functionReply = await ai.ExecuteFunctionVoice(interaction.user.id, (response.call as FunctionCall).name!, (response.call as FunctionCall).args, null as any);
+                                    const functionReply = await ai.executeFunctionVoice(interaction.user.id, (response.call as FunctionCall).name!, (response.call as FunctionCall).args, null as any);
                                     console.log(`[Voice AI] Function executed, got reply: ${functionReply?.substring(0, 100)}...`);
                                     finalText = functionReply || response.text;
                                 }
@@ -1124,7 +1127,7 @@ export default {
                 });
 
                 connection.on(VoiceConnectionStatus.Disconnected, () => {
-                    ai.ClearChat(interaction.user.id);
+                    ai.clearChat(interaction.user.id);
                     if (silenceTimeout) clearTimeout(silenceTimeout);
                 });
 
@@ -1132,7 +1135,7 @@ export default {
                     const conn = getVoiceConnection(interaction.guild!.id);
                     if (conn) {
                         conn.destroy();
-                        ai.ClearChat(interaction.user.id);
+                        ai.clearChat(interaction.user.id);
                         interaction.followUp(texts.voice.timed_out).catch(() => { });
                     }
                 }, 600000);

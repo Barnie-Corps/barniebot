@@ -93,6 +93,7 @@ const aiMonitor = new AiMonitorManager(client, true, "phi3:latest");
 })();
 
 client.on("clientReady", async (): Promise<any> => {
+    (global as any).client = client;
     Log.success(`Bot logged in successfully`, {
         component: "Bot",
         username: client.user?.tag
@@ -142,12 +143,81 @@ client.on("clientReady", async (): Promise<any> => {
         process.env.REBOOTING = "0";
         saveRuntimeState({ safeShutdown: false, rebooting: false });
     }
-    Workers.bulkCreateWorkers(path.join(__dirname, "workers", "translate.js"), "translate", 5);
     process.env.SAFELY_SHUTTED_DOWN = "0";
     saveRuntimeState({ safeShutdown: false, rebooting: false });
     Log.info("Workers loaded", { component: "WorkerSystem" });
 
     WarningCleanup.startWarningCleanupScheduler();
+
+    setInterval(async () => {
+        try {
+            const due = await db.query("SELECT * FROM reminders WHERE status = 'pending' AND remind_at <= ?", [Date.now()]) as unknown as any[];
+            for (const r of due) {
+                try {
+                    const user = await client.users.fetch(r.user_id);
+                    let reminderContent = `⏰ **Reminder:** ${r.message}`;
+                    const userLang = await utils.getUserLanguage(r.user_id);
+                    if (userLang !== "en") {
+                        try { reminderContent = (await utils.translate(reminderContent, "en", userLang)).text || reminderContent; } catch {}
+                    }
+                    await user.send(reminderContent);
+                    await db.query("UPDATE reminders SET status = 'sent' WHERE id = ?", [r.id]);
+                } catch {
+                    await db.query("UPDATE reminders SET status = 'failed' WHERE id = ?", [r.id]);
+                }
+            }
+        } catch (e) {
+            Log.warn("Reminder check failed", { component: "Reminders", error: (e as any)?.message || String(e) });
+        }
+    }, 30000);
+
+    setInterval(async () => {
+        try {
+            const ended = await db.query("SELECT * FROM giveaways WHERE ended = FALSE AND ends_at <= ?", [Date.now()]) as unknown as any[];
+            for (const g of ended) {
+                const entries = await db.query("SELECT user_id FROM giveaway_entries WHERE giveaway_id = ?", [g.id]) as unknown as any[];
+                const userIds = entries.map((e: any) => e.user_id);
+                const winners: string[] = [];
+                const pool = [...userIds];
+                for (let i = 0; i < g.winner_count && pool.length > 0; i++) {
+                    const idx = Math.floor(Math.random() * pool.length);
+                    winners.push(pool[idx]);
+                    pool.splice(idx, 1);
+                }
+                await db.query("UPDATE giveaways SET ended = TRUE, winner_ids = ? WHERE id = ?", [JSON.stringify(winners), g.id]);
+                const channel = await client.channels.fetch(g.channel_id).catch(() => null) as TextChannel | null;
+                if (channel) {
+                    const embed = new EmbedBuilder()
+                        .setColor("Green")
+                        .setTitle(`🎊 ${g.prize}`)
+                        .setDescription(g.description || "")
+                        .addFields(
+                            { name: "Winner(s)", value: winners.length > 0 ? winners.map((w: string) => `<@${w}>`).join(", ") : "No entries", inline: true }
+                        )
+                        .setTimestamp();
+                    let giveawayEndedText = "Giveaway Ended!";
+                    let wonText = "won";
+                    const guildChat = await utils.getGlobalChatConfigCached(channel.guildId).catch(() => null);
+                    const guildLang = typeof guildChat?.language === "string" && guildChat.language ? guildChat.language : "en";
+                    if (guildLang !== "en") {
+                        try {
+                            const [endedRes, wonRes] = await Promise.all([
+                                utils.translate("Giveaway Ended!", "en", guildLang),
+                                utils.translate("won", "en", guildLang)
+                            ]);
+                            giveawayEndedText = endedRes.text || giveawayEndedText;
+                            wonText = wonRes.text || wonText;
+                        } catch {}
+                    }
+                    await channel.send({ content: winners.length > 0 ? `🎉 ${giveawayEndedText} ${winners.map((w: string) => `<@${w}>`).join(", ")} ${wonText} **${g.prize}**!` : undefined, embeds: [embed] });
+                    const msg = await channel.messages.fetch(g.message_id).catch(() => null);
+                    if (msg) await msg.edit({ components: [] });
+                }
+            }
+        } catch (e) {
+            Log.warn("Giveaway check failed", { component: "Giveaway", error: (e as any)?.message || String(e) });
+        }
+    }, 30000);
 
     Log.info("Bot is ready", { component: "System" });
 });
@@ -289,33 +359,27 @@ client.on("messageCreate", async (message): Promise<any> => {
                     { name: "💾 Memory", value: `\`[${memBar}] ${memPercent}%\`\n${usedMem}MB / ${totalMem}MB`, inline: false },
                     { name: "🔧 Process", value: `PID: \`${process.pid}\` | Node: \`${process.version}\``, inline: true },
                     { name: "📦 Commands", value: `\`${data.bot.commands.size}\` loaded`, inline: true }
-                )
-                .setFooter({ text: `Last restart: ${new Date(Date.now() - uptime * 1000).toLocaleString()}` })
+                );
+            try {
+                const pmRaw = fs.readFileSync(path.join(process.cwd(), ".pm.status.json"), "utf8");
+                const pm = JSON.parse(pmRaw);
+                if (pm && pm.pid) {
+                    const pmUptime = pm.startedAt ? Math.floor((Date.now() - pm.startedAt) / 1000) : 0;
+                    const pd = Math.floor(pmUptime / 86400);
+                    const ph = Math.floor((pmUptime % 86400) / 3600);
+                    const pmn = Math.floor((pmUptime % 3600) / 60);
+                    const ps = Math.floor(pmUptime % 60);
+                    const pmStateIcon = pm.state === "running" ? "🟢" : pm.state === "restarting" ? "🟡" : pm.state === "starting" ? "🔵" : pm.state === "stopped" ? "⚪" : "🔴";
+                    statusEmbed.addFields(
+                        { name: "🤖 Process Manager", value: `${pmStateIcon} \`${String(pm.state).toUpperCase()}\` | PID \`${pm.pid}\` | Restarts \`${pm.restartCount}/${pm.maxRestarts}\``, inline: false },
+                        { name: "⏱️ PM Uptime", value: `\`${pd}d ${ph}h ${pmn}m ${ps}s\``, inline: true },
+                        { name: "💥 Last Crash", value: pm.lastCrashTime ? `<t:${Math.floor(pm.lastCrashTime / 1000)}:R>${pm.lastCrashPattern ? ` \`(${pm.lastCrashPattern})\`` : ""}` : "None", inline: true }
+                    );
+                }
+            } catch { }
+            statusEmbed.setFooter({ text: `Last restart: ${new Date(Date.now() - uptime * 1000).toLocaleString()}` })
                 .setTimestamp();
             await message.reply({ embeds: [statusEmbed] });
-            break;
-        }
-        case "announce": {
-            if (args.length < 2) {
-                const usageEmbed = new EmbedBuilder()
-                    .setColor("#E74C3C")
-                    .setTitle("📢 Announce Command")
-                    .setDescription("```\nb.announce <language> <message>\n```")
-                    .addFields({ name: "Example", value: "`b.announce en Hello everyone!`" });
-                return await message.reply({ embeds: [usageEmbed] });
-            }
-            const [language, ...msg] = args;
-            const announceEmbed = new EmbedBuilder()
-                .setColor("#3498DB")
-                .setTitle("📢 Broadcasting Announcement")
-                .addFields(
-                    { name: "🌐 Language", value: `\`${language}\``, inline: true },
-                    { name: "📝 Message", value: msg.join(" ").substring(0, 100) + (msg.join(" ").length > 100 ? "..." : ""), inline: false }
-                )
-                .setFooter({ text: `Sent by ${message.author.username}` })
-                .setTimestamp();
-            await message.reply({ embeds: [announceEmbed] });
-            await manager.announce(msg.join(" "), language, message.attachments);
             break;
         }
         case "messages": {
@@ -888,6 +952,23 @@ client.on("guildMemberAdd", async (member): Promise<any> => {
     } catch (error: any) {
         Log.warn("AI monitor memberAdd failed", { component: "AiMonitor", error: error?.message || String(error) });
     }
+    try {
+        const rows = await db.query("SELECT * FROM welcome_configs WHERE guild_id = ? AND welcome_enabled = TRUE", [member.guild.id]) as unknown as any[];
+        if (!rows[0] || rows[0].channel_id === "0") return;
+        const config = rows[0];
+        const channel = member.guild.channels.cache.get(config.channel_id) as TextChannel;
+        if (!channel) return;
+        const msg = config.welcome_message || "Welcome {user}!";
+        const formatted = msg
+            .replace(/\{user\}/g, `<@${member.user.id}>`)
+            .replace(/\{username\}/g, member.user.username)
+            .replace(/\{displayname\}/g, member.displayName)
+            .replace(/\{server\}/g, member.guild.name)
+            .replace(/\{count\}/g, String(member.guild.memberCount));
+        await channel.send(formatted);
+    } catch (error: any) {
+        Log.warn("Welcome message failed", { component: "Welcome", error: error?.message || String(error) });
+    }
 });
 
 client.on("guildMemberRemove", async (member): Promise<any> => {
@@ -897,6 +978,25 @@ client.on("guildMemberRemove", async (member): Promise<any> => {
         await aiMonitor.handleMemberRemove(fullMember as any);
     } catch (error: any) {
         Log.warn("AI monitor memberRemove failed", { component: "AiMonitor", error: error?.message || String(error) });
+    }
+    try {
+        const rows = await db.query("SELECT * FROM welcome_configs WHERE guild_id = ? AND goodbye_enabled = TRUE", [member.guild.id]) as unknown as any[];
+        if (!rows[0] || rows[0].channel_id === "0") return;
+        const config = rows[0];
+        const channel = member.guild.channels.cache.get(config.channel_id) as TextChannel;
+        if (!channel) return;
+        const msg = config.goodbye_message || "Goodbye {user}!";
+        const username = "user" in member ? (member.user?.username || "User") : "User";
+        const displayName = "displayName" in member ? (member.displayName || username) : username;
+        const formatted = msg
+            .replace(/\{user\}/g, `<@${member.id}>`)
+            .replace(/\{username\}/g, username)
+            .replace(/\{displayname\}/g, displayName)
+            .replace(/\{server\}/g, member.guild.name)
+            .replace(/\{count\}/g, String(member.guild.memberCount));
+        await channel.send(formatted);
+    } catch (error: any) {
+        Log.warn("Goodbye message failed", { component: "Welcome", error: error?.message || String(error) });
     }
 });
 
@@ -1029,6 +1129,29 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(interaction.user.id)) return;
     const foundLang = ((await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown) as any[]);
     const Lang = foundLang[0] ? foundLang[0].lang : "en";
+
+    if (interaction.isButton() && interaction.customId.startsWith("giveaway_enter_")) {
+        const giveawayId = interaction.customId.replace("giveaway_enter_", "");
+        try {
+            const rows = await db.query("SELECT * FROM giveaways WHERE id = ? AND ended = FALSE", [giveawayId]) as unknown as any[];
+            if (!rows[0]) {
+                return interaction.reply({ content: "This giveaway is no longer active.", ephemeral: true });
+            }
+            const existing = await db.query("SELECT * FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?", [giveawayId, interaction.user.id]) as unknown as any[];
+            if (existing[0]) {
+                return interaction.reply({ content: "You're already entered!", ephemeral: true });
+            }
+            await db.query("INSERT INTO giveaway_entries SET ?", [{
+                giveaway_id: giveawayId, user_id: interaction.user.id, entered_at: Date.now()
+            }]);
+            await interaction.reply({ content: "You entered the giveaway!", ephemeral: true });
+        } catch (error: any) {
+            Log.warn("Giveaway button handler failed", { component: "Giveaway", error: error?.message || String(error) });
+            await interaction.reply({ content: "An error occurred.", ephemeral: true }).catch(() => {});
+        }
+        return;
+    }
+
     const isSlashCommand = interaction.isCommand();
     const cachedCommand = isSlashCommand ? data.bot.commands.get(interaction.commandName as string) : undefined;
     if (isSlashCommand && cachedCommand && !interaction.deferred && !interaction.replied) {
@@ -1137,7 +1260,10 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 ].join("\n");
                 fs.writeFileSync(logPath, logContents);
 
-                const errMessage = `⚠️ **Unexpected Error**\nYour request \`/${interaction.commandName}\` failed internally.\nReference: \`${errorId}\`\nThe detailed log was saved privately. If this keeps happening, open \`/support\` and provide the reference ID.`;
+                let errMessage = `⚠️ **Unexpected Error**\nYour request \`/${interaction.commandName}\` failed internally.\nReference: \`${errorId}\`\nThe detailed log was saved privately. If this keeps happening, open \`/support\` and provide the reference ID.`;
+                if (Lang !== "en") {
+                    try { errMessage = (await utils.translate(errMessage, "en", Lang)).text || errMessage; } catch {}
+                }
 
                 if (interaction.deferred || interaction.replied) {
                     try {
@@ -1773,15 +1899,26 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     }
 
                     try {
+                        let closeTexts = {
+                            title: "🔒 Support Ticket Closed",
+                            description: `Your support ticket #${ticketId} has been closed by ${interaction.user.tag}.`,
+                            duration: "Duration",
+                            messages: "Messages",
+                            footer: "Thank you for contacting support!"
+                        };
+                        const ticketOwnerLang = await utils.getUserLanguage(ticket.user_id);
+                        if (ticketOwnerLang !== "en") {
+                            try { closeTexts = await utils.autoTranslate(closeTexts, "en", ticketOwnerLang); } catch {}
+                        }
                         const closedEmbed = new EmbedBuilder()
                             .setColor("Red")
-                            .setTitle("🔒 Support Ticket Closed")
-                            .setDescription(`Your support ticket #${ticketId} has been closed by ${interaction.user.tag}.`)
+                            .setTitle(closeTexts.title)
+                            .setDescription(closeTexts.description)
                             .addFields(
-                                { name: "Duration", value: durationText, inline: true },
-                                { name: "Messages", value: messages.length.toString(), inline: true }
+                                { name: closeTexts.duration, value: durationText, inline: true },
+                                { name: closeTexts.messages, value: messages.length.toString(), inline: true }
                             )
-                            .setFooter({ text: "Thank you for contacting support!" })
+                            .setFooter({ text: closeTexts.footer })
                             .setTimestamp();
 
                         await user.send({ embeds: [closedEmbed] });
@@ -1815,7 +1952,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     try {
                         await interaction.editReply({ content: `✅ Ticket #${ticketId} has been closed successfully!` });
                     } catch (error) {
-                        console.log("Could not update confirmation message:", error);
+                        Log.warn("Could not update confirmation message", { error: String(error) });
                     }
 
                 } catch (error) {
@@ -1947,7 +2084,7 @@ client.on("guildDelete", async (guild): Promise<any> => {
 client.on("messageCreate", async (message): Promise<any> => {
     if (Number(process.env.TEST) === 1 && !data.bot.owners.includes(message.author.id)) return;
     if (!message.inGuild()) return;
-    if (Number(process.env.INGORE_GLOBAL_CHAT) === 1) return;
+    if (Number(process.env.IGNORE_GLOBAL_CHAT) === 1) return;
     if (!message.guildId) return;
     const chatdb = await utils.getGlobalChatConfigCached(message.guildId);
     if (!chatdb) return;
@@ -1958,8 +2095,10 @@ client.on("messageCreate", async (message): Promise<any> => {
     const isGlobalCommand = await globalCommandsManager.processMessage(message, manager);
     if (isGlobalCommand) return;
 
-    await manager.processUser(author);
-    await manager.processMessage(message);
+    await Promise.all([
+        manager.processUser(author),
+        manager.processMessage(message)
+    ]);
 });
 
 client.on("messageCreate", async (message): Promise<any> => {
@@ -1982,7 +2121,7 @@ client.on("messageCreate", async (message): Promise<any> => {
         webhook = await (message.channel as TextChannel).createWebhook({ name: "Filter Webhook", reason: "Filter webhook" });
         await db.query("INSERT INTO filter_webhooks SET ?", [{ id: webhook.id, token: webhook.token, channel: message.channel.id }]);
     }
-    if (wordList.length < 1) { console.log("No words found."); return; }
+    if (wordList.length < 1) { Log.info("No words found."); return; }
     const badWords = wordList.filter((w: any) => message.content.toLowerCase().includes(w.content)).sort((w1: any, w2: any) => {
         if (w1.content.length > w2.content.length) return -1;
         else if (w2.content.length > w1.content.length) return 1;
@@ -2074,6 +2213,72 @@ manager.on("limit-exceed", async u => {
         username: user?.username,
         duration: manager.options.ratelimit_time / 1000
     });
+});
+
+const recentMessages: Map<string, number[]> = new Map();
+let lastSpamPrune = Date.now();
+
+client.on("messageCreate", async (message): Promise<any> => {
+    if (!message.inGuild() || message.author.bot) return;
+    try {
+        const rows = await db.query("SELECT * FROM automod_configs WHERE guild_id = ? AND enabled = TRUE", [message.guildId]) as unknown as any[];
+        if (!rows[0]) return;
+        const config = rows[0];
+        if (message.member?.permissions.has(PermissionFlagsBits.ManageMessages)) return;
+        let violated = false;
+        let reason = "";
+        if (config.spam_enabled) {
+            const windowMs = Number(config.spam_window_ms) || 5000;
+            const maxMessages = Number(config.spam_max_messages) || 5;
+            const now = Date.now();
+            const key = `${message.guildId}:${message.author.id}`;
+            const times = (recentMessages.get(key) || []).filter((t) => t > now - windowMs);
+            times.push(now);
+            recentMessages.set(key, times);
+            if (now - lastSpamPrune > 60000) {
+                lastSpamPrune = now;
+                for (const [k, ts] of recentMessages) {
+                    if (ts[ts.length - 1] <= now - windowMs) recentMessages.delete(k);
+                }
+            }
+            if (times.length >= maxMessages) { violated = true; reason = "spam"; }
+        }
+        if (!violated && config.caps_enabled && message.content.length > 10) {
+            const caps = (message.content.match(/[A-Z]/g) || []).length;
+            if (caps / message.content.length > 0.7) { violated = true; reason = "excessive caps"; }
+        }
+        if (!violated && config.mention_enabled) {
+            const mentionCount = message.mentions.users.size + message.mentions.roles.size;
+            if (mentionCount > 5) { violated = true; reason = "mass mention"; }
+        }
+        if (!violated && config.invite_enabled) {
+            if (/(?:discord\.(?:gg|io|me|com\/invite)\/|discordapp\.com\/invite\/)\w+/i.test(message.content)) {
+                violated = true; reason = "invite link";
+            }
+        }
+        if (violated) {
+            await db.query("INSERT INTO automod_log SET ?", [{
+                guild_id: message.guildId, user_id: message.author.id,
+                message_content: message.content.slice(0, 500), rule: reason,
+                created_at: Date.now(), action_taken: config.action
+            }]);
+            if (config.action === "delete" || config.action === "delete_warn") {
+                await message.delete().catch(() => {});
+            }
+            if (config.action === "warn" || config.action === "delete_warn") {
+                try {
+                    let warnContent = `⚠️ **Auto-Mod Warning** in **${message.guild?.name}**: ${reason}`;
+                    const authorLang = await utils.getUserLanguage(message.author.id);
+                    if (authorLang !== "en") {
+                        try { warnContent = (await utils.translate(warnContent, "en", authorLang)).text || warnContent; } catch {}
+                    }
+                    await message.author.send(warnContent);
+                } catch {}
+            }
+        }
+    } catch (error: any) {
+        Log.warn("Auto-mod check failed", { component: "AutoMod", error: error?.message || String(error) });
+    }
 });
 
 client.on("messageCreate", async (message): Promise<any> => {

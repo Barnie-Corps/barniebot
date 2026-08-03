@@ -2,45 +2,24 @@
 import { randomBytes } from "crypto";
 import utils from "../utils";
 import db from "../mysql/database";
-import client from "..";
+import client, { manager } from "..";
 
-// Helper to check if user is staff
-function ensureStaff(executorRank: string | null): { ok: boolean; error?: string } {
-    const idx = utils.getStaffRankIndex(executorRank);
-    if (idx < 0) return { ok: false, error: "You must be staff to use this command." };
-    return { ok: true };
-}
-
-// Helper to check if user is moderator+
-function ensureModPlus(executorRank: string | null): { ok: boolean; error?: string } {
-    const idx = utils.getStaffRankIndex(executorRank);
-    const min = utils.getStaffRankIndex("Moderator");
-    if (idx < 0 || idx < min) return { ok: false, error: "Moderator rank or higher required." };
-    return { ok: true };
-}
-
-function ensureAdminPlus(executorRank: string | null): { ok: boolean; error?: string } {
-    const idx = utils.getStaffRankIndex(executorRank);
-    const min = utils.getStaffRankIndex("Probationary Administrator");
-    if (idx < 0 || idx < min) return { ok: false, error: "Probationary Administrator rank or higher required." };
-    return { ok: true };
-}
-
-// Helper to log staff actions
-async function logStaffAction(staffId: string, actionType: string, targetId: string | null, details: string, metadata?: any) {
-    try {
-        await db.query("INSERT INTO staff_audit_log SET ?", [{
-            staff_id: staffId,
-            action_type: actionType,
-            target_id: targetId,
-            details: details,
-            metadata: metadata ? JSON.stringify(metadata) : null,
-            created_at: Date.now()
-        }]);
-    } catch (error) {
-        console.error("Failed to log staff action:", error);
+const resolveUsers = async (ids: Array<string | null | undefined>): Promise<Map<string, any>> => {
+    const unique = Array.from(new Set(ids.filter((id): id is string => !!id)));
+    const users = new Map<string, any>();
+    const missing: string[] = [];
+    for (const id of unique) {
+        const cached = client.users.cache.get(id);
+        if (cached) users.set(id, cached);
+        else missing.push(id);
     }
-}
+    const resolved = await Promise.all(missing.map(id => client.users.fetch(id).catch(() => null)));
+    for (let i = 0; i < missing.length; i++) {
+        const u = resolved[i];
+        if (u) users.set(missing[i], u);
+    }
+    return users;
+};
 
 export default {
     data: new SlashCommandBuilder()
@@ -174,7 +153,7 @@ export default {
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         const sub = interaction.options.getSubcommand();
         const executor = interaction.user;
-        const executorRank = await utils.getUserStaffRank(executor.id);
+        const executorRank = await utils.getCachedUserStaffRank(executor.id);
         let texts = {
             workload_title: "Staff Workload",
             workload_description: "Current ticket ownership and availability snapshot.",
@@ -198,7 +177,7 @@ export default {
         };
         if (lang !== "en") texts = await utils.autoTranslate(texts, "en", lang);
 
-        const perm = ensureStaff(executorRank);
+        const perm = utils.ensureStaff(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
         switch (sub) {
@@ -235,10 +214,12 @@ export default {
                     .setDescription(`Filter: **${filter.charAt(0).toUpperCase() + filter.slice(1)}**\nShowing ${tickets.length} ticket(s)`)
                     .setTimestamp();
 
-                for (const ticket of tickets.slice(0, 10)) {
-                    const user = await client.users.fetch(ticket.user_id).catch(() => null);
-                    const assignedUser = ticket.assigned_to ? await client.users.fetch(ticket.assigned_to).catch(() => null) : null;
-                    const age = Math.floor((Date.now() - ticket.created_at) / 60000); // minutes
+                const shown = tickets.slice(0, 10);
+                const users = await resolveUsers(shown.map((t: any) => t.user_id).concat(shown.map((t: any) => t.assigned_to)));
+                for (const ticket of shown) {
+                    const user = users.get(ticket.user_id) ?? null;
+                    const assignedUser = ticket.assigned_to ? users.get(ticket.assigned_to) ?? null : null;
+                    const age = Math.floor((Date.now() - ticket.created_at) / 60000);
                     const ageText = age < 60 ? `${age}m ago` : `${Math.floor(age / 60)}h ago`;
                     const awaitingResponse = !ticket.first_response_at;
 
@@ -249,7 +230,7 @@ export default {
                     });
                 }
 
-                await logStaffAction(executor.id, "VIEW_TICKETS", null, `Viewed tickets with filter: ${filter}`);
+                await utils.logStaffAction(executor.id, "VIEW_TICKETS", null, `Viewed tickets with filter: ${filter}`);
                 return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
@@ -257,8 +238,7 @@ export default {
                 const ticketId = interaction.options.getInteger("ticket_id", true);
                 const staffUser = interaction.options.getUser("staff") || executor;
 
-                // Check if staff user is actually staff
-                const staffRank = await utils.getUserStaffRank(staffUser.id);
+                const staffRank = await utils.getCachedUserStaffRank(staffUser.id);
                 if (!staffRank) {
                     return utils.safeInteractionRespond(interaction, "The specified user is not a staff member.");
                 }
@@ -270,7 +250,6 @@ export default {
 
                 await db.query("UPDATE support_tickets SET assigned_to = ? WHERE id = ?", [staffUser.id, ticketId]);
 
-                // Notify in ticket channel
                 try {
                     const ticketChannel = await client.channels.fetch(ticket[0].channel_id);
                     if (ticketChannel && ticketChannel.isTextBased()) {
@@ -280,7 +259,7 @@ export default {
                     console.error("Failed to notify in ticket channel:", error);
                 }
 
-                await logStaffAction(executor.id, "ASSIGN_TICKET", ticket[0].user_id, `Assigned ticket #${ticketId} to ${staffUser.tag}`, { ticket_id: ticketId, assigned_to: staffUser.id });
+                await utils.logStaffAction(executor.id, "ASSIGN_TICKET", ticket[0].user_id, `Assigned ticket #${ticketId} to ${staffUser.tag}`, { ticket_id: ticketId, assigned_to: staffUser.id });
                 return utils.safeInteractionRespond(interaction, `✅ Ticket #${ticketId} has been assigned to ${staffUser.tag}.`);
             }
 
@@ -301,7 +280,7 @@ export default {
                 };
                 const emoji = statusEmoji[status] || "⚪";
 
-                await logStaffAction(executor.id, "SET_STATUS", null, `Changed status to ${status}${message ? `: ${message}` : ""}`, { status, message });
+                await utils.logStaffAction(executor.id, "SET_STATUS", null, `Changed status to ${status}${message ? `: ${message}` : ""}`, { status, message });
                 return utils.safeInteractionRespond(interaction, `${emoji} Your status has been set to **${status.toUpperCase()}**${message ? `\nMessage: ${message}` : ""}`);
             }
 
@@ -325,8 +304,9 @@ export default {
                     .setTitle(texts.workload_title)
                     .setDescription(texts.workload_description)
                     .setTimestamp();
+                const users = await resolveUsers(rows.map((r: any) => r.uid));
                 for (const row of rows) {
-                    const user = await client.users.fetch(row.uid).catch(() => null);
+                    const user = users.get(row.uid) ?? null;
                     const oldest = row.oldest_open_at ? Math.floor((Date.now() - Number(row.oldest_open_at)) / 60000) : null;
                     embed.addFields({
                         name: user?.tag ?? row.uid,
@@ -339,7 +319,7 @@ export default {
                         inline: true
                     });
                 }
-                await logStaffAction(executor.id, "VIEW_WORKLOAD", null, "Viewed staff workload");
+                await utils.logStaffAction(executor.id, "VIEW_WORKLOAD", null, "Viewed staff workload");
                 return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
@@ -347,16 +327,18 @@ export default {
                 const thresholdHours = interaction.options.getInteger("hours") || 4;
                 const thresholdMs = thresholdHours * 60 * 60 * 1000;
                 const since = Date.now() - (7 * 24 * 60 * 60 * 1000);
-                const [openRows, unassignedRows, awaitingRows, overdueRows, oldestRows, responseRows] = await Promise.all([
+                const [openRows, unassignedRows, awaitingRows, overdueRows, oldestRows, avgRows, responseRows] = await Promise.all([
                     db.query("SELECT COUNT(*) AS count FROM support_tickets WHERE status = 'open'"),
                     db.query("SELECT COUNT(*) AS count FROM support_tickets WHERE status = 'open' AND (assigned_to IS NULL OR assigned_to = '')"),
                     db.query("SELECT COUNT(*) AS count FROM support_tickets WHERE status = 'open' AND first_response_at IS NULL"),
                     db.query("SELECT COUNT(*) AS count FROM support_tickets WHERE status = 'open' AND first_response_at IS NULL AND created_at <= ?", [Date.now() - thresholdMs]),
                     db.query("SELECT MIN(created_at) AS oldest FROM support_tickets WHERE status = 'open'"),
-                    db.query("SELECT created_at, first_response_at FROM support_tickets WHERE first_response_at IS NOT NULL AND created_at >= ?", [since])
+                    db.query("SELECT AVG(first_response_at - created_at) AS avg_ms FROM support_tickets WHERE first_response_at IS NOT NULL AND created_at >= ?", [since]),
+                    db.query("SELECT created_at, first_response_at FROM support_tickets WHERE first_response_at IS NOT NULL AND created_at >= ? ORDER BY created_at DESC LIMIT 10000", [since])
                 ]) as any;
                 const responseTimes = (responseRows as any[]).map(row => Number(row.first_response_at) - Number(row.created_at)).filter(value => Number.isFinite(value) && value >= 0).sort((a, b) => a - b);
-                const avg = responseTimes.length ? Math.round(responseTimes.reduce((sum, value) => sum + value, 0) / responseTimes.length / 60000) : null;
+                const avgRaw = Number(avgRows?.[0]?.avg_ms ?? 0);
+                const avg = Number.isFinite(avgRaw) && avgRaw > 0 ? Math.round(avgRaw / 60000) : null;
                 const median = responseTimes.length ? Math.round(responseTimes[Math.floor(responseTimes.length / 2)] / 60000) : null;
                 const oldestOpen = oldestRows?.[0]?.oldest ? Math.floor((Date.now() - Number(oldestRows[0].oldest)) / 60000) : null;
                 const embed = new EmbedBuilder()
@@ -373,7 +355,7 @@ export default {
                         { name: texts.median_first_response, value: median === null ? texts.no_metrics : `${median}m`, inline: true }
                     )
                     .setTimestamp();
-                await logStaffAction(executor.id, "VIEW_SLA", null, `Viewed support SLA with threshold ${thresholdHours}h`, { thresholdHours });
+                await utils.logStaffAction(executor.id, "VIEW_SLA", null, `Viewed support SLA with threshold ${thresholdHours}h`, { thresholdHours });
                 return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
@@ -388,7 +370,7 @@ export default {
                     created_at: Date.now()
                 }]);
 
-                await logStaffAction(executor.id, "ADD_NOTE", user.id, `Added note about ${user.tag}`, { note: noteContent });
+                await utils.logStaffAction(executor.id, "ADD_NOTE", user.id, `Added note about ${user.tag}`, { note: noteContent });
                 return utils.safeInteractionRespond(interaction, `📝 Note added for ${user.tag}.`);
             }
 
@@ -408,8 +390,9 @@ export default {
                     .setDescription(`Showing ${notes.length} note(s)`)
                     .setTimestamp();
 
+                const users = await resolveUsers(notes.map((n: any) => n.staff_id));
                 for (const note of notes) {
-                    const staffUser = await client.users.fetch(note.staff_id).catch(() => null);
+                    const staffUser = users.get(note.staff_id) ?? null;
                     const timestamp = new Date(note.created_at);
 
                     embed.addFields({
@@ -419,14 +402,13 @@ export default {
                     });
                 }
 
-                await logStaffAction(executor.id, "VIEW_NOTES", user.id, `Viewed notes for ${user.tag}`);
+                await utils.logStaffAction(executor.id, "VIEW_NOTES", user.id, `Viewed notes for ${user.tag}`);
                 return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
             case "search": {
                 const query = interaction.options.getString("query", true);
 
-                // Search in tickets
                 const tickets: any = await db.query(
                     "SELECT * FROM support_tickets WHERE (initial_message LIKE ? OR user_id = ?) AND status = 'open' ORDER BY created_at DESC LIMIT 10",
                     [`%${query}%`, query]
@@ -442,9 +424,11 @@ export default {
                     .setDescription(`Query: "${query}"\nFound ${tickets.length} ticket(s)`)
                     .setTimestamp();
 
-                for (const ticket of tickets.slice(0, 5)) {
-                    const user = await client.users.fetch(ticket.user_id).catch(() => null);
-                    const assignedUser = ticket.assigned_to ? await client.users.fetch(ticket.assigned_to).catch(() => null) : null;
+                const shown = tickets.slice(0, 5);
+                const users = await resolveUsers(shown.map((t: any) => t.user_id).concat(shown.map((t: any) => t.assigned_to)));
+                for (const ticket of shown) {
+                    const user = users.get(ticket.user_id) ?? null;
+                    const assignedUser = ticket.assigned_to ? users.get(ticket.assigned_to) ?? null : null;
                     const awaitingResponse = !ticket.first_response_at;
 
                     embed.addFields({
@@ -454,13 +438,12 @@ export default {
                     });
                 }
 
-                await logStaffAction(executor.id, "SEARCH_TICKETS", null, `Searched tickets: "${query}"`, { query });
+                await utils.logStaffAction(executor.id, "SEARCH_TICKETS", null, `Searched tickets: "${query}"`, { query });
                 return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
             case "auditlog": {
-                // Moderator+ required for viewing audit logs
-                const modPerm = ensureModPlus(executorRank);
+                const modPerm = utils.ensureModPlus(executorRank);
                 if (!modPerm.ok) return utils.safeInteractionRespond(interaction, modPerm.error || "Moderator rank or higher required.");
 
                 const staffUser = interaction.options.getUser("staff");
@@ -468,7 +451,7 @@ export default {
                 const days = interaction.options.getInteger("days") || 7;
                 const since = Date.now() - (days * 24 * 60 * 60 * 1000);
 
-                let query = "SELECT * FROM staff_audit_log WHERE created_at >= ?";
+                let query = "SELECT id, staff_id, action_type, target_id, details, created_at FROM staff_audit_log WHERE created_at >= ?";
                 const params: any[] = [since];
 
                 if (staffUser) {
@@ -495,9 +478,11 @@ export default {
                     .setDescription(`${staffUser ? `Staff: ${staffUser.tag}\n` : ""}Action: **${actionFilter}**\nPeriod: Last ${days} day(s)\nShowing ${logs.length} entry(ies)`)
                     .setTimestamp();
 
-                for (const log of logs.slice(0, 10)) {
-                    const staff = await client.users.fetch(log.staff_id).catch(() => null);
-                    const target = log.target_id ? await client.users.fetch(log.target_id).catch(() => null) : null;
+                const shown = logs.slice(0, 10);
+                const users = await resolveUsers(shown.map((l: any) => l.staff_id).concat(shown.map((l: any) => l.target_id)));
+                for (const log of shown) {
+                    const staff = users.get(log.staff_id) ?? null;
+                    const target = log.target_id ? users.get(log.target_id) ?? null : null;
                     const timestamp = new Date(log.created_at);
 
                     const actionEmoji: Record<string, string> = {
@@ -530,18 +515,17 @@ export default {
                     embed.setFooter({ text: `Showing 10 of ${logs.length} entries` });
                 }
 
-                await logStaffAction(executor.id, "VIEW_AUDIT_LOG", null, `Viewed audit log${staffUser ? ` for ${staffUser.tag}` : ""}`, { filter: actionFilter, days });
+                await utils.logStaffAction(executor.id, "VIEW_AUDIT_LOG", null, `Viewed audit log${staffUser ? ` for ${staffUser.tag}` : ""}`, { filter: actionFilter, days });
                 return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
             case "reviewappeals": {
-                const perm = ensureModPlus(executorRank);
+                const perm = utils.ensureModPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const warningId = interaction.options.getInteger("warning_id");
                 const decision = interaction.options.getString("decision");
 
-                // If specific warning ID and decision provided, process it
                 if (warningId && decision) {
                     const warningData: any = await db.query("SELECT * FROM global_warnings WHERE id = ? AND appealed = TRUE AND appeal_status = 'pending'", [warningId]);
 
@@ -553,14 +537,11 @@ export default {
                     const user = await client.users.fetch(warning.userid).catch(() => null);
 
                     if (decision === "approve") {
-                        // Approve appeal - mark warning as inactive and approved
                         await db.query("UPDATE global_warnings SET appeal_status = 'approved', active = FALSE, appeal_reviewed_by = ?, appeal_reviewed_at = ? WHERE id = ?",
                             [executor.id, Date.now(), warningId]);
 
-                        // Notify user
                         if (user) {
                             try {
-                                const { EmbedBuilder } = await import("discord.js");
                                 const approveEmbed = new EmbedBuilder()
                                     .setColor("Green")
                                     .setTitle("✅ Appeal Approved")
@@ -575,22 +556,17 @@ export default {
                             } catch { }
                         }
 
-                        // Announce to staff
-                        const { manager } = await import("..");
                         await manager.Log(`✅ **Appeal Approved**: Warning #${warningId} for ${user?.username || "Unknown"} has been removed by ${executor.username}.`, "en");
 
-                        await logStaffAction(executor.id, "APPROVE_APPEAL", warning.userid, `Approved appeal for warning #${warningId}`, { warningId, warning: warning.reason });
+                        await utils.logStaffAction(executor.id, "APPROVE_APPEAL", warning.userid, `Approved appeal for warning #${warningId}`, { warningId, warning: warning.reason });
 
                         return utils.safeInteractionRespond(interaction, `✅ Appeal for warning #${warningId} has been **approved**. Warning removed.`);
                     } else if (decision === "deny") {
-                        // Deny appeal - keep warning active
                         await db.query("UPDATE global_warnings SET appeal_status = 'denied', appeal_reviewed_by = ?, appeal_reviewed_at = ? WHERE id = ?",
                             [executor.id, Date.now(), warningId]);
 
-                        // Notify user
                         if (user) {
                             try {
-                                const { EmbedBuilder } = await import("discord.js");
                                 const denyEmbed = new EmbedBuilder()
                                     .setColor("Red")
                                     .setTitle("❌ Appeal Denied")
@@ -605,33 +581,30 @@ export default {
                             } catch { }
                         }
 
-                        // Announce to staff
-                        const { manager } = await import("..");
                         await manager.Log(`❌ **Appeal Denied**: Warning #${warningId} for ${user?.username || "Unknown"} remains active (reviewed by ${executor.username}).`, "en");
 
-                        await logStaffAction(executor.id, "DENY_APPEAL", warning.userid, `Denied appeal for warning #${warningId}`, { warningId, warning: warning.reason });
+                        await utils.logStaffAction(executor.id, "DENY_APPEAL", warning.userid, `Denied appeal for warning #${warningId}`, { warningId, warning: warning.reason });
 
                         return utils.safeInteractionRespond(interaction, `❌ Appeal for warning #${warningId} has been **denied**. Warning remains active.`);
                     }
                 }
 
-                // If no specific decision, show pending appeals list
                 const pendingAppeals: any = await db.query("SELECT * FROM global_warnings WHERE appealed = TRUE AND appeal_status = 'pending' ORDER BY createdAt DESC LIMIT 10");
 
                 if (pendingAppeals.length === 0) {
                     return utils.safeInteractionRespond(interaction, "📋 No pending appeals to review.");
                 }
 
-                const { EmbedBuilder } = await import("discord.js");
                 const embed = new EmbedBuilder()
                     .setColor("Blue")
                     .setTitle("📋 Pending Warning Appeals")
                     .setDescription(`${pendingAppeals.length} appeal(s) pending review\n\nUse \`/stafftools reviewappeals <warning_id> <decision>\` to process an appeal.`)
                     .setTimestamp();
 
+                const users = await resolveUsers(pendingAppeals.map((a: any) => a.userid).concat(pendingAppeals.map((a: any) => a.authorid)));
                 for (const appeal of pendingAppeals) {
-                    const user = await client.users.fetch(appeal.userid).catch(() => null);
-                    const author = await client.users.fetch(appeal.authorid).catch(() => null);
+                    const user = users.get(appeal.userid) ?? null;
+                    const author = users.get(appeal.authorid) ?? null;
 
                     const categoryEmojis: Record<string, string> = {
                         spam: "📧",
@@ -664,15 +637,19 @@ export default {
                     });
                 }
 
-                await logStaffAction(executor.id, "VIEW_APPEALS", null, "Viewed pending appeals");
+                await utils.logStaffAction(executor.id, "VIEW_APPEALS", null, "Viewed pending appeals");
                 return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
             case "notify": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const language = interaction.options.getString("language") || "en";
+
+                if (!utils.isValidLanguageCode(language)) {
+                    return utils.safeInteractionRespond(interaction, "❌ Invalid language code. Use a 2-letter code like `en`, `es`, `fr`, `de`, `pt`.");
+                }
 
                 if (!interaction.channel || !("createMessageCollector" in interaction.channel)) {
                     return utils.safeInteractionRespond(interaction, "❌ This command must be used in a text channel.");
@@ -716,7 +693,7 @@ export default {
                         created_at: Date.now()
                     }]);
 
-                    await logStaffAction(executor.id, "CREATE_NOTIFICATION", null, `Created global notification: "${content.substring(0, 50)}..."`, { language, length: content.length });
+                    await utils.logStaffAction(executor.id, "CREATE_NOTIFICATION", null, `Created global notification: "${content.substring(0, 50)}..."`, { language, length: content.length });
 
                     await interaction.followUp({
                         content: `📢 **Global notification created successfully!**\n\nUsers will be notified when they next use a command.\n\n**Preview:**\n${content.substring(0, 200)}${content.length > 200 ? "..." : ""}`,
@@ -737,7 +714,7 @@ export default {
             }
 
             case "rpg_freeze": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
@@ -771,12 +748,12 @@ export default {
                     } catch { }
                 }
 
-                await logStaffAction(executor.id, "RPG_FREEZE", account[0].last_user_logged, `Froze RPG account ${username}: ${reason}`, { username, accountId: account[0].id });
+                await utils.logStaffAction(executor.id, "RPG_FREEZE", account[0].last_user_logged, `Froze RPG account ${username}: ${reason}`, { username, accountId: account[0].id });
                 return utils.safeInteractionRespond(interaction, `❄️ **Account frozen:** ${username}\n**Reason:** ${reason}\nThe account has been logged out.`);
             }
 
             case "rpg_unfreeze": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
@@ -804,12 +781,12 @@ export default {
                     } catch { }
                 }
 
-                await logStaffAction(executor.id, "RPG_UNFREEZE", account[0].last_user_logged, `Unfroze RPG account ${username}`, { username, accountId: account[0].id });
+                await utils.logStaffAction(executor.id, "RPG_UNFREEZE", account[0].last_user_logged, `Unfroze RPG account ${username}`, { username, accountId: account[0].id });
                 return utils.safeInteractionRespond(interaction, `✅ **Account unfrozen:** ${username}\nThe user can now log in again.`);
             }
 
             case "rpg_ban": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
@@ -843,12 +820,12 @@ export default {
                     } catch { }
                 }
 
-                await logStaffAction(executor.id, "RPG_BAN", account[0].last_user_logged, `Banned RPG account ${username}: ${reason}`, { username, accountId: account[0].id });
+                await utils.logStaffAction(executor.id, "RPG_BAN", account[0].last_user_logged, `Banned RPG account ${username}: ${reason}`, { username, accountId: account[0].id });
                 return utils.safeInteractionRespond(interaction, `🚫 **Account banned:** ${username}\n**Reason:** ${reason}\nThe account has been logged out.`);
             }
 
             case "rpg_unban": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
@@ -876,12 +853,12 @@ export default {
                     } catch { }
                 }
 
-                await logStaffAction(executor.id, "RPG_UNBAN", account[0].last_user_logged, `Unbanned RPG account ${username}`, { username, accountId: account[0].id });
+                await utils.logStaffAction(executor.id, "RPG_UNBAN", account[0].last_user_logged, `Unbanned RPG account ${username}`, { username, accountId: account[0].id });
                 return utils.safeInteractionRespond(interaction, `✅ **Account unbanned:** ${username}\nThe user can now log in again.`);
             }
 
             case "rpg_stats": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
@@ -919,12 +896,12 @@ export default {
                     await db.query("UPDATE rpg_characters SET mp = ? WHERE id = ?", [value, character[0].id]);
                 }
 
-                await logStaffAction(executor.id, "RPG_MODIFY_STATS", account[0].last_user_logged, `Modified ${stat} for ${username}: ${oldValue} → ${value}`, { username, stat, oldValue, newValue: value });
+                await utils.logStaffAction(executor.id, "RPG_MODIFY_STATS", account[0].last_user_logged, `Modified ${stat} for ${username}: ${oldValue} → ${value}`, { username, stat, oldValue, newValue: value });
                 return utils.safeInteractionRespond(interaction, `📊 **Stats modified for ${username}**\n**${stat}:** ${oldValue} → ${value}`);
             }
 
             case "rpg_password": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
@@ -953,12 +930,12 @@ export default {
                     } catch { }
                 }
 
-                await logStaffAction(executor.id, "RPG_RESET_PASSWORD", account[0].last_user_logged, `Issued password reset for ${username}`, { username, accountId: account[0].id });
+                await utils.logStaffAction(executor.id, "RPG_RESET_PASSWORD", account[0].last_user_logged, `Issued password reset for ${username}`, { username, accountId: account[0].id });
                 return utils.safeInteractionRespond(interaction, `🔐 **Password reset issued for ${username}**\nThe account has been logged out and a reset token was sent.`);
             }
 
             case "rpg_logout": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
@@ -988,12 +965,12 @@ export default {
                     } catch { }
                 }
 
-                await logStaffAction(executor.id, "RPG_LOGOUT", account[0].last_user_logged, `Force logged out ${username}`, { username, accountId: account[0].id });
+                await utils.logStaffAction(executor.id, "RPG_LOGOUT", account[0].last_user_logged, `Force logged out ${username}`, { username, accountId: account[0].id });
                 return utils.safeInteractionRespond(interaction, `🚪 **Account logged out:** ${username}`);
             }
 
             case "rpg_info": {
-                const perm = ensureModPlus(executorRank);
+                const perm = utils.ensureModPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
@@ -1063,12 +1040,12 @@ export default {
                     }
                 }
 
-                await logStaffAction(executor.id, "RPG_VIEW_INFO", account[0].last_user_logged, `Viewed RPG info for ${username}`, { username, accountId: account[0].id });
+                await utils.logStaffAction(executor.id, "RPG_VIEW_INFO", account[0].last_user_logged, `Viewed RPG info for ${username}`, { username, accountId: account[0].id });
                 return utils.safeInteractionRespond(interaction, { embeds: [infoEmbed], content: "" });
             }
 
             case "rpg_give_item": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
@@ -1104,12 +1081,12 @@ export default {
                     }]);
                 }
 
-                await logStaffAction(executor.id, "RPG_GIVE_ITEM", account[0].last_user_logged, `Gave ${quantity}x ${item[0].name} to ${username}`, { username, itemId, itemName: item[0].name, quantity });
+                await utils.logStaffAction(executor.id, "RPG_GIVE_ITEM", account[0].last_user_logged, `Gave ${quantity}x ${item[0].name} to ${username}`, { username, itemId, itemName: item[0].name, quantity });
                 return utils.safeInteractionRespond(interaction, `✅ **Item given to ${username}**\n**Item:** ${item[0].name}\n**Quantity:** ${quantity}`);
             }
 
             case "rpg_remove_item": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const username = interaction.options.getString("username", true);
@@ -1143,7 +1120,7 @@ export default {
                     await db.query("UPDATE rpg_inventory SET quantity = quantity - ? WHERE id = ?", [quantity, existingItem[0].id]);
                 }
 
-                await logStaffAction(executor.id, "RPG_REMOVE_ITEM", account[0].last_user_logged, `Removed ${quantity}x ${item[0].name} from ${username}`, { username, itemId, itemName: item[0].name, quantity });
+                await utils.logStaffAction(executor.id, "RPG_REMOVE_ITEM", account[0].last_user_logged, `Removed ${quantity}x ${item[0].name} from ${username}`, { username, itemId, itemName: item[0].name, quantity });
                 return utils.safeInteractionRespond(interaction, `✅ **Item removed from ${username}**\n**Item:** ${item[0].name}\n**Quantity:** ${quantity}`);
             }
 

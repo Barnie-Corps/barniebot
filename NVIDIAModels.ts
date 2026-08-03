@@ -1,5 +1,6 @@
 import NVIDIAModelsManager from "./managers/NVIDIAModelsManager"
 
-const NVIDIAModels = new NVIDIAModelsManager(process.env.NVIDIA_API_KEY!);
+const apiKeys = (process.env.NVIDIA_API_KEY || "").split(",").map(k => k.trim()).filter(Boolean);
+const NVIDIAModels = new NVIDIAModelsManager(apiKeys);
 
 export default NVIDIAModels;

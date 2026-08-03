@@ -1,41 +1,7 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, AutocompleteInteraction } from "discord.js";
 import utils from "../utils";
-import db from "../mysql/database";
-
-function ensureStaff(executorRank: string | null): { ok: boolean; error?: string } {
-    const idx = utils.getStaffRankIndex(executorRank);
-    if (idx < 0) return { ok: false, error: "You must be staff to use this command." };
-    return { ok: true };
-}
-
-function ensureModPlus(executorRank: string | null): { ok: boolean; error?: string } {
-    const idx = utils.getStaffRankIndex(executorRank);
-    const min = utils.getStaffRankIndex("Moderator");
-    if (idx < 0 || idx < min) return { ok: false, error: "Moderator rank or higher required." };
-    return { ok: true };
-}
-
-function ensureAdminPlus(executorRank: string | null): { ok: boolean; error?: string } {
-    const idx = utils.getStaffRankIndex(executorRank);
-    const min = utils.getStaffRankIndex("Probationary Administrator");
-    if (idx < 0 || idx < min) return { ok: false, error: "Probationary Administrator rank or higher required." };
-    return { ok: true };
-}
-
-async function logStaffAction(staffId: string, actionType: string, targetId: string | null, details: string, metadata?: any) {
-    try {
-        await db.query("INSERT INTO staff_audit_log SET ?", [{
-            staff_id: staffId,
-            action_type: actionType,
-            target_id: targetId,
-            details: details,
-            metadata: metadata ? JSON.stringify(metadata) : null,
-            created_at: Date.now()
-        }]);
-    } catch (error) {
-        console.error("Failed to log staff action:", error);
-    }
-}
+import db, { withTransaction } from "../mysql/database";
+import { initializeShopItems, initializeRPGData } from "../rpg_init";
 
 export default {
     data: new SlashCommandBuilder()
@@ -230,50 +196,48 @@ export default {
     category: "Bot Staff",
     autocomplete: async (interaction: AutocompleteInteraction) => {
         const focused = interaction.options.getFocused(true);
-        const query = String(focused.value || "").toLowerCase();
+        const query = String(focused.value || "").toLowerCase().replace(/([\\%_])/g, "\\$1");
         const configs: Record<string, { sql: string; label: (row: any) => string }> = {
             item_id: {
-                sql: "SELECT id, name FROM rpg_items ORDER BY id DESC LIMIT 25",
+                sql: "SELECT id, name FROM rpg_items WHERE name LIKE ? ORDER BY id DESC LIMIT 25",
                 label: (row: any) => `#${row.id} ${row.name}`
             },
             achievement_id: {
-                sql: "SELECT id, name FROM rpg_achievements ORDER BY id DESC LIMIT 25",
+                sql: "SELECT id, name FROM rpg_achievements WHERE name LIKE ? ORDER BY id DESC LIMIT 25",
                 label: (row: any) => `#${row.id} ${row.name}`
             },
             pet_id: {
-                sql: "SELECT id, name FROM rpg_pets ORDER BY id DESC LIMIT 25",
+                sql: "SELECT id, name FROM rpg_pets WHERE name LIKE ? ORDER BY id DESC LIMIT 25",
                 label: (row: any) => `#${row.id} ${row.name}`
             },
             dungeon_id: {
-                sql: "SELECT id, name FROM rpg_dungeons ORDER BY id DESC LIMIT 25",
+                sql: "SELECT id, name FROM rpg_dungeons WHERE name LIKE ? ORDER BY id DESC LIMIT 25",
                 label: (row: any) => `#${row.id} ${row.name}`
             },
             material_id: {
-                sql: "SELECT id, name FROM rpg_crafting_materials ORDER BY id DESC LIMIT 25",
+                sql: "SELECT id, name FROM rpg_crafting_materials WHERE name LIKE ? ORDER BY id DESC LIMIT 25",
                 label: (row: any) => `#${row.id} ${row.name}`
             }
         };
         const config = configs[focused.name];
         if (!config) return await interaction.respond([]);
-        const rows = await db.query(config.sql) as unknown as any[];
+        const rows = await db.query(config.sql, [`%${query}%`]) as unknown as any[];
         await interaction.respond(
             rows
                 .map(row => ({ name: config.label(row), value: Number(row.id) }))
-                .filter(row => row.name.toLowerCase().includes(query) || String(row.value).includes(query))
-                .slice(0, 25)
         );
     },
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         const sub = interaction.options.getSubcommand();
         const executor = interaction.user;
-        const executorRank = await utils.getUserStaffRank(executor.id);
+        const executorRank = await utils.getCachedUserStaffRank(executor.id);
 
-        const perm = ensureStaff(executorRank);
+        const perm = utils.ensureStaff(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
         switch (sub) {
             case "create_item": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const name = interaction.options.getString("name", true);
@@ -296,12 +260,12 @@ export default {
                     max_stack: maxStack
                 }]);
 
-                await logStaffAction(executor.id, "RPG_CREATE_ITEM", null, `Created item: ${name} (${type}, ${rarity})`, { name, type, rarity, baseValue });
+                await utils.logStaffAction(executor.id, "RPG_CREATE_ITEM", null, `Created item: ${name} (${type}, ${rarity})`, { name, type, rarity, baseValue });
                 return utils.safeInteractionRespond(interaction, `✅ **Item created successfully!**\n**Name:** ${name}\n**Type:** ${type}\n**Rarity:** ${rarity}\n**ID:** ${result.insertId}\n**Base Value:** ${baseValue}g`);
             }
 
             case "edit_item": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const itemId = interaction.options.getInteger("item_id", true);
@@ -332,12 +296,12 @@ export default {
                 const oldValue = item[0][field];
                 await db.query(`UPDATE rpg_items SET ${field} = ? WHERE id = ?`, [processedValue, itemId]);
 
-                await logStaffAction(executor.id, "RPG_EDIT_ITEM", null, `Edited item ${item[0].name}: ${field} = ${oldValue} → ${processedValue}`, { itemId, field, oldValue, newValue: processedValue });
+                await utils.logStaffAction(executor.id, "RPG_EDIT_ITEM", null, `Edited item ${item[0].name}: ${field} = ${oldValue} → ${processedValue}`, { itemId, field, oldValue, newValue: processedValue });
                 return utils.safeInteractionRespond(interaction, `✅ **Item updated!**\n**Item:** ${item[0].name}\n**Field:** ${field}\n**Old Value:** ${oldValue}\n**New Value:** ${processedValue}`);
             }
 
             case "delete_item": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const itemId = interaction.options.getInteger("item_id", true);
@@ -347,17 +311,19 @@ export default {
                     return utils.safeInteractionRespond(interaction, `❌ Item ID **${itemId}** not found.`);
                 }
 
-                await db.query("DELETE FROM rpg_items WHERE id = ?", [itemId]);
-                await db.query("DELETE FROM rpg_equipment WHERE item_id = ?", [itemId]);
-                await db.query("DELETE FROM rpg_consumables WHERE item_id = ?", [itemId]);
-                await db.query("DELETE FROM rpg_inventory WHERE item_id = ?", [itemId]);
+                await withTransaction(async (conn) => {
+                    await conn.query("DELETE FROM rpg_items WHERE id = ?", [itemId]);
+                    await conn.query("DELETE FROM rpg_equipment WHERE item_id = ?", [itemId]);
+                    await conn.query("DELETE FROM rpg_consumables WHERE item_id = ?", [itemId]);
+                    await conn.query("DELETE FROM rpg_inventory WHERE item_id = ?", [itemId]);
+                });
 
-                await logStaffAction(executor.id, "RPG_DELETE_ITEM", null, `Deleted item: ${item[0].name}`, { itemId, itemName: item[0].name });
+                await utils.logStaffAction(executor.id, "RPG_DELETE_ITEM", null, `Deleted item: ${item[0].name}`, { itemId, itemName: item[0].name });
                 return utils.safeInteractionRespond(interaction, `✅ **Item deleted:** ${item[0].name}\nAll related data has been removed.`);
             }
 
             case "list_items": {
-                const perm = ensureModPlus(executorRank);
+                const perm = utils.ensureModPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const typeFilter = interaction.options.getString("type") || "all";
@@ -410,12 +376,12 @@ export default {
                     embed.setFooter({ text: `Showing 25 of ${items.length} items` });
                 }
 
-                await logStaffAction(executor.id, "RPG_LIST_ITEMS", null, `Listed items: ${typeFilter}/${rarityFilter}`);
+                await utils.logStaffAction(executor.id, "RPG_LIST_ITEMS", null, `Listed items: ${typeFilter}/${rarityFilter}`);
                 return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
             case "create_achievement": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const name = interaction.options.getString("name", true);
@@ -438,12 +404,12 @@ export default {
                     icon
                 }]);
 
-                await logStaffAction(executor.id, "RPG_CREATE_ACHIEVEMENT", null, `Created achievement: ${name}`, { name, category, requirementType, requirementValue });
+                await utils.logStaffAction(executor.id, "RPG_CREATE_ACHIEVEMENT", null, `Created achievement: ${name}`, { name, category, requirementType, requirementValue });
                 return utils.safeInteractionRespond(interaction, `✅ **Achievement created!**\n${icon} **${name}**\n${description}\n**Category:** ${category}\n**Requirement:** ${requirementType} = ${requirementValue}\n**Rewards:** ${rewardGold}g, ${rewardExperience} XP\n**ID:** ${result.insertId}`);
             }
 
             case "delete_achievement": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const achievementId = interaction.options.getInteger("achievement_id", true);
@@ -453,15 +419,17 @@ export default {
                     return utils.safeInteractionRespond(interaction, `❌ Achievement ID **${achievementId}** not found.`);
                 }
 
-                await db.query("DELETE FROM rpg_achievements WHERE id = ?", [achievementId]);
-                await db.query("DELETE FROM rpg_character_achievements WHERE achievement_id = ?", [achievementId]);
+                await withTransaction(async (conn) => {
+                    await conn.query("DELETE FROM rpg_achievements WHERE id = ?", [achievementId]);
+                    await conn.query("DELETE FROM rpg_character_achievements WHERE achievement_id = ?", [achievementId]);
+                });
 
-                await logStaffAction(executor.id, "RPG_DELETE_ACHIEVEMENT", null, `Deleted achievement: ${achievement[0].name}`, { achievementId });
+                await utils.logStaffAction(executor.id, "RPG_DELETE_ACHIEVEMENT", null, `Deleted achievement: ${achievement[0].name}`, { achievementId });
                 return utils.safeInteractionRespond(interaction, `✅ **Achievement deleted:** ${achievement[0].name}`);
             }
 
             case "list_achievements": {
-                const perm = ensureModPlus(executorRank);
+                const perm = utils.ensureModPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const categoryFilter = interaction.options.getString("category") || "all";
@@ -496,12 +464,12 @@ export default {
                     });
                 }
 
-                await logStaffAction(executor.id, "RPG_LIST_ACHIEVEMENTS", null, `Listed achievements: ${categoryFilter}`);
+                await utils.logStaffAction(executor.id, "RPG_LIST_ACHIEVEMENTS", null, `Listed achievements: ${categoryFilter}`);
                 return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
             case "create_pet": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const name = interaction.options.getString("name", true);
@@ -530,12 +498,12 @@ export default {
                     emoji
                 }]);
 
-                await logStaffAction(executor.id, "RPG_CREATE_PET", null, `Created pet: ${name}`, { name, rarity, basePrice });
+                await utils.logStaffAction(executor.id, "RPG_CREATE_PET", null, `Created pet: ${name}`, { name, rarity, basePrice });
                 return utils.safeInteractionRespond(interaction, `✅ **Pet created!**\n${emoji} **${name}**\n${description}\n**Rarity:** ${rarity}\n**Price:** ${basePrice}g\n**Stats:** STR+${strength} DEF+${defense} AGI+${agility} INT+${intelligence} LUK+${luck}\n**ID:** ${result.insertId}`);
             }
 
             case "delete_pet": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const petId = interaction.options.getInteger("pet_id", true);
@@ -545,18 +513,22 @@ export default {
                     return utils.safeInteractionRespond(interaction, `❌ Pet ID **${petId}** not found.`);
                 }
 
-                await db.query("DELETE FROM rpg_pets WHERE id = ?", [petId]);
-                await db.query("DELETE FROM rpg_character_pets WHERE pet_id = ?", [petId]);
+                await withTransaction(async (conn) => {
+                    await conn.query("DELETE FROM rpg_pets WHERE id = ?", [petId]);
+                    await conn.query("DELETE FROM rpg_character_pets WHERE pet_id = ?", [petId]);
+                });
 
-                await logStaffAction(executor.id, "RPG_DELETE_PET", null, `Deleted pet: ${pet[0].name}`, { petId });
+                await utils.logStaffAction(executor.id, "RPG_DELETE_PET", null, `Deleted pet: ${pet[0].name}`, { petId });
                 return utils.safeInteractionRespond(interaction, `✅ **Pet deleted:** ${pet[0].name}`);
             }
 
             case "list_pets": {
-                const perm = ensureModPlus(executorRank);
+                const perm = utils.ensureModPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
-                const pets: any = await db.query("SELECT * FROM rpg_pets ORDER BY rarity, name");
+                const totalResult: any = await db.query("SELECT COUNT(*) AS total FROM rpg_pets");
+                const total = Number(totalResult[0]?.total || 0);
+                const pets: any = await db.query("SELECT * FROM rpg_pets ORDER BY rarity, name LIMIT 25");
 
                 if (!pets || pets.length === 0) {
                     return utils.safeInteractionRespond(interaction, "No pets found.");
@@ -565,7 +537,7 @@ export default {
                 const embed = new EmbedBuilder()
                     .setColor("Green")
                     .setTitle("🐾 RPG Pets Database")
-                    .setDescription(`Total pets: ${pets.length}`)
+                    .setDescription(`Total pets: ${total}`)
                     .setTimestamp();
 
                 for (const pet of pets) {
@@ -576,12 +548,16 @@ export default {
                     });
                 }
 
-                await logStaffAction(executor.id, "RPG_LIST_PETS", null, "Listed all pets");
+                if (total > pets.length) {
+                    embed.setFooter({ text: `Showing ${pets.length} of ${total} pets` });
+                }
+
+                await utils.logStaffAction(executor.id, "RPG_LIST_PETS", null, "Listed all pets");
                 return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
             case "create_dungeon": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const name = interaction.options.getString("name", true);
@@ -610,12 +586,12 @@ export default {
                     cooldown: cooldown * 1000
                 }]);
 
-                await logStaffAction(executor.id, "RPG_CREATE_DUNGEON", null, `Created dungeon: ${name}`, { name, difficulty, requiredLevel });
+                await utils.logStaffAction(executor.id, "RPG_CREATE_DUNGEON", null, `Created dungeon: ${name}`, { name, difficulty, requiredLevel });
                 return utils.safeInteractionRespond(interaction, `✅ **Dungeon created!**\n🗺️ **${name}**\n${description}\n**Difficulty:** ${difficulty} | **Level:** ${requiredLevel}+\n**Stages:** ${stages} | **Boss:** ${bossName}\n**Rewards:** ${rewardGoldMin}-${rewardGoldMax}g, ${rewardExpMin}-${rewardExpMax} XP\n**Cooldown:** ${cooldown}s\n**ID:** ${result.insertId}`);
             }
 
             case "delete_dungeon": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const dungeonId = interaction.options.getInteger("dungeon_id", true);
@@ -625,18 +601,22 @@ export default {
                     return utils.safeInteractionRespond(interaction, `❌ Dungeon ID **${dungeonId}** not found.`);
                 }
 
-                await db.query("DELETE FROM rpg_dungeons WHERE id = ?", [dungeonId]);
-                await db.query("DELETE FROM rpg_dungeon_runs WHERE dungeon_id = ?", [dungeonId]);
+                await withTransaction(async (conn) => {
+                    await conn.query("DELETE FROM rpg_dungeons WHERE id = ?", [dungeonId]);
+                    await conn.query("DELETE FROM rpg_dungeon_runs WHERE dungeon_id = ?", [dungeonId]);
+                });
 
-                await logStaffAction(executor.id, "RPG_DELETE_DUNGEON", null, `Deleted dungeon: ${dungeon[0].name}`, { dungeonId });
+                await utils.logStaffAction(executor.id, "RPG_DELETE_DUNGEON", null, `Deleted dungeon: ${dungeon[0].name}`, { dungeonId });
                 return utils.safeInteractionRespond(interaction, `✅ **Dungeon deleted:** ${dungeon[0].name}`);
             }
 
             case "list_dungeons": {
-                const perm = ensureModPlus(executorRank);
+                const perm = utils.ensureModPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
-                const dungeons: any = await db.query("SELECT * FROM rpg_dungeons ORDER BY required_level");
+                const totalResult: any = await db.query("SELECT COUNT(*) AS total FROM rpg_dungeons");
+                const total = Number(totalResult[0]?.total || 0);
+                const dungeons: any = await db.query("SELECT * FROM rpg_dungeons ORDER BY required_level LIMIT 25");
 
                 if (!dungeons || dungeons.length === 0) {
                     return utils.safeInteractionRespond(interaction, "No dungeons found.");
@@ -645,7 +625,7 @@ export default {
                 const embed = new EmbedBuilder()
                     .setColor("Red")
                     .setTitle("🗺️ RPG Dungeons Database")
-                    .setDescription(`Total dungeons: ${dungeons.length}`)
+                    .setDescription(`Total dungeons: ${total}`)
                     .setTimestamp();
 
                 for (const dungeon of dungeons) {
@@ -657,12 +637,16 @@ export default {
                     });
                 }
 
-                await logStaffAction(executor.id, "RPG_LIST_DUNGEONS", null, "Listed all dungeons");
+                if (total > dungeons.length) {
+                    embed.setFooter({ text: `Showing ${dungeons.length} of ${total} dungeons` });
+                }
+
+                await utils.logStaffAction(executor.id, "RPG_LIST_DUNGEONS", null, "Listed all dungeons");
                 return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
             case "create_material": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const name = interaction.options.getString("name", true);
@@ -685,12 +669,12 @@ export default {
                     emoji
                 }]);
 
-                await logStaffAction(executor.id, "RPG_CREATE_MATERIAL", null, `Created material: ${name}`, { name, rarity, dropRate });
+                await utils.logStaffAction(executor.id, "RPG_CREATE_MATERIAL", null, `Created material: ${name}`, { name, rarity, dropRate });
                 return utils.safeInteractionRespond(interaction, `✅ **Material created!**\n${emoji} **${name}**\n${description}\n**Rarity:** ${rarity}\n**Stack Size:** ${stackSize}\n**Drop Rate:** ${dropRate}%\n**ID:** ${result.insertId}`);
             }
 
             case "delete_material": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const materialId = interaction.options.getInteger("material_id", true);
@@ -700,18 +684,22 @@ export default {
                     return utils.safeInteractionRespond(interaction, `❌ Material ID **${materialId}** not found.`);
                 }
 
-                await db.query("DELETE FROM rpg_crafting_materials WHERE id = ?", [materialId]);
-                await db.query("DELETE FROM rpg_character_materials WHERE material_id = ?", [materialId]);
+                await withTransaction(async (conn) => {
+                    await conn.query("DELETE FROM rpg_crafting_materials WHERE id = ?", [materialId]);
+                    await conn.query("DELETE FROM rpg_character_materials WHERE material_id = ?", [materialId]);
+                });
 
-                await logStaffAction(executor.id, "RPG_DELETE_MATERIAL", null, `Deleted material: ${material[0].name}`, { materialId });
+                await utils.logStaffAction(executor.id, "RPG_DELETE_MATERIAL", null, `Deleted material: ${material[0].name}`, { materialId });
                 return utils.safeInteractionRespond(interaction, `✅ **Material deleted:** ${material[0].name}`);
             }
 
             case "list_materials": {
-                const perm = ensureModPlus(executorRank);
+                const perm = utils.ensureModPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
-                const materials: any = await db.query("SELECT * FROM rpg_crafting_materials ORDER BY rarity, name");
+                const totalResult: any = await db.query("SELECT COUNT(*) AS total FROM rpg_crafting_materials");
+                const total = Number(totalResult[0]?.total || 0);
+                const materials: any = await db.query("SELECT * FROM rpg_crafting_materials ORDER BY rarity, name LIMIT 25");
 
                 if (!materials || materials.length === 0) {
                     return utils.safeInteractionRespond(interaction, "No materials found.");
@@ -720,7 +708,7 @@ export default {
                 const embed = new EmbedBuilder()
                     .setColor("Orange")
                     .setTitle("📦 RPG Materials Database")
-                    .setDescription(`Total materials: ${materials.length}`)
+                    .setDescription(`Total materials: ${total}`)
                     .setTimestamp();
 
                 for (const mat of materials) {
@@ -731,12 +719,16 @@ export default {
                     });
                 }
 
-                await logStaffAction(executor.id, "RPG_LIST_MATERIALS", null, "Listed all materials");
+                if (total > materials.length) {
+                    embed.setFooter({ text: `Showing ${materials.length} of ${total} materials` });
+                }
+
+                await utils.logStaffAction(executor.id, "RPG_LIST_MATERIALS", null, "Listed all materials");
                 return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
             }
 
             case "init_data": {
-                const perm = ensureAdminPlus(executorRank);
+                const perm = utils.ensureAdminPlus(executorRank);
                 if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
                 const force = interaction.options.getBoolean("force") || false;
@@ -744,19 +736,16 @@ export default {
                 await utils.safeInteractionRespond(interaction, "🔄 Initializing RPG data... This may take a moment.");
 
                 try {
-                    const { initializeShopItems, initializeRPGData } = await import("../rpg_init");
-
                     if (force) {
                         await utils.safeInteractionRespond(interaction, "⚠️ Force mode enabled. Checking existing data...");
                     }
 
-                    await initializeShopItems();
-                    await initializeRPGData();
+                    await Promise.all([initializeShopItems(), initializeRPGData()]);
 
-                    await logStaffAction(executor.id, "RPG_INIT_DATA", null, `Initialized RPG data (force: ${force})`);
+                    await utils.logStaffAction(executor.id, "RPG_INIT_DATA", null, `Initialized RPG data (force: ${force})`);
                     return utils.safeInteractionRespond(interaction, `✅ **RPG data initialization complete!**\n\nInitialized:\n• Shop items and equipment\n• Achievements\n• Crafting materials\n• Pets\n• Dungeons\n\n${force ? "**Force mode:** Existing data was checked for conflicts." : "**Note:** Existing data was not overwritten."}`);
                 } catch (error: any) {
-                    await logStaffAction(executor.id, "RPG_INIT_DATA_FAILED", null, `Failed to initialize RPG data: ${error.message}`);
+                    await utils.logStaffAction(executor.id, "RPG_INIT_DATA_FAILED", null, `Failed to initialize RPG data: ${error.message}`);
                     return utils.safeInteractionRespond(interaction, `❌ **Failed to initialize RPG data**\n\`\`\`${error.message}\`\`\``);
                 }
             }

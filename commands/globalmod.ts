@@ -1,49 +1,34 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from "discord.js";
+import fs from "fs";
 import utils from "../utils";
 import db from "../mysql/database";
 import client, { manager } from "..";
-import { GlobalWarning, SupportTicket, SupportMessage, LastInsertIdResult } from "../types/interfaces";
+import data from "../data";
+import { SupportTicket, SupportMessage } from "../types/interfaces";
+import StaffRanksManager from "../managers/StaffRanksManager";
 
-// Helper to log staff actions
-async function logStaffAction(staffId: string, actionType: string, targetId: string | null, details: string, metadata?: any) {
-  try {
-    await db.query("INSERT INTO staff_audit_log SET ?", [{
-      staff_id: staffId,
-      action_type: actionType,
-      target_id: targetId,
-      details: details,
-      metadata: metadata ? JSON.stringify(metadata) : null,
-      created_at: Date.now()
-    }]);
-  } catch (error) {
-    console.error("Failed to log staff action:", error);
-  }
-}
-
-// Calculate total active warning points and trigger auto-escalation
 async function checkUserPoints(userId: string, username: string, executorId: string, executorUsername: string): Promise<{ totalPoints: number; escalated: boolean; action?: string }> {
   try {
-    const warnings = (await db.query(
-      "SELECT * FROM global_warnings WHERE userid = ? AND active = TRUE AND (appeal_status IS NULL OR appeal_status != 'approved') AND expires_at > ?",
+    const result = (await db.query(
+      "SELECT COALESCE(SUM(points), 0) AS total FROM global_warnings WHERE userid = ? AND active = TRUE AND (appeal_status IS NULL OR appeal_status != 'approved') AND expires_at > ?",
       [userId, Date.now()]
-    ) as unknown as GlobalWarning[]);
+    ) as unknown as any[]);
 
-    const totalPoints = warnings.reduce((sum, w) => sum + (w.points || 1), 0);
+    const totalPoints = Number(result?.[0]?.total ?? 0);
 
-    // Auto-escalation thresholds
     if (totalPoints >= 5) {
-      // Auto-ban at 5+ points
       await db.query("INSERT INTO global_bans (id, active, times) VALUES (?, TRUE, 1) ON DUPLICATE KEY UPDATE active = TRUE, times = times + 1", [userId]);
+      utils.invalidateStaffModCache(userId);
       await manager.announce(`⚠️ **AUTO-BAN**: User \`${username}\` has been automatically blacklisted due to reaching ${totalPoints} warning points.`, "en");
-      await logStaffAction(executorId, "AUTO_BAN", userId, `Auto-banned ${username} for ${totalPoints} points`, { totalPoints, threshold: 5 });
+      await utils.logStaffAction(executorId, "AUTO_BAN", userId, `Auto-banned ${username} for ${totalPoints} points`, { totalPoints, threshold: 5 });
       return { totalPoints, escalated: true, action: "ban" };
     } else if (totalPoints >= 3) {
-      // Auto-mute at 3-4 points (24 hours)
-      const until = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+      const until = Date.now() + 24 * 60 * 60 * 1000;
       await db.query("INSERT INTO global_mutes SET ? ON DUPLICATE KEY UPDATE reason = VALUES(reason), authorid = VALUES(authorid), createdAt = VALUES(createdAt), until = VALUES(until)",
         [{ id: userId, reason: "Automatic mute due to warning points", authorid: executorId, createdAt: Date.now(), until }]);
+      utils.invalidateStaffModCache(userId);
       await manager.announce(`⚠️ **AUTO-MUTE**: User \`${username}\` has been automatically muted for 24h due to reaching ${totalPoints} warning points.`, "en");
-      await logStaffAction(executorId, "AUTO_MUTE", userId, `Auto-muted ${username} for 24h (${totalPoints} points)`, { totalPoints, threshold: 3, duration: "24h" });
+      await utils.logStaffAction(executorId, "AUTO_MUTE", userId, `Auto-muted ${username} for 24h (${totalPoints} points)`, { totalPoints, threshold: 3, duration: "24h" });
       return { totalPoints, escalated: true, action: "mute" };
     }
 
@@ -55,28 +40,19 @@ async function checkUserPoints(userId: string, username: string, executorId: str
 }
 
 function ensureCoMPlus(executorRank: string | null): { ok: boolean; error?: string } {
-  const idx = utils.getStaffRankIndex(executorRank);
-  const min = utils.getStaffRankIndex("Chief of Moderation");
-  if (idx < 0 || idx < min) return { ok: false, error: "Insufficient permissions (Chief of Moderation+ required)." };
-  return { ok: true };
+  return utils.ensureCoMPlus(executorRank);
 }
 function ensureModPlus(executorRank: string | null): { ok: boolean; error?: string } {
-  const idx = utils.getStaffRankIndex(executorRank);
-  const min = utils.getStaffRankIndex("Moderator");
-  if (idx < 0 || idx < min) return { ok: false, error: "Insufficient permissions (Moderator+ required)." };
-  return { ok: true };
+  return utils.ensureModPlus(executorRank);
 }
 function ensureAnyStaff(executorRank: string | null): { ok: boolean; error?: string } {
-  const idx = utils.getStaffRankIndex(executorRank);
-  if (idx < 0) return { ok: false, error: "Insufficient permissions (staff only)." };
-  return { ok: true };
+  return utils.ensureStaff(executorRank);
 }
 function ensureProbAdminPlus(executorRank: string | null): { ok: boolean; error?: string } {
-  const idx = utils.getStaffRankIndex(executorRank);
-  const min = utils.getStaffRankIndex("Probationary Administrator");
-  if (idx < 0 || idx < min) return { ok: false, error: "Insufficient permissions (Probationary Administrator+ required)." };
-  return { ok: true };
+  return utils.ensureAdminPlus(executorRank);
 }
+
+let membersSearched = false;
 
 export default {
   data: new SlashCommandBuilder()
@@ -121,12 +97,14 @@ export default {
     .addSubcommand(s => s.setName("closeticket").setDescription("Close a support ticket")
       .addIntegerOption(o => o.setName("ticket_id").setDescription("Ticket ID").setRequired(true)))
     .addSubcommand(s => s.setName("search_user").setDescription("Search a user's ID by username and display found user info with moderation status")
-      .addStringOption(o => o.setName("username").setDescription("Username to search for").setRequired(true))),
+      .addStringOption(o => o.setName("username").setDescription("Username to search for").setRequired(true)))
+    .addSubcommand(s => s.setName("announce").setDescription("Send an announcement to global chat")
+      .addStringOption(o => o.setName("language").setDescription("Language code").setRequired(true))),
   category: "Bot Staff",
   execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
     const sub = interaction.options.getSubcommand();
     const executor = interaction.user;
-    const executorRank = await utils.getUserStaffRank(executor.id);
+    const executorRank = await utils.getCachedUserStaffRank(executor.id);
 
     switch (sub) {
       case "blacklist": {
@@ -135,8 +113,9 @@ export default {
         const perm = ensureCoMPlus(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         await db.query("INSERT INTO global_bans (id, active, times) VALUES (?, TRUE, 1) ON DUPLICATE KEY UPDATE active = TRUE, times = times + 1", [user.id]);
+        utils.invalidateStaffModCache(user.id);
         await manager.announce(`User \`${user.username}\` has been globally blacklisted by ${executor.username}. Reason: ${reason}`, "en");
-        await logStaffAction(executor.id, "BLACKLIST", user.id, `Blacklisted ${user.tag}`, { reason });
+        await utils.logStaffAction(executor.id, "BLACKLIST", user.id, `Blacklisted ${user.tag}`, { reason });
         return utils.safeInteractionRespond(interaction, `Blacklisted \`${user.username}\`. Reason: ${reason}`);
       }
       case "unblacklist": {
@@ -144,8 +123,9 @@ export default {
         const perm = ensureCoMPlus(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         await db.query("UPDATE global_bans SET active = FALSE WHERE id = ?", [user.id]);
+        utils.invalidateStaffModCache(user.id);
         await manager.announce(`User \`${user.username}\` has been globally unblacklisted by ${executor.username}.`, "en");
-        await logStaffAction(executor.id, "UNBLACKLIST", user.id, `Removed blacklist for ${user.tag}`);
+        await utils.logStaffAction(executor.id, "UNBLACKLIST", user.id, `Removed blacklist for ${user.tag}`);
         return utils.safeInteractionRespond(interaction, `Removed blacklist for \`${user.username}\`.`);
       }
       case "warn": {
@@ -160,7 +140,7 @@ export default {
 
         const expiresAt = Date.now() + (expiryDays * 24 * 60 * 60 * 1000);
 
-        await db.query("INSERT INTO global_warnings SET ?", [{
+        const insertResult: any = await db.query("INSERT INTO global_warnings SET ?", [{
           userid: user.id,
           reason,
           authorid: executor.id,
@@ -172,10 +152,7 @@ export default {
           appealed: false
         }]);
 
-        const warningId = await (async () => {
-          const result = await db.query("SELECT id WHERE userid = ? ORDER BY createdAt DESC LIMIT 1", [user.id]) as unknown as LastInsertIdResult[];
-          return result[0]?.id || 0;
-        })();
+        const warningId = insertResult?.insertId || 0;
 
         const pointCheck = await checkUserPoints(user.id, user.username, executor.id, executor.username);
 
@@ -194,6 +171,9 @@ export default {
 
         const emoji = categoryEmojis[category] || "⚠️";
         const pointsText = points === 1 ? "1 point" : `${points} points`;
+
+        const announceMsg = `${emoji} **Warning Issued**: User \`${user.username}\` has been warned by ${executor.username} (${pointsText}, ${category})${pointCheck.escalated ? ` and was automatically ${pointCheck.action === "ban" ? "blacklisted" : "muted"}` : ""}. Reason: ${reason}`;
+        await manager.announce(announceMsg, "en");
 
         let responseMessage = `${emoji} **Warning Issued**\n`;
         responseMessage += `User: \`${user.username}\`\n`;
@@ -221,27 +201,44 @@ export default {
           escalationAction: pointCheck.action,
         });
 
-        // DM the user
         try {
+          let warningTexts = {
+            title: `${emoji} You've Received a Warning`,
+            description: `You have been warned in the global chat by ${executor.username}.`,
+            reason: "Reason",
+            points: "Points",
+            category: "Category",
+            totalPoints: "Total Points",
+            expires: "Expires",
+            warningId: "Warning ID",
+            footer: "You can appeal this warning using /appeal command",
+            autoAction: "⚠️ Automatic Action Taken",
+            banned: "You have been blacklisted from the global chat.",
+            muted: "You have been muted for 24 hours."
+          };
+          const userLang = await utils.getUserLanguage(user.id);
+          if (userLang !== "en") {
+            try { warningTexts = await utils.autoTranslate(warningTexts, "en", userLang); } catch {}
+          }
           const userEmbed = new EmbedBuilder()
             .setColor("Orange")
-            .setTitle(`${emoji} You've Received a Warning`)
-            .setDescription(`You have been warned in the global chat by ${executor.username}.`)
+            .setTitle(warningTexts.title)
+            .setDescription(warningTexts.description)
             .addFields(
-              { name: "Reason", value: reason },
-              { name: "Points", value: pointsText, inline: true },
-              { name: "Category", value: category, inline: true },
-              { name: "Total Points", value: pointCheck.totalPoints.toString(), inline: true },
-              { name: "Expires", value: `<t:${Math.floor(expiresAt / 1000)}:R>` },
-              { name: "Warning ID", value: `#${warningId}` }
+              { name: warningTexts.reason, value: reason },
+              { name: warningTexts.points, value: pointsText, inline: true },
+              { name: warningTexts.category, value: category, inline: true },
+              { name: warningTexts.totalPoints, value: pointCheck.totalPoints.toString(), inline: true },
+              { name: warningTexts.expires, value: `<t:${Math.floor(expiresAt / 1000)}:R>` },
+              { name: warningTexts.warningId, value: `#${warningId}` }
             )
-            .setFooter({ text: "You can appeal this warning using /appeal command" })
+            .setFooter({ text: warningTexts.footer })
             .setTimestamp();
 
           if (pointCheck.escalated) {
             userEmbed.addFields({
-              name: "⚠️ Automatic Action Taken",
-              value: pointCheck.action === "ban" ? "You have been blacklisted from the global chat." : "You have been muted for 24 hours."
+              name: warningTexts.autoAction,
+              value: pointCheck.action === "ban" ? warningTexts.banned : warningTexts.muted
             });
           }
 
@@ -250,7 +247,7 @@ export default {
           console.error("Failed to DM user:", error);
         }
 
-        await logStaffAction(executor.id, "WARN", user.id, `Warned ${user.tag} (${pointsText})`, {
+        await utils.logStaffAction(executor.id, "WARN", user.id, `Warned ${user.tag} (${pointsText})`, {
           reason,
           points,
           category,
@@ -271,8 +268,9 @@ export default {
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         const until = minutes > 0 ? Date.now() + minutes * 60_000 : 0;
         await db.query("INSERT INTO global_mutes SET ? ON DUPLICATE KEY UPDATE reason = VALUES(reason), authorid = VALUES(authorid), createdAt = VALUES(createdAt), until = VALUES(until)", [{ id: user.id, reason, authorid: executor.id, createdAt: Date.now(), until }]);
+        utils.invalidateStaffModCache(user.id);
         await manager.announce(`User \`${user.username}\` has been globally muted by ${executor.username}. Reason: ${reason}`, "en");
-        await logStaffAction(executor.id, "MUTE", user.id, `Muted ${user.tag}${minutes > 0 ? ` for ${minutes}m` : " indefinitely"}`, { reason, minutes, until });
+        await utils.logStaffAction(executor.id, "MUTE", user.id, `Muted ${user.tag}${minutes > 0 ? ` for ${minutes}m` : " indefinitely"}`, { reason, minutes, until });
         return utils.safeInteractionRespond(interaction, `Muted \`${user.username}\` ${minutes > 0 ? `for ${minutes}m` : "indefinitely"}.`);
       }
       case "unmute": {
@@ -280,15 +278,18 @@ export default {
         const perm = ensureModPlus(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         await db.query("DELETE FROM global_mutes WHERE id = ?", [user.id]);
+        utils.invalidateStaffModCache(user.id);
         await manager.announce(`User \`${user.username}\` has been globally unmuted by ${executor.username}.`, "en");
-        await logStaffAction(executor.id, "UNMUTE", user.id, `Unmuted ${user.tag}`);
+        await utils.logStaffAction(executor.id, "UNMUTE", user.id, `Unmuted ${user.tag}`);
         return utils.safeInteractionRespond(interaction, `Unmuted \`${user.username}\`.`);
       }
       case "status": {
         const user = interaction.options.getUser("user", true);
-        const blacklisted = await utils.isUserBlacklisted(user.id);
-        const muted = await utils.isUserMuted(user.id);
-        const rank = await utils.getUserStaffRank(user.id);
+        const [blacklisted, muted, rank] = await Promise.all([
+          utils.isUserBlacklistedCached(user.id),
+          utils.isUserMutedCached(user.id),
+          utils.getCachedUserStaffRank(user.id)
+        ]);
         return utils.safeInteractionRespond(interaction, `Status for \`${user.username}\`:\nRank: ${rank ?? "(none)"}\nBlacklisted: ${blacklisted ? "Yes" : "No"}\nMuted: ${muted ? "Yes" : "No"}`);
       }
       case "closeticket": {
@@ -310,14 +311,11 @@ export default {
           const user = await interaction.client.users.fetch(ticket.user_id);
           const messages = (await db.query("SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY timestamp ASC", [ticketId]) as unknown as SupportMessage[]);
 
-          // Calculate duration
           const durationMs = Date.now() - ticket.created_at;
           const hours = Math.floor(durationMs / 3600000);
           const minutes = Math.floor((durationMs % 3600000) / 60000);
           const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 
-          // Generate transcripts (same logic as button handler)
-          const fs = await import("fs");
           let textTranscript = `Support Ticket #${ticketId} - Transcript\n`;
           textTranscript += `User: ${user.tag} (${user.id})\n`;
           textTranscript += `Created: ${new Date(ticket.created_at).toISOString()}\n`;
@@ -338,7 +336,7 @@ export default {
             }
           }
 
-          let htmlTemplate = fs.readFileSync("./transcript_placeholder.html", "utf-8");
+          let htmlTemplate = await fs.promises.readFile("./transcript_placeholder.html", "utf-8");
           let messagesHtml = "";
 
           for (const msg of messages) {
@@ -386,14 +384,11 @@ export default {
             .replace(/{initialMessage}/g, ticket.initial_message ?? "No initial message")
             .replace(/{messages}/g, messagesHtml);
 
-          fs.writeFileSync(`./transcript-${ticketId}.txt`, textTranscript);
-          fs.writeFileSync(`./transcript-${ticketId}.html`, htmlTemplate);
+          await fs.promises.writeFile(`./transcript-${ticketId}.txt`, textTranscript);
+          await fs.promises.writeFile(`./transcript-${ticketId}.html`, htmlTemplate);
 
-          // Send to transcripts channel
-          const data = (await import("../data")).default;
           const transcriptsChannel = await interaction.client.channels.fetch(data.bot.transcripts_channel);
           if (transcriptsChannel && transcriptsChannel.isTextBased()) {
-            const { EmbedBuilder } = await import("discord.js");
             const transcriptEmbed = new EmbedBuilder()
               .setColor("Purple")
               .setTitle(`🎫 Ticket #${ticketId} - Closed`)
@@ -417,12 +412,10 @@ export default {
           const closedAt = Date.now();
           await db.query("UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ?", [closedAt, executor.id, ticketId]);
 
-          // Update the original embed in ticket channel
+          const ticketChannel = await interaction.client.channels.fetch(ticket.channel_id!);
           try {
-            const ticketChannel = await interaction.client.channels.fetch(ticket.channel_id!);
             if (ticketChannel && ticketChannel.isTextBased() && ticket.message_id) {
               const originalMessage = await (ticketChannel as any).messages.fetch(ticket.message_id);
-              const { EmbedBuilder } = await import("discord.js");
               const updatedEmbed = EmbedBuilder.from(originalMessage.embeds[0])
                 .setColor("Red")
                 .setTitle(`🔒 Ticket #${ticketId} - CLOSED`)
@@ -441,18 +434,27 @@ export default {
             console.error("Failed to update ticket embed:", error);
           }
 
-          // Notify user with embed
           try {
-            const { EmbedBuilder } = await import("discord.js");
+            let closeTexts = {
+              title: "🔒 Support Ticket Closed",
+              description: `Your support ticket #${ticketId} has been closed by ${executor.tag}.`,
+              duration: "Duration",
+              messages: "Messages",
+              footer: "Thank you for contacting support!"
+            };
+            const ticketOwnerLang = await utils.getUserLanguage(ticket.user_id);
+            if (ticketOwnerLang !== "en") {
+              try { closeTexts = await utils.autoTranslate(closeTexts, "en", ticketOwnerLang); } catch {}
+            }
             const closedEmbed = new EmbedBuilder()
               .setColor("Red")
-              .setTitle("🔒 Support Ticket Closed")
-              .setDescription(`Your support ticket #${ticketId} has been closed by ${executor.tag}.`)
+              .setTitle(closeTexts.title)
+              .setDescription(closeTexts.description)
               .addFields(
-                { name: "Duration", value: durationText, inline: true },
-                { name: "Messages", value: messages.length.toString(), inline: true }
+                { name: closeTexts.duration, value: durationText, inline: true },
+                { name: closeTexts.messages, value: messages.length.toString(), inline: true }
               )
-              .setFooter({ text: "Thank you for contacting support!" })
+              .setFooter({ text: closeTexts.footer })
               .setTimestamp();
 
             await user.send({ embeds: [closedEmbed] });
@@ -460,9 +462,7 @@ export default {
             console.error("Failed to notify user:", error);
           }
 
-          // Send message in ticket channel with delete option
           try {
-            const ticketChannel = await interaction.client.channels.fetch(ticket.channel_id!);
             if (ticketChannel && ticketChannel.isTextBased()) {
               const closedNoticeEmbed = new EmbedBuilder()
                 .setColor("Red")
@@ -485,8 +485,8 @@ export default {
             console.error("Failed to send close notice:", error);
           }
 
-          fs.unlinkSync(`./transcript-${ticketId}.txt`);
-          fs.unlinkSync(`./transcript-${ticketId}.html`);
+          await fs.promises.unlink(`./transcript-${ticketId}.txt`);
+          await fs.promises.unlink(`./transcript-${ticketId}.html`);
 
           return utils.safeInteractionRespond(interaction, `Ticket #${ticketId} has been closed successfully.`);
         } catch (error) {
@@ -499,9 +499,14 @@ export default {
         const perm = ensureAnyStaff(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         await utils.safeInteractionRespond(interaction, "Searching, please wait...");
-        if (Number(process.env.MEMBERS_FETCHED) === 0) for (const g of client.guilds.cache.values()) await g.members.fetch();
+        if (!membersSearched) {
+          membersSearched = true;
+          const guilds = Array.from(client.guilds.cache.values());
+          for (let i = 0; i < guilds.length; i += 10) {
+            await Promise.all(guilds.slice(i, i + 10).map(g => g.members.fetch().catch(() => null)));
+          }
+        }
         const query = username.toLowerCase();
-        // Guard against null displayName and ensure bot exclusion applies to both username/displayName checks
         const allUsers = client.users.cache.filter(u => {
           if (u.bot) return false;
           const uname = (u.username || "").toLowerCase();
@@ -511,14 +516,55 @@ export default {
         if (allUsers.size === 0) return utils.safeInteractionRespond(interaction, `No users found matching '${username}'.`);
         const matches = Array.from(allUsers.values()).slice(0, 100);
         const userStatusCache: Array<{ user: any; rank: string; blacklisted: boolean; muted: boolean; points: number }> = [];
+        const uids = matches.map(u => u.id);
+        const ph = uids.map(() => "?").join(",");
+        const owners = new Set(data.bot.owners || []);
+        const now = Date.now();
+
+        const [staffRows, banRows, muteRows, warningRows] = await Promise.all([
+          db.query(`SELECT uid, hierarchy_position FROM staff WHERE uid IN (${ph})`, uids) as any,
+          db.query(`SELECT id FROM global_bans WHERE id IN (${ph}) AND active = TRUE`, uids) as any,
+          db.query(`SELECT id, until FROM global_mutes WHERE id IN (${ph})`, uids) as any,
+          db.query(`SELECT userid, points FROM global_warnings WHERE userid IN (${ph}) AND active = TRUE AND expires_at > ? AND (appeal_status IS NULL OR appeal_status != 'approved')`, [...uids, now]) as any,
+        ]);
+
+        const rankMap = new Map<string, string>();
+        for (const row of (Array.isArray(staffRows) ? staffRows : [])) {
+          const rd = StaffRanksManager.getRankByHierarchy(Number(row.hierarchy_position));
+          if (rd) rankMap.set(row.uid, rd.name);
+        }
+
+        const bannedSet = new Set<string>();
+        for (const row of (Array.isArray(banRows) ? banRows : [])) {
+          bannedSet.add(row.id);
+        }
+
+        const mutedSet = new Set<string>();
+        const expiredMuteIds: string[] = [];
+        for (const row of (Array.isArray(muteRows) ? muteRows : [])) {
+          if (row.until && Number(row.until) > 0) {
+            if (now >= Number(row.until)) { expiredMuteIds.push(row.id); continue; }
+          }
+          mutedSet.add(row.id);
+        }
+        if (expiredMuteIds.length > 0) {
+          const eph = expiredMuteIds.map(() => "?").join(",");
+          Promise.resolve(db.query(`DELETE FROM global_mutes WHERE id IN (${eph})`, expiredMuteIds)).catch(() => {});
+        }
+
+        const warnPointsMap = new Map<string, number>();
+        for (const row of (Array.isArray(warningRows) ? warningRows : [])) {
+          warnPointsMap.set(row.userid, (warnPointsMap.get(row.userid) || 0) + (row.points || 1));
+        }
+
         for (const u of matches) {
-          const rank = await utils.getUserStaffRank(u.id);
-          const blacklisted = await utils.isUserBlacklisted(u.id);
-          const muted = await utils.isUserMuted(u.id);
-          const warnings = (await db.query("SELECT points, expires_at, active, appeal_status FROM global_warnings WHERE userid = ?", [u.id]) as unknown as GlobalWarning[]);
-          const now = Date.now();
-          const totalPoints = warnings.filter(w => w.active && w.expires_at > now && (!w.appeal_status || w.appeal_status !== 'approved')).reduce((s, w) => s + (w.points || 1), 0);
-          userStatusCache.push({ user: u, rank: rank || "None", blacklisted, muted, points: totalPoints });
+          userStatusCache.push({
+            user: u,
+            rank: owners.has(u.id) ? "Owner" : rankMap.get(u.id) || "None",
+            blacklisted: bannedSet.has(u.id),
+            muted: mutedSet.has(u.id),
+            points: warnPointsMap.get(u.id) || 0,
+          });
         }
         if (userStatusCache.length === 1) {
           const entry = userStatusCache[0];
@@ -527,7 +573,7 @@ export default {
             .setTitle(`User Search Result`)
             .setDescription(`Exact result for '${username}'`)
             .addFields(
-              { name: "Username", value: `${entry.user.username} (${entry.user.id})`, inline: true },
+              { name: "Username", value: `@${entry.user.username}`, inline: true },
               { name: "Display Name", value: entry.user.displayName || "N/A", inline: true },
               { name: "Rank", value: entry.rank, inline: true },
               { name: "Warnings Points", value: entry.points.toString(), inline: true },
@@ -535,7 +581,17 @@ export default {
               { name: "Muted", value: entry.muted ? "Yes" : "No", inline: true }
             )
             .setTimestamp();
-          return utils.safeInteractionRespond(interaction, { content: "", embeds: [embed] });
+          const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId(`copyid_${entry.user.id}`).setLabel("Copy User ID").setStyle(ButtonStyle.Secondary).setEmoji("📋")
+          );
+          const msg = await utils.safeInteractionRespond(interaction, { content: "", embeds: [embed], components: [row] });
+          const collector = (msg as any).createMessageComponentCollector({ time: 30000, filter: (i: any) => i.user.id === executor.id });
+          collector.on("collect", async (i: any) => {
+            if (i.customId === `copyid_${entry.user.id}`) {
+              await i.reply({ content: `\`${entry.user.id}\``, ephemeral: true });
+            }
+          });
+          return;
         }
         let page = 0;
         const pageSize = 10;
@@ -549,8 +605,8 @@ export default {
             .setTimestamp();
           for (const entry of slice) {
             embed.addFields({
-              name: `${entry.user.displayName} (@${entry.user.username}) -> (${entry.user.id})`,
-              value: `Rank: ${entry.rank} | Points: ${entry.points} | Blacklisted: ${entry.blacklisted ? 'Yes' : 'No'} | Muted: ${entry.muted ? 'Yes' : 'No'}`,
+              name: `${entry.user.displayName} (@${entry.user.username})`,
+              value: `ID: \`${entry.user.id}\` | Rank: ${entry.rank} | Points: ${entry.points} | Blacklisted: ${entry.blacklisted ? 'Yes' : 'No'} | Muted: ${entry.muted ? 'Yes' : 'No'}`,
               inline: false
             });
           }
@@ -568,6 +624,43 @@ export default {
           await utils.safeComponentUpdate(i, { embeds: [buildEmbed()], components: [makeRow()] });
         });
         collector.on("end", async (_: any, r: any) => { if (r !== "stop") try { await (msg as any).edit({ embeds: [buildEmbed()], components: [] }); } catch { } });
+        return;
+      }
+      case "announce": {
+        const language = interaction.options.getString("language", true);
+        const perm = ensureCoMPlus(executorRank);
+        if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
+        const prompt = new EmbedBuilder()
+          .setColor("Purple")
+          .setTitle("Announcement")
+          .setDescription(`Language: \`${language}\`\nType the announcement message in this channel now. Attachments are supported.`)
+          .setTimestamp();
+        await utils.safeInteractionRespond(interaction, { content: "", embeds: [prompt] });
+        if (!interaction.channel) return;
+        const collector = (interaction.channel as any).createMessageCollector({
+          time: 120000,
+          filter: (m: any) => m.author.id === executor.id
+        });
+        collector.on("collect", async (m: any) => {
+          collector.stop("captured");
+          await m.delete().catch(() => { });
+          const announceEmbed = new EmbedBuilder()
+            .setColor("Purple")
+            .setTitle("Announcement Sent")
+            .addFields(
+              { name: "Language", value: `\`${language}\``, inline: true },
+              { name: "Message", value: m.content.substring(0, 100) + (m.content.length > 100 ? "..." : ""), inline: false }
+            )
+            .setFooter({ text: `Sent by ${executor.username}` })
+            .setTimestamp();
+          await utils.safeInteractionRespond(interaction, { content: "", embeds: [announceEmbed] });
+          await manager.announce(m.content, language, m.attachments);
+        });
+        collector.on("end", async (_: any, reason: string) => {
+          if (reason !== "captured") {
+            try { await interaction.editReply({ content: "Announcement cancelled (no message received)." }); } catch { }
+          }
+        });
         return;
       }
     }

@@ -1,5 +1,4 @@
 import * as crypto from "crypto";
-import * as async from "async";
 import * as bcrypt from "bcryptjs";
 import Workers from "./Workers";
 import type { WorkerHandle } from "./types/worker";
@@ -11,6 +10,7 @@ import NVIDIAModels from "./NVIDIAModels";
 import * as nodemailer from "nodemailer";
 import * as os from "os";
 import Log from "./Log";
+import langs from "langs";
 import data from "./data";
 import client from ".";
 import { promises as fs } from "fs";
@@ -22,9 +22,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFl
 import type { DiscordUser, UserLanguage, AIMemory, KnowledgeSource, KnowledgeCache, ProjectKnowledgeDoc, ProjectKnowledgeCache, AiChatTierStatus, RPGSession, RPGCharacter } from "./types/interfaces";
 import cacheManager from "./managers/CacheManager";
 const TRANSLATE_WORKER_TYPE = "translate";
-const RATELIMIT_WORKER_TYPE = "ratelimit";
 const TRANSLATE_WORKER_PATH = path.join(__dirname, "workers/translate.js");
-const RATELIMIT_WORKER_PATH = path.join(__dirname, "workers/ratelimit.js");
 const TRANSLATE_WORKER_POOL_SIZE = (() => {
   const fromEnv = Number(process.env.TRANSLATE_WORKERS);
   if (!Number.isNaN(fromEnv) && fromEnv > 0) return Math.max(1, Math.min(16, fromEnv));
@@ -32,7 +30,7 @@ const TRANSLATE_WORKER_POOL_SIZE = (() => {
   const isWindows = process.platform === "win32";
   return isWindows ? Math.max(2, Math.min(4, cores)) : Math.max(2, Math.min(8, Math.ceil(cores / 2)));
 })();
-const TRANSLATE_TIMEOUT = process.platform === "win32" ? 25000 : 15000;
+const TRANSLATE_TIMEOUT = 15000;
 const TRANSLATE_CACHE_TTL = 300000;
 const TRANSLATE_MAX_RETRIES = 3;
 const TRANSLATE_RETRY_BASE_DELAY = 1000;
@@ -42,6 +40,153 @@ const TRANSLATION_CACHE_PREFIX = "barniebot:local:utils:translation:";
 const KNOWLEDGE_CACHE_KEY = "barniebot:local:utils:knowledge";
 const PROJECT_KNOWLEDGE_CACHE_KEY = "barniebot:local:utils:project-knowledge";
 const pendingTranslations = new Map<string, Promise<string>>();
+
+const USER_LANGUAGE_CACHE_TTL = 600000;
+const USER_LANGUAGE_LOCAL_PREFIX = "barniebot:local:chat:lang:";
+const USER_LANGUAGE_GLOBAL_PREFIX = "barniebot:chat:lang:";
+const pendingUserLanguages = new Map<string, Promise<string>>();
+
+export const getUserLanguageCached = async (userId: string): Promise<string> => {
+  if (!userId) return "en";
+  const localCacheKey = `${USER_LANGUAGE_LOCAL_PREFIX}${userId}`;
+  const localCached = cacheManager.getLocal<{ lang: string }>(localCacheKey);
+  if (localCached?.lang) return localCached.lang;
+  const inflight = pendingUserLanguages.get(userId);
+  if (inflight) return inflight;
+  const task = (async () => {
+    const globalCacheKey = `${USER_LANGUAGE_GLOBAL_PREFIX}${userId}`;
+    const globalCached = await cacheManager.get<{ lang: string }>(globalCacheKey);
+    if (globalCached?.lang) {
+      cacheManager.setLocal(localCacheKey, { lang: globalCached.lang }, USER_LANGUAGE_CACHE_TTL);
+      return globalCached.lang;
+    }
+    const result: any = await db.query("SELECT * FROM languages WHERE userid = ?", [userId]);
+    const language = typeof result?.[0]?.lang === "string" && result[0].lang ? result[0].lang : "en";
+    cacheManager.setLocal(localCacheKey, { lang: language }, USER_LANGUAGE_CACHE_TTL);
+    Promise.resolve(cacheManager.set(globalCacheKey, { lang: language }, USER_LANGUAGE_CACHE_TTL)).catch(() => { });
+    return language;
+  })();
+  pendingUserLanguages.set(userId, task);
+  try {
+    return await task;
+  } finally {
+    pendingUserLanguages.delete(userId);
+  }
+};
+
+export const invalidateUserLanguageCache = (userId: string): void => {
+  if (!userId) return;
+  cacheManager.deleteLocal(`${USER_LANGUAGE_LOCAL_PREFIX}${userId}`);
+  Promise.resolve(cacheManager.delete(`${USER_LANGUAGE_GLOBAL_PREFIX}${userId}`)).catch(() => { });
+};
+
+const STAFF_RANK_CACHE_TTL = 300000;
+const MODERATION_CACHE_TTL = 60000;
+const STAFF_RANK_LOCAL_PREFIX = "barniebot:local:chat:rank:";
+const STAFF_RANK_GLOBAL_PREFIX = "barniebot:chat:rank:";
+const BLACKLIST_LOCAL_PREFIX = "barniebot:local:chat:blacklist:";
+const BLACKLIST_GLOBAL_PREFIX = "barniebot:chat:blacklist:";
+const MUTE_LOCAL_PREFIX = "barniebot:local:chat:mute:";
+const MUTE_GLOBAL_PREFIX = "barniebot:chat:mute:";
+
+export const getCachedUserStaffRank = async (userId: string): Promise<string | null> => {
+  if (!userId) return null;
+  const localCacheKey = `${STAFF_RANK_LOCAL_PREFIX}${userId}`;
+  const localCached = cacheManager.getLocal<{ rank: string | null }>(localCacheKey);
+  if (localCached && Object.prototype.hasOwnProperty.call(localCached, "rank")) return localCached.rank;
+  const globalCacheKey = `${STAFF_RANK_GLOBAL_PREFIX}${userId}`;
+  const globalCached = await cacheManager.get<{ rank: string | null }>(globalCacheKey);
+  if (globalCached && Object.prototype.hasOwnProperty.call(globalCached, "rank")) {
+    cacheManager.setLocal(localCacheKey, { rank: globalCached.rank }, STAFF_RANK_CACHE_TTL);
+    return globalCached.rank;
+  }
+  let rank: string | null = null;
+  if (data.bot.owners.includes(userId)) {
+    rank = "Owner";
+  } else {
+    const res: any = await db.query("SELECT hierarchy_position FROM staff WHERE uid = ?", [userId]);
+    if (Array.isArray(res) && res[0]?.hierarchy_position !== undefined) {
+      const rankData = StaffRanksManager.getRankByHierarchy(Number(res[0].hierarchy_position));
+      rank = rankData ? rankData.name : null;
+    }
+  }
+  cacheManager.setLocal(localCacheKey, { rank }, STAFF_RANK_CACHE_TTL);
+  Promise.resolve(cacheManager.set(globalCacheKey, { rank }, STAFF_RANK_CACHE_TTL)).catch(() => { });
+  return rank;
+};
+
+export const isUserBlacklistedCached = async (userId: string): Promise<boolean> => {
+  if (!userId) return false;
+  const localCacheKey = `${BLACKLIST_LOCAL_PREFIX}${userId}`;
+  const localCached = cacheManager.getLocal<{ value: boolean }>(localCacheKey);
+  if (localCached && typeof localCached.value === "boolean") return localCached.value;
+  const globalCacheKey = `${BLACKLIST_GLOBAL_PREFIX}${userId}`;
+  const globalCached = await cacheManager.get<{ value: boolean }>(globalCacheKey);
+  if (globalCached && typeof globalCached.value === "boolean") {
+    cacheManager.setLocal(localCacheKey, { value: globalCached.value }, MODERATION_CACHE_TTL);
+    return globalCached.value;
+  }
+  const res: any = await db.query("SELECT * FROM global_bans WHERE id = ? AND active = TRUE", [userId]);
+  const value = Array.isArray(res) && res.length > 0;
+  cacheManager.setLocal(localCacheKey, { value }, MODERATION_CACHE_TTL);
+  Promise.resolve(cacheManager.set(globalCacheKey, { value }, MODERATION_CACHE_TTL)).catch(() => { });
+  return value;
+};
+
+export const isUserMutedCached = async (userId: string): Promise<boolean> => {
+  const now = Date.now();
+  if (!userId) return false;
+  const localCacheKey = `${MUTE_LOCAL_PREFIX}${userId}`;
+  const localCached = cacheManager.getLocal<{ value: boolean; until: number }>(localCacheKey);
+  if (localCached && typeof localCached.value === "boolean") {
+    if (localCached.until > 0 && now >= localCached.until) {
+      cacheManager.deleteLocal(localCacheKey);
+      return false;
+    }
+    return localCached.value;
+  }
+  const globalCacheKey = `${MUTE_GLOBAL_PREFIX}${userId}`;
+  const globalCached = await cacheManager.get<{ value: boolean; until: number }>(globalCacheKey);
+  if (globalCached && typeof globalCached.value === "boolean") {
+    const until = Number(globalCached.until) || 0;
+    if (until > 0 && now >= until) {
+      cacheManager.deleteLocal(localCacheKey);
+      Promise.resolve(cacheManager.delete(globalCacheKey)).catch(() => { });
+      return false;
+    }
+    cacheManager.setLocal(localCacheKey, { value: globalCached.value, until }, MODERATION_CACHE_TTL);
+    return globalCached.value;
+  }
+  const res: any = await db.query("SELECT * FROM global_mutes WHERE id = ?", [userId]);
+  let value = false;
+  let until = 0;
+  if (Array.isArray(res) && res[0]) {
+    until = Number(res[0].until) || 0;
+    if (until > 0 && now >= until) {
+      Promise.resolve(db.query("DELETE FROM global_mutes WHERE id = ?", [userId])).catch(() => { });
+      value = false;
+    } else {
+      value = true;
+    }
+  }
+  cacheManager.setLocal(localCacheKey, { value, until }, MODERATION_CACHE_TTL);
+  Promise.resolve(cacheManager.set(globalCacheKey, { value, until }, MODERATION_CACHE_TTL)).catch(() => { });
+  return value;
+};
+
+export const invalidateStaffModCache = (userId: string): void => {
+  if (!userId) return;
+  cacheManager.deleteLocal([
+    `${STAFF_RANK_LOCAL_PREFIX}${userId}`,
+    `${BLACKLIST_LOCAL_PREFIX}${userId}`,
+    `${MUTE_LOCAL_PREFIX}${userId}`
+  ]);
+  Promise.resolve(cacheManager.delete([
+    `${STAFF_RANK_GLOBAL_PREFIX}${userId}`,
+    `${BLACKLIST_GLOBAL_PREFIX}${userId}`,
+    `${MUTE_GLOBAL_PREFIX}${userId}`
+  ])).catch(() => { });
+};
 
 let circuitBreakerFailures = 0;
 let circuitBreakerLastFailure = 0;
@@ -75,14 +220,51 @@ void (async () => {
     await Workers.prewarmType(TRANSLATE_WORKER_TYPE, TRANSLATE_WORKER_POOL_SIZE, 1500);
   } catch { }
 })();
-Workers.bulkCreateWorkers(RATELIMIT_WORKER_PATH, RATELIMIT_WORKER_TYPE, 1);
-void (async () => { try { await Workers.prewarmType(RATELIMIT_WORKER_TYPE, 1, 1000); } catch { } })();
 
-async function processRateLimitsWorker(users: Array<{ uid: string; time_left: number }>, limits: Array<{ uid: string; time_left: number; username: string }>, decrementMs = 1000) {
-  let worker = Workers.getAvailableWorker(RATELIMIT_WORKER_TYPE);
-  if (!worker) worker = Workers.createWorker(RATELIMIT_WORKER_PATH, RATELIMIT_WORKER_TYPE) ?? undefined;
-  if (!worker) worker = await Workers.AwaitAvailableWorker(RATELIMIT_WORKER_TYPE, 2000);
-  return await Workers.sendMessage(worker.id, { type: "process", users, limits, decrement: decrementMs }, 2000);
+function processRateLimitsWorker(users: Array<{ uid: string; time_left: number }>, limits: Array<{ uid: string; time_left: number; username: string }>, decrementMs = 1000) {
+  const activeUsers: Array<{ uid: string; time_left: number }> = [];
+  const expiredUsers: string[] = [];
+  const seenUsers = new Map<string, number>();
+  if (Array.isArray(users)) {
+    for (const u of users) {
+      if (!u || typeof u.uid !== "string") continue;
+      const existing = seenUsers.get(u.uid);
+      const tl = (typeof u.time_left === "number" ? u.time_left : 0) - decrementMs;
+      if (existing !== undefined) {
+        if (tl > existing) seenUsers.set(u.uid, tl);
+        continue;
+      }
+      seenUsers.set(u.uid, tl);
+    }
+    for (const [uid, timeLeft] of seenUsers) {
+      if (timeLeft <= 0) expiredUsers.push(uid);
+      else activeUsers.push({ uid, time_left: timeLeft });
+    }
+  }
+  const activeLimits: Array<{ uid: string; time_left: number; username: string }> = [];
+  const expiredLimits: Array<{ uid: string; username: string }> = [];
+  const seenLimits = new Map<string, { time_left: number; username: string }>();
+  if (Array.isArray(limits)) {
+    for (const l of limits) {
+      if (!l || typeof l.uid !== "string") continue;
+      const existing = seenLimits.get(l.uid);
+      const tl = (typeof l.time_left === "number" ? l.time_left : 0) - decrementMs;
+      const username = typeof l.username === "string" ? l.username : "Unknown";
+      if (existing !== undefined) {
+        if (tl > existing.time_left) seenLimits.set(l.uid, { time_left: tl, username });
+        continue;
+      }
+      seenLimits.set(l.uid, { time_left: tl, username });
+    }
+    for (const [uid, data] of seenLimits) {
+      if (data.time_left <= 0) expiredLimits.push({ uid, username: data.username });
+      else activeLimits.push({ uid, time_left: data.time_left, username: data.username });
+    }
+  }
+  return {
+    users: { keep: activeUsers, expired: expiredUsers },
+    limits: { keep: activeLimits, expired: expiredLimits }
+  };
 }
 const resolveWorkspacePath = (targetPath = ".", userId?: string) => {
   const userWorkspace = userId ? path.join(AI_WORKSPACE_ROOT, userId) : AI_WORKSPACE_ROOT;
@@ -768,6 +950,51 @@ const utils: any = {
       if (!args.url) return { error: "Missing url parameter" };
       return await fetchUrlSafe({ url: args.url });
     },
+    api_request: async (args: { method: string; url: string; headers?: Record<string, string>; body?: string; query?: Record<string, string> }): Promise<any> => {
+      const method = (args.method || "").toUpperCase();
+      if (!["GET", "POST", "PUT", "PATCH"].includes(method)) return { error: "Unsupported method. Use GET, POST, PUT, or PATCH." };
+      if (!args.url) return { error: "Missing url parameter" };
+      let parsed: URL;
+      try { parsed = new URL(args.url); } catch { return { error: "Invalid URL" }; }
+      if (!/^https?:$/.test(parsed.protocol)) return { error: "Only http/https URLs are allowed" };
+      if (args.query && typeof args.query === "object") {
+        for (const [k, v] of Object.entries(args.query)) parsed.searchParams.set(k, String(v));
+      }
+      const maxResponseBytes = 100 * 1024;
+      const timeoutMs = 10000;
+      let lastUrl = parsed.toString();
+      let redirects = 0;
+      const maxRedirects = 5;
+      while (true) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const fetchOpts: RequestInit = { method, redirect: "manual", headers: args.headers || {}, signal: controller.signal as any };
+          if (["POST", "PUT", "PATCH"].includes(method) && args.body !== undefined) fetchOpts.body = args.body;
+          const response = await fetch(lastUrl, fetchOpts);
+          if (response.status >= 300 && response.status < 400) {
+            clearTimeout(timer);
+            if (redirects >= maxRedirects) return { error: "Too many redirects", status: response.status };
+            const location = response.headers.get("location");
+            if (!location) return { error: "Redirect without Location header", status: response.status };
+            try { lastUrl = new URL(location, lastUrl).toString(); } catch { return { error: "Invalid redirect URL", status: response.status }; }
+            redirects++;
+            continue;
+          }
+          clearTimeout(timer);
+          const contentType = response.headers.get("content-type") || "";
+          const rawBody = Buffer.from(await response.arrayBuffer());
+          if (rawBody.length > maxResponseBytes) {
+            const text = rawBody.toString("utf8").slice(0, maxResponseBytes);
+            return { status: response.status, contentType, body: text, truncated: true };
+          }
+          return { status: response.status, contentType, body: rawBody.toString("utf8"), truncated: false };
+        } catch (error: any) {
+          clearTimeout(timer);
+          return { error: error?.name === "AbortError" ? "Request timed out" : "Request failed" };
+        }
+      }
+    },
     fetch_url_safe: fetchUrlSafe,
     generate_code: async (args: { prompt: string }): Promise<{ code?: string; reasoning?: string; error?: string }> => {
       const prompt = args?.prompt?.trim();
@@ -1329,7 +1556,6 @@ const utils: any = {
       const botMember = guild.members.me;
       if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageChannels)) return { error: "Bot lacks ManageChannels permission" };
       const typeKey = args.type.toLowerCase();
-      console.log("Creating channel with type key:", typeKey);
       const typeMap: Record<string, ChannelType> = {
         text: ChannelType.GuildText,
         voice: ChannelType.GuildVoice,
@@ -1339,8 +1565,7 @@ const utils: any = {
         stage: ChannelType.GuildStageVoice
       };
       const channelType = typeMap[typeKey] as any;
-      console.log("Resolved channel type:", channelType);
-      if (!channelType && args.type !== "text") { console.log("Unsupported channel type:", args.type); return { error: "Unsupported channel type" }; }
+      if (!channelType && args.type !== "text") return { error: "Unsupported channel type" };
       const channel = await guild.channels.create({
         name: args.name,
         type: typeMap[typeKey] as any,
@@ -1352,7 +1577,6 @@ const utils: any = {
         userLimit: args.userLimit,
         reason: args.reason
       });
-      console.log("Created channel:", channel.id);
       return { channel: { id: channel.id, name: channel.name, type: channel.type } };
     },
     edit_guild_channel: async (args: { requesterId?: string; guildId?: string; channelId: string; name?: string; topic?: string; nsfw?: boolean; rateLimitPerUser?: number; parentId?: string; position?: number; userLimit?: number; bitrate?: number; reason?: string }): Promise<any> => {
@@ -2657,21 +2881,34 @@ const utils: any = {
           components: [closeButton]
         });
 
+        let createTexts = {
+          title: "🎫 Support Ticket Created",
+          description: `Your support ticket #${ticketId} has been created!\n\nOur staff will respond to you soon. You can close this ticket at any time using the button below.`,
+          ticketId: "Ticket ID",
+          status: "Status",
+          open: "Open",
+          footer: "All messages you send here will be forwarded to staff",
+          closeTicket: "Close Ticket"
+        };
+        const creatorLang = await utils.getUserLanguage(args.userId);
+        if (creatorLang !== "en") {
+          try { createTexts = await utils.autoTranslate(createTexts, "en", creatorLang); } catch {}
+        }
         const userCloseEmbed = new EmbedBuilder()
           .setColor("Purple")
-          .setTitle("🎫 Support Ticket Created")
-          .setDescription(`Your support ticket #${ticketId} has been created!\n\nOur staff will respond to you soon. You can close this ticket at any time using the button below.`)
+          .setTitle(createTexts.title)
+          .setDescription(createTexts.description)
           .addFields(
-            { name: "Ticket ID", value: `#${ticketId}`, inline: true },
-            { name: "Status", value: "Open", inline: true }
+            { name: createTexts.ticketId, value: `#${ticketId}`, inline: true },
+            { name: createTexts.status, value: createTexts.open, inline: true }
           )
-          .setFooter({ text: "All messages you send here will be forwarded to staff" })
+          .setFooter({ text: createTexts.footer })
           .setTimestamp();
 
         const userCloseButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder()
             .setCustomId(`close_ticket-${ticketId}-${args.userId}`)
-            .setLabel("Close Ticket")
+            .setLabel(createTexts.closeTicket)
             .setStyle(ButtonStyle.Danger)
             .setEmoji("🔒")
         );
@@ -2901,15 +3138,26 @@ const utils: any = {
       }
 
       try {
+        let closeTexts = {
+          title: "🔒 Support Ticket Closed",
+          description: `Your support ticket #${args.ticketId} has been closed.`,
+          duration: "Duration",
+          messages: "Messages",
+          footer: "Thank you for contacting support!"
+        };
+        const ticketOwnerLang = await utils.getUserLanguage(ticket.user_id);
+        if (ticketOwnerLang !== "en") {
+          try { closeTexts = await utils.autoTranslate(closeTexts, "en", ticketOwnerLang); } catch {}
+        }
         const closedEmbed = new EmbedBuilder()
           .setColor("Red")
-          .setTitle("🔒 Support Ticket Closed")
-          .setDescription(`Your support ticket #${args.ticketId} has been closed.`)
+          .setTitle(closeTexts.title)
+          .setDescription(closeTexts.description)
           .addFields(
-            { name: "Duration", value: durationText, inline: true },
-            { name: "Messages", value: messages.length.toString(), inline: true }
+            { name: closeTexts.duration, value: durationText, inline: true },
+            { name: closeTexts.messages, value: messages.length.toString(), inline: true }
           )
-          .setFooter({ text: "Thank you for contacting support!" })
+          .setFooter({ text: closeTexts.footer })
           .setTimestamp();
         await user.send({ embeds: [closedEmbed] });
       } catch (error) {
@@ -3049,10 +3297,10 @@ const utils: any = {
     get_rpg_equipment: async (args: { characterId: number }): Promise<any> => {
       if (!args.characterId) return { error: "Missing characterId parameter" };
       const equipment: any = await db.query(`
-        SELECT eq.*, ce.equipped_at
-        FROM rpg_character_equipment ce
-        JOIN rpg_equipment eq ON ce.equipment_id = eq.id
-        WHERE ce.character_id = ?
+        SELECT eq.*, ei.equipped_at
+        FROM rpg_equipped_items ei
+        JOIN rpg_equipment eq ON ei.item_id = eq.item_id
+        WHERE ei.character_id = ?
       `, [args.characterId]);
       return { equipment: Array.isArray(equipment) ? equipment : [] };
     },
@@ -3682,6 +3930,302 @@ const utils: any = {
         related_entities: mem.related_entities ? decryptText(mem.related_entities) : null
       }));
       return { memories: decryptedMemories };
+    },
+    set_slowmode: async (args: { requesterId?: string; guildId?: string; channelId: string; delay: number; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.channelId || args.delay === undefined) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageChannels);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageChannels)) return { error: "Bot lacks ManageChannels permission" };
+      const channel = guild.channels.cache.get(args.channelId) as any;
+      if (!channel) return { error: "Channel not found" };
+      const delay = Math.max(0, Math.min(Math.floor(args.delay), 21600));
+      try {
+        await channel.setRateLimitPerUser(delay, args.reason || "Slowmode updated by AI");
+        return { success: true, slowmode: delay };
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to set slowmode" };
+      }
+    },
+    search_messages: async (args: { requesterId?: string; guildId?: string; channelId: string; query: string; limit?: number; before?: string; after?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.channelId || !args.query) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const staff = await utils.isStaff(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const channel = guild.channels.cache.get(args.channelId) as any;
+      if (!channel || !channel.isTextBased?.()) return { error: "Channel not found or not text-based" };
+      if (!owner && !adminStaff && !staff) {
+        const perms = channel.permissionsFor(member);
+        if (!perms || !perms.has(PermissionFlagsBits.ReadMessageHistory)) return { error: "Requester lacks ReadMessageHistory permission" };
+      }
+      const botPerms = channel.permissionsFor(guild.members.me);
+      if (!botPerms || !botPerms.has(PermissionFlagsBits.ReadMessageHistory)) return { error: "Bot lacks ReadMessageHistory permission" };
+      const limit = Math.max(1, Math.min(args.limit ?? 25, 100));
+      const query = args.query.toLowerCase();
+      try {
+        const fetchOpts: any = { limit: 100 };
+        if (args.before) fetchOpts.before = args.before;
+        if (args.after) fetchOpts.after = args.after;
+        let fetched = await channel.messages.fetch(fetchOpts);
+        const matched = fetched.filter((m: any) => m.content && m.content.toLowerCase().includes(query)).first(limit);
+        return { messages: matched.map((m: any) => ({ id: m.id, author: { id: m.author.id, username: m.author.username }, content: m.content.slice(0, 1000), timestamp: m.createdTimestamp })) };
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to search messages" };
+      }
+    },
+    list_invites: async (args: { requesterId?: string; guildId: string; channelId?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageGuild);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageGuild)) return { error: "Bot lacks ManageGuild permission" };
+      try {
+        const invites = await guild.invites.fetch();
+        let filtered = invites.cache.values();
+        if (args.channelId) filtered = [...filtered].filter((i: any) => i.channel?.id === args.channelId);
+        return { invites: [...filtered].map((i: any) => ({ code: i.code, uses: i.uses, maxUses: i.maxUses, maxAge: i.maxAge, expiresAt: i.expiresTimestamp, channel: { id: i.channel?.id, name: i.channel?.name }, inviter: { id: i.inviter?.id, username: i.inviter?.username } })) };
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to list invites" };
+      }
+    },
+    create_invite: async (args: { requesterId?: string; guildId?: string; channelId: string; maxAge?: number; maxUses?: number; temporary?: boolean; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.channelId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.CreateInstantInvite);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.CreateInstantInvite)) return { error: "Bot lacks CreateInstantInvite permission" };
+      const channel = guild.channels.cache.get(args.channelId) as any;
+      if (!channel) return { error: "Channel not found" };
+      try {
+        const invite = await channel.createInvite({
+          maxAge: args.maxAge ?? 86400,
+          maxUses: args.maxUses ?? 0,
+          temporary: args.temporary ?? false,
+          reason: args.reason || "Invite created by AI"
+        });
+        return { invite: { code: invite.code, url: invite.url, maxAge: invite.maxAge, maxUses: invite.maxUses } };
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to create invite" };
+      }
+    },
+    list_webhooks: async (args: { requesterId?: string; guildId: string; channelId?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageWebhooks);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageWebhooks)) return { error: "Bot lacks ManageWebhooks permission" };
+      try {
+        const webhooks = await guild.fetchWebhooks();
+        let filtered = webhooks.cache.values();
+        if (args.channelId) filtered = [...filtered].filter((w: any) => w.channelId === args.channelId);
+        return { webhooks: [...filtered].map((w: any) => ({ id: w.id, name: w.name, channelId: w.channelId, url: w.url })) };
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to list webhooks" };
+      }
+    },
+    create_webhook: async (args: { requesterId?: string; guildId?: string; channelId: string; name: string; avatar?: string; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.channelId || !args.name) return { error: "Missing parameters" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageWebhooks);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageWebhooks)) return { error: "Bot lacks ManageWebhooks permission" };
+      const channel = guild.channels.cache.get(args.channelId) as any;
+      if (!channel) return { error: "Channel not found" };
+      try {
+        const webhook = await channel.createWebhook({
+          name: args.name,
+          avatar: args.avatar || undefined,
+          reason: args.reason || "Webhook created by AI"
+        });
+        return { webhook: { id: webhook.id, name: webhook.name, url: webhook.url } };
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to create webhook" };
+      }
+    },
+    manage_thread: async (args: { requesterId?: string; guildId?: string; channelId: string; action: string; name?: string; reason?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.channelId || !args.action) return { error: "Missing parameters" };
+      const action = args.action.toLowerCase();
+      if (!["archive", "unarchive", "lock", "unlock", "rename"].includes(action)) return { error: "Invalid action. Use: archive, unarchive, lock, unlock, rename" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageThreads);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageThreads)) return { error: "Bot lacks ManageThreads permission" };
+      const channel = guild.channels.cache.get(args.channelId) as any;
+      if (!channel) return { error: "Thread not found" };
+      const isThread = channel.isThread();
+      if (!isThread) return { error: "Channel is not a thread" };
+      try {
+        const reason = args.reason || `Thread ${action} by AI`;
+        if (action === "archive") await channel.setArchived(true, reason);
+        else if (action === "unarchive") await channel.setArchived(false, reason);
+        else if (action === "lock") await channel.setLocked(true, reason);
+        else if (action === "unlock") await channel.setLocked(false, reason);
+        else if (action === "rename") {
+          if (!args.name) return { error: "Name is required for rename action" };
+          await channel.setName(args.name, reason);
+        }
+        return { success: true, action, threadId: args.channelId };
+      } catch (error: any) {
+        return { error: error.message ?? `Failed to ${action} thread` };
+      }
+    },
+    manage_scheduled_event: async (args: { requesterId?: string; guildId: string; action: string; name?: string; channelId?: string; startTime?: string; description?: string; location?: string; eventId?: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.action) return { error: "Missing parameters" };
+      const action = args.action.toLowerCase();
+      if (!["create", "list", "delete", "get"].includes(action)) return { error: "Invalid action. Use: create, list, delete, get" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageEvents);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageEvents)) return { error: "Bot lacks ManageEvents permission" };
+      try {
+        if (action === "list") {
+          const events = await guild.scheduledEvents.fetch();
+          return { events: events.cache.map((e: any) => ({ id: e.id, name: e.name, status: e.status, scheduledStartAt: e.scheduledStartAt, channelId: e.channelId, location: e.entityMetadata?.location, description: e.description })) };
+        }
+        if (action === "get") {
+          if (!args.eventId) return { error: "eventId is required for get action" };
+          const event = await guild.scheduledEvents.fetch(args.eventId);
+          return { event: { id: event.id, name: event.name, status: event.status, scheduledStartAt: event.scheduledStartAt, channelId: event.channelId, location: event.entityMetadata?.location, description: event.description } };
+        }
+        if (action === "delete") {
+          if (!args.eventId) return { error: "eventId is required for delete action" };
+          await guild.scheduledEvents.delete(args.eventId);
+          return { success: true, action: "delete" };
+        }
+        if (action === "create") {
+          if (!args.name || !args.startTime) return { error: "name and startTime are required for create action" };
+          const startDate = new Date(args.startTime);
+          if (isNaN(startDate.getTime())) return { error: "Invalid startTime format. Use ISO 8601." };
+          const eventData: any = { name: args.name, scheduledStartTime: startDate, description: args.description || "" };
+          if (args.channelId) {
+            eventData.channel = args.channelId;
+            eventData.entityType = 2;
+          } else if (args.location) {
+            eventData.entityType = 3;
+            eventData.entityMetadata = { location: args.location };
+          } else {
+            return { error: "Either channelId (voice/stage) or location (external) is required" };
+          }
+          const event = await guild.scheduledEvents.create(eventData);
+          return { event: { id: event.id, name: event.name, status: event.status, scheduledStartAt: event.scheduledStartAt } };
+        }
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to manage scheduled event" };
+      }
+    },
+    list_emojis: async (args: { requesterId?: string; guildId: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId) return { error: "Missing parameters" };
+      const guild = await client.guilds.fetch(args.guildId).catch(() => null);
+      if (!guild) return { error: "Guild not found" };
+      try {
+        const emojis = await guild.emojis.fetch();
+        return { emojis: emojis.map((e: any) => ({ id: e.id, name: e.name, url: e.url, animated: e.animated, available: e.available })) };
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to list emojis" };
+      }
+    },
+    list_stickers: async (args: { requesterId?: string; guildId: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId) return { error: "Missing parameters" };
+      const guild = await client.guilds.fetch(args.guildId).catch(() => null);
+      if (!guild) return { error: "Guild not found" };
+      try {
+        const stickers = await guild.stickers.fetch();
+        return { stickers: stickers.map((s: any) => ({ id: s.id, name: s.name, description: s.description, format: s.format, url: s.url })) };
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to list stickers" };
+      }
+    },
+    manage_pin: async (args: { requesterId?: string; guildId?: string; channelId: string; messageId: string; action: string }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.channelId || !args.messageId || !args.action) return { error: "Missing parameters" };
+      const action = args.action.toLowerCase();
+      if (!["pin", "unpin"].includes(action)) return { error: "Invalid action. Use: pin or unpin" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageMessages);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      const botMember = guild.members.me;
+      if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageMessages)) return { error: "Bot lacks ManageMessages permission" };
+      const channel = guild.channels.cache.get(args.channelId) as any;
+      if (!channel || !channel.isTextBased?.()) return { error: "Channel not found or not text-based" };
+      try {
+        const message = await channel.messages.fetch(args.messageId);
+        if (!message) return { error: "Message not found" };
+        if (action === "pin") await message.pin();
+        else await message.unpin();
+        return { success: true, action, messageId: args.messageId };
+      } catch (error: any) {
+        return { error: error.message ?? `Failed to ${action} message` };
+      }
+    },
+    check_local_model: async (): Promise<any> => {
+      const aiManager = (await import("./ai")).default;
+      const health = await aiManager.checkOllamaHealth();
+      return {
+        online: health.online,
+        error: health.error,
+        models: health.models,
+        configured: {
+          chat: aiManager.OllamaChatModel,
+          moderation: aiManager.OllamaModerationModel,
+          vision: aiManager.OllamaVisionModel
+        }
+      };
+    },
+    list_local_models: async (): Promise<any> => {
+      const aiManager = (await import("./ai")).default;
+      const models = await aiManager.getOllamaModels();
+      if (!models.length) return { models: [], message: "No models available or Ollama is offline" };
+      return { models };
     }
   },
   createSpaces: (length: number): string => {
@@ -3697,6 +4241,14 @@ const utils: any = {
       censor += "*";
     }
     return censor;
+  },
+  getUserLanguage: getUserLanguageCached,
+  invalidateUserLanguageCache,
+  isValidLanguageCode: (code: string): boolean => {
+    const c = String(code || "").trim().toLowerCase();
+    if (c.length !== 2) return false;
+    if (["ch", "br", "wa"].includes(c)) return false;
+    return langs.has(1, c);
   },
   translate: async (text: string, from: string, target: string): Promise<any> => {
     const cacheKey = `${from}->${target}:${text}`;
@@ -3764,44 +4316,52 @@ const utils: any = {
       pendingTranslations.delete(cacheKey);
     }
   },
-  parallel: (functions: any): Promise<any[]> => {
-    return new Promise((resolve, reject) => {
-      if (typeof functions !== "object")
-        reject(new TypeError("functions parameter must be of type object"));
-      async.parallel(functions, (err, results) => {
-        if (err) reject(err);
-        else resolve(results as any[]);
-      });
-    });
-  },
-  autoTranslate: async (obj: any, language: string, target: string): Promise<typeof obj> => {
-    if (typeof obj !== "object" || Array.isArray(obj)) throw new TypeError(`The autoTranslate function takes as first argument an object, got ${Array.isArray(obj) ? "Array" : typeof obj}`);
-    if (typeof language !== "string") throw new TypeError(`The autoTranslate function takes as second argument a string, got ${typeof language}`);
-    const keys = Object.keys(obj);
-    const newObj = { ...obj };
-    const validKeys: string[] = [];
-    for (const k of keys) {
-      if (typeof obj[k] === "object" && !Array.isArray(obj)) {
-        const newProperty = await utils.autoTranslate(obj[k], language, target);
-        newObj[k] = newProperty;
-        continue;
-      }
-      if (typeof obj[k] !== "string") continue;
-      validKeys.push(k);
-    }
-    await Promise.all(validKeys.map(async vk => {
-      const translated = await utils.translate(obj[vk], language, target);
-      newObj[vk] = translated.text;
-    }));
-    return newObj;
-  },
   processRateLimitsWorker,
   // --- Staff utilities ---
-  getStaffRanks: (): Array<string> => [
-    ...data.bot.staff_ranks.map(r => r.name)
-  ],
   getStaffRankIndex: (rank?: string | null): number => {
     return StaffRanksManager.getRankHierarchyByName(rank ?? null);
+  },
+  ensureStaff: (executorRank: string | null): { ok: boolean; error?: string } => {
+    const idx = StaffRanksManager.getRankHierarchyByName(executorRank ?? null);
+    if (idx < 0) return { ok: false, error: "You must be staff to use this command." };
+    return { ok: true };
+  },
+  ensureAnyStaff: (executorRank: string | null): { ok: boolean; error?: string } => {
+    const idx = StaffRanksManager.getRankHierarchyByName(executorRank ?? null);
+    if (idx < 0) return { ok: false, error: "Insufficient permissions (staff only)." };
+    return { ok: true };
+  },
+  ensureModPlus: (executorRank: string | null): { ok: boolean; error?: string } => {
+    const idx = StaffRanksManager.getRankHierarchyByName(executorRank ?? null);
+    const min = StaffRanksManager.getRankHierarchyByName("Moderator");
+    if (idx < 0 || idx < min) return { ok: false, error: "Moderator rank or higher required." };
+    return { ok: true };
+  },
+  ensureAdminPlus: (executorRank: string | null): { ok: boolean; error?: string } => {
+    const idx = StaffRanksManager.getRankHierarchyByName(executorRank ?? null);
+    const min = StaffRanksManager.getRankHierarchyByName("Probationary Administrator");
+    if (idx < 0 || idx < min) return { ok: false, error: "Probationary Administrator rank or higher required." };
+    return { ok: true };
+  },
+  ensureCoMPlus: (executorRank: string | null): { ok: boolean; error?: string } => {
+    const idx = StaffRanksManager.getRankHierarchyByName(executorRank ?? null);
+    const min = StaffRanksManager.getRankHierarchyByName("Chief of Moderation");
+    if (idx < 0 || idx < min) return { ok: false, error: "Chief of Moderation rank or higher required." };
+    return { ok: true };
+  },
+  logStaffAction: async (staffId: string, actionType: string, targetId: string | null, details: string, metadata?: any): Promise<void> => {
+    try {
+      await db.query("INSERT INTO staff_audit_log SET ?", [{
+        staff_id: staffId,
+        action_type: actionType,
+        target_id: targetId,
+        details: details,
+        metadata: metadata ? JSON.stringify(metadata) : null,
+        created_at: Date.now()
+      }]);
+    } catch (error) {
+      console.error("Failed to log staff action:", error);
+    }
   },
   getRankSuffix: (rank?: string | null): string => {
     if (!rank) return "";
@@ -3842,9 +4402,14 @@ const utils: any = {
     }
     return null;
   },
+  getCachedUserStaffRank,
+  isUserBlacklistedCached,
+  isUserMutedCached,
+  invalidateStaffModCache,
   setUserStaffRank: async (userId: string, rank: string | null): Promise<void> => {
     if (!rank) {
       await db.query("DELETE FROM staff WHERE uid = ?", [userId]);
+      invalidateStaffModCache(userId);
       return;
     }
     const hierarchy = StaffRanksManager.getRankHierarchyByName(rank);
@@ -3853,6 +4418,7 @@ const utils: any = {
     const existing: any = await db.query("SELECT * FROM staff WHERE uid = ?", [userId]);
     if (existing?.length) await db.query("UPDATE staff SET ? WHERE uid = ?", [{ rank: rankName, hierarchy_position: hierarchy }, userId]);
     else await db.query("INSERT INTO staff SET ?", [{ uid: userId, rank: rankName, hierarchy_position: hierarchy }]);
+    invalidateStaffModCache(userId);
   },
   // Blacklist / mute helpers for global chat
   isUserBlacklisted: async (userId: string): Promise<boolean> => {
@@ -3872,21 +4438,33 @@ const utils: any = {
     }
     return true;
   },
+  autoTranslate: async (obj: any, language: string, target: string): Promise<typeof obj> => {
+    if (typeof obj !== "object" || Array.isArray(obj)) throw new TypeError(`The autoTranslate function takes as first argument an object, got ${Array.isArray(obj) ? "Array" : typeof obj}`);
+    if (typeof language !== "string") throw new TypeError(`The autoTranslate function takes as second argument a string, got ${typeof language}`);
+    const keys = Object.keys(obj);
+    const newObj = { ...obj };
+    const validKeys: string[] = [];
+    for (const k of keys) {
+      if (typeof obj[k] === "object" && !Array.isArray(obj[k])) {
+        const newProperty = await utils.autoTranslate(obj[k], language, target);
+        newObj[k] = newProperty;
+        continue;
+      }
+      if (typeof obj[k] !== "string") continue;
+      validKeys.push(k);
+    }
+    await Promise.all(validKeys.map(async vk => {
+      const translated = await utils.translate(obj[vk], language, target);
+      newObj[vk] = translated.text;
+    }));
+    return newObj;
+  },
   /**
    * Parallel translation for nested objects with breadth-first batching.
    * Avoids deep recursion blocking and maximizes concurrency across available workers.
    */
-  hasPermission: (rank: string | null, permission: string): boolean => {
-    return StaffRanksManager.hasPermission(rank, permission);
-  },
   hasMinimumRank: (userRank: string | null, minimumRank: string): boolean => {
     return StaffRanksManager.hasMinimumRank(userRank, minimumRank);
-  },
-  getStaffRankByHierarchy: (hierarchy: number) => {
-    return StaffRanksManager.getRankByHierarchy(hierarchy);
-  },
-  getStaffRankByName: (name: string) => {
-    return StaffRanksManager.getRankByName(name);
   },
   autoTranslateParallel: async (obj: any, language: string, target: string): Promise<typeof obj> => {
     if (typeof obj !== "object" || Array.isArray(obj)) throw new TypeError(`autoTranslateParallel expects an object, got ${Array.isArray(obj) ? "Array" : typeof obj}`);
@@ -3948,11 +4526,6 @@ const utils: any = {
       return decrypted;
     }
     return decryptWithAESLegacy(key, data);
-  },
-  replaceNonLetters: (input: string): string => {
-    const regex = /\*\*(.*?)\*\*/g;
-    const result = input.replace(regex, "$1");
-    return result;
   },
   hashPassword,
   verifyPassword,
@@ -4135,13 +4708,6 @@ const utils: any = {
       Log.error(`${data.rejected.length}/${data.rejected.length + data.accepted.length} couldn't receive the email due to an unknown rejection by the SMTP server.`);
     }
   },
-  sumNumbers: (numbers: number[]): number => {
-    let sum = 0;
-    for (const n of numbers) {
-      sum += n;
-    }
-    return sum;
-  },
   getUnreadNotifications: async (userId: string): Promise<any[]> => {
     const notifications: any = await db.query(`
       SELECT gn.* FROM global_notifications gn
@@ -4162,7 +4728,10 @@ const utils: any = {
   },
   safeInteractionRespond: async (interaction: any, payload: any) => {
     try {
-      if (interaction.replied || interaction.deferred) return await interaction.editReply(payload);
+      if (interaction.replied || interaction.deferred) {
+        if (typeof payload === "object" && !payload.content && payload.embeds) payload.content = "";
+        return await interaction.editReply(payload);
+      }
       if (typeof payload === "object" && !payload.content) payload.content = "";
       return await interaction.reply(payload);
     } catch (err: any) {

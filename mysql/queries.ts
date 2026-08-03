@@ -131,13 +131,29 @@ const ensureUniqueColumns = async (tableName: string, uniqueColumns: string[]): 
 
 const ensureExtraConstraints = async (tableName: string, constraints: string[]): Promise<void> => {
     if (constraints.length === 0) return;
-    let showCreate = normalizeSql(await getShowCreateTable(tableName));
+    const existingIndexes = new Set<string>();
+    try {
+        const rows = await db.query(`SHOW INDEX FROM \`${tableName}\``) as unknown as any[];
+        if (Array.isArray(rows)) {
+            for (const row of rows) {
+                if (row.Key_name) existingIndexes.add(String(row.Key_name));
+            }
+        }
+    } catch {}
+    let showCreate = "";
     for (const constraint of constraints) {
-        const normalizedConstraint = normalizeSql(constraint);
-        if (showCreate.includes(normalizedConstraint)) continue;
+        if (/^(?:UNIQUE\s+)?(?:KEY|INDEX)\s+/i.test(constraint)) {
+            const nameMatch = constraint.match(/^(?:UNIQUE\s+)?(?:KEY|INDEX)\s+(\S+)/i);
+            const indexName = nameMatch ? nameMatch[1].replace(/`/g, "") : null;
+            if (indexName && existingIndexes.has(indexName)) continue;
+        } else {
+            if (!showCreate) {
+                try { showCreate = await getShowCreateTable(tableName); } catch {}
+            }
+            if (showCreate && normalizeSql(showCreate).includes(normalizeSql(constraint))) continue;
+        }
         try {
             await db.query(`ALTER TABLE \`${tableName}\` ADD ${constraint}`);
-            showCreate = normalizeSql(await getShowCreateTable(tableName));
         } catch (error: any) {
             Log.warn("Schema constraint ensure failed", { tableName, constraint, error: error?.message ?? String(error) });
         }
@@ -162,17 +178,6 @@ const ensureTableFromSchema = async (createSql: string): Promise<void> => {
             actual = parseCreateTableStatement(await getShowCreateTable(expected.tableName));
         } catch (error: any) {
             Log.warn("Schema column reconcile failed", { tableName: expected.tableName, columnName, definition, error: error?.message ?? String(error) });
-        }
-    }
-
-    if (expected.tableName === "message_count") {
-        try {
-            await db.query(`CREATE TEMPORARY TABLE message_count_dedup AS SELECT uid, SUM(count) AS count FROM message_count GROUP BY uid`);
-            await db.query(`TRUNCATE TABLE message_count`);
-            await db.query(`INSERT INTO message_count (uid, count) SELECT uid, count FROM message_count_dedup`);
-            await db.query(`DROP TEMPORARY TABLE message_count_dedup`);
-        } catch (error: any) {
-            Log.warn("Schema message_count dedupe skipped", { error: error?.message ?? String(error) });
         }
     }
 
@@ -214,13 +219,13 @@ const tableDefinitions = [
         `CREATE TABLE IF NOT EXISTS message_count (uid VARCHAR(255) NOT NULL PRIMARY KEY, count INT(255) NOT NULL DEFAULT 1)`,
         `CREATE TABLE IF NOT EXISTS ai_memories (id INT PRIMARY KEY AUTO_INCREMENT, uid VARCHAR(255) NOT NULL, memory TEXT NOT NULL)`,
         `CREATE TABLE IF NOT EXISTS custom_responses (id INT PRIMARY KEY AUTO_INCREMENT, guild VARCHAR(255) NOT NULL, command VARCHAR(255) NOT NULL, response TEXT NOT NULL, is_regex BOOLEAN NOT NULL DEFAULT FALSE)`,
-        `CREATE TABLE IF NOT EXISTS support_tickets (id INT PRIMARY KEY AUTO_INCREMENT, user_id VARCHAR(255) NOT NULL, channel_id VARCHAR(255) NOT NULL, message_id VARCHAR(255) DEFAULT NULL, status VARCHAR(50) NOT NULL DEFAULT 'open', assigned_to VARCHAR(255) DEFAULT NULL, created_at BIGINT(255) NOT NULL, closed_at BIGINT(255) DEFAULT NULL, closed_by VARCHAR(255) DEFAULT NULL, first_response_at BIGINT(255) DEFAULT NULL, first_response_by VARCHAR(255) DEFAULT NULL, initial_message TEXT, guild_id VARCHAR(255) DEFAULT NULL, guild_name VARCHAR(255) DEFAULT NULL)`,
+        `CREATE TABLE IF NOT EXISTS support_tickets (id INT PRIMARY KEY AUTO_INCREMENT, user_id VARCHAR(255) NOT NULL, channel_id VARCHAR(255) NOT NULL, message_id VARCHAR(255) DEFAULT NULL, status VARCHAR(50) NOT NULL DEFAULT 'open', assigned_to VARCHAR(255) DEFAULT NULL, created_at BIGINT(255) NOT NULL, closed_at BIGINT(255) DEFAULT NULL, closed_by VARCHAR(255) DEFAULT NULL, first_response_at BIGINT(255) DEFAULT NULL, first_response_by VARCHAR(255) DEFAULT NULL, initial_message TEXT, guild_id VARCHAR(255) DEFAULT NULL, guild_name VARCHAR(255) DEFAULT NULL, INDEX idx_support_tickets_assigned_to (assigned_to))`,
         `CREATE TABLE IF NOT EXISTS support_messages (id INT PRIMARY KEY AUTO_INCREMENT, ticket_id INT NOT NULL, user_id VARCHAR(255) NOT NULL, username VARCHAR(255) NOT NULL, content TEXT NOT NULL, timestamp BIGINT(255) NOT NULL, is_staff BOOLEAN NOT NULL DEFAULT FALSE, staff_rank VARCHAR(64) DEFAULT NULL)`,
         `CREATE TABLE IF NOT EXISTS local_ticket_configs (guild_id VARCHAR(255) NOT NULL PRIMARY KEY, enabled BOOLEAN NOT NULL DEFAULT TRUE, category_id VARCHAR(255) NOT NULL, transcripts_channel_id VARCHAR(255) DEFAULT NULL, support_role_ids JSON DEFAULT NULL, created_at BIGINT(255) NOT NULL, updated_at BIGINT(255) NOT NULL)`,
         `CREATE TABLE IF NOT EXISTS local_tickets (id INT PRIMARY KEY AUTO_INCREMENT, guild_id VARCHAR(255) NOT NULL, channel_id VARCHAR(255) NOT NULL, creator_id VARCHAR(255) NOT NULL, opener_message_id VARCHAR(255) DEFAULT NULL, initial_message TEXT NOT NULL, status VARCHAR(32) NOT NULL DEFAULT 'open', created_at BIGINT(255) NOT NULL, closed_at BIGINT(255) DEFAULT NULL, closed_by VARCHAR(255) DEFAULT NULL)`,
         `CREATE TABLE IF NOT EXISTS staff_status (user_id VARCHAR(255) PRIMARY KEY, status VARCHAR(20) NOT NULL DEFAULT 'offline', status_message VARCHAR(255) DEFAULT NULL, updated_at BIGINT(255) NOT NULL)`,
         `CREATE TABLE IF NOT EXISTS staff_notes (id INT PRIMARY KEY AUTO_INCREMENT, user_id VARCHAR(255) NOT NULL, staff_id VARCHAR(255) NOT NULL, note TEXT NOT NULL, created_at BIGINT(255) NOT NULL)`,
-        `CREATE TABLE IF NOT EXISTS staff_audit_log (id INT PRIMARY KEY AUTO_INCREMENT, staff_id VARCHAR(255) NOT NULL, action_type VARCHAR(50) NOT NULL, target_id VARCHAR(255) DEFAULT NULL, details TEXT, metadata JSON DEFAULT NULL, created_at BIGINT(255) NOT NULL)`,
+        `CREATE TABLE IF NOT EXISTS staff_audit_log (id INT PRIMARY KEY AUTO_INCREMENT, staff_id VARCHAR(255) NOT NULL, action_type VARCHAR(50) NOT NULL, target_id VARCHAR(255) DEFAULT NULL, details TEXT, metadata JSON DEFAULT NULL, created_at BIGINT(255) NOT NULL, INDEX idx_staff_audit_log_created_at (created_at))`,
         `CREATE TABLE IF NOT EXISTS ai_monitor_configs (guild_id VARCHAR(255) NOT NULL PRIMARY KEY, enabled BOOLEAN NOT NULL DEFAULT FALSE, logs_channel VARCHAR(255) NOT NULL DEFAULT '0', allow_actions BOOLEAN NOT NULL DEFAULT FALSE, analyze_potentially BOOLEAN NOT NULL DEFAULT FALSE, allow_investigation_tools BOOLEAN NOT NULL DEFAULT FALSE, monitor_language VARCHAR(5) NOT NULL DEFAULT 'en', channel_whitelist_ids JSON DEFAULT NULL, role_whitelist_ids JSON DEFAULT NULL, created_at BIGINT(255) NOT NULL, updated_at BIGINT(255) NOT NULL)`,
         `CREATE TABLE IF NOT EXISTS ai_monitor_cases (case_id VARCHAR(64) NOT NULL PRIMARY KEY, guild_id VARCHAR(255) NOT NULL, event_type VARCHAR(50) NOT NULL, user_id VARCHAR(255) DEFAULT NULL, channel_id VARCHAR(255) DEFAULT NULL, message_id VARCHAR(255) DEFAULT NULL, summary TEXT, risk VARCHAR(20) NOT NULL DEFAULT 'low', recommended_action VARCHAR(32) NOT NULL DEFAULT 'notify', recommended_actions JSON DEFAULT NULL, action_payload JSON DEFAULT NULL, status VARCHAR(20) NOT NULL DEFAULT 'open', created_at BIGINT(255) NOT NULL, updated_at BIGINT(255) NOT NULL, log_channel_id VARCHAR(255) DEFAULT NULL, log_message_id VARCHAR(255) DEFAULT NULL, allow_actions BOOLEAN NOT NULL DEFAULT FALSE, auto_action_taken BOOLEAN NOT NULL DEFAULT FALSE, reason TEXT, confidence DECIMAL(4,3) DEFAULT NULL)`,
         `CREATE TABLE IF NOT EXISTS ai_monitor_entity_stats (guild_id VARCHAR(255) NOT NULL, entity_key VARCHAR(320) NOT NULL, entity_type VARCHAR(32) NOT NULL, risk_score DECIMAL(8,3) NOT NULL DEFAULT 0, flag_count INT NOT NULL DEFAULT 0, action_count INT NOT NULL DEFAULT 0, false_positive_count INT NOT NULL DEFAULT 0, last_flag_at BIGINT(255) DEFAULT NULL, last_action_at BIGINT(255) DEFAULT NULL, updated_at BIGINT(255) NOT NULL, PRIMARY KEY (guild_id, entity_key))`,
@@ -238,7 +243,7 @@ const tableDefinitions = [
         `CREATE TABLE IF NOT EXISTS rpg_inventory (id INT PRIMARY KEY AUTO_INCREMENT, character_id INT NOT NULL, item_id INT NOT NULL, quantity INT NOT NULL DEFAULT 1, acquired_at BIGINT(255) NOT NULL, bound BOOLEAN NOT NULL DEFAULT FALSE)`,
         `CREATE TABLE IF NOT EXISTS rpg_equipped_items (character_id INT NOT NULL, slot VARCHAR(30) NOT NULL, item_id INT NOT NULL, inventory_id INT NOT NULL, equipped_at BIGINT(255) NOT NULL, PRIMARY KEY (character_id, slot))`,
         `CREATE TABLE IF NOT EXISTS rpg_combat_logs (id INT PRIMARY KEY AUTO_INCREMENT, attacker_id INT NOT NULL, defender_id INT DEFAULT NULL, action_type VARCHAR(30) NOT NULL, damage_dealt INT NOT NULL DEFAULT 0, hp_remaining INT NOT NULL, result VARCHAR(20) NOT NULL, occurred_at BIGINT(255) NOT NULL)`,
-        `CREATE TABLE IF NOT EXISTS rpg_quests (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(100) NOT NULL, description TEXT NOT NULL, required_level INT NOT NULL DEFAULT 1, reward_gold INT NOT NULL DEFAULT 0, reward_experience INT NOT NULL DEFAULT 0, reward_item_id INT DEFAULT NULL, repeatable BOOLEAN NOT NULL DEFAULT FALSE, cooldown INT NOT NULL DEFAULT 0)`,
+        `CREATE TABLE IF NOT EXISTS rpg_quests (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(100) NOT NULL, description TEXT NOT NULL, required_level INT NOT NULL DEFAULT 1, requirement INT NOT NULL DEFAULT 1, reward_gold INT NOT NULL DEFAULT 0, reward_experience INT NOT NULL DEFAULT 0, reward_item_id INT DEFAULT NULL, repeatable BOOLEAN NOT NULL DEFAULT FALSE, cooldown INT NOT NULL DEFAULT 0)`,
         `CREATE TABLE IF NOT EXISTS rpg_character_quests (id INT PRIMARY KEY AUTO_INCREMENT, character_id INT NOT NULL, quest_id INT NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'active', progress INT NOT NULL DEFAULT 0, accepted_at BIGINT(255) NOT NULL, completed_at BIGINT(255) DEFAULT NULL, last_completion BIGINT(255) DEFAULT NULL)`,
         `CREATE TABLE IF NOT EXISTS rpg_skills (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(50) NOT NULL, class VARCHAR(30) NOT NULL, description TEXT NOT NULL, required_level INT NOT NULL DEFAULT 1, mp_cost INT NOT NULL DEFAULT 10, cooldown INT NOT NULL DEFAULT 0, damage_multiplier DECIMAL(4,2) NOT NULL DEFAULT 1.00, effect_type VARCHAR(30) DEFAULT NULL, effect_value INT DEFAULT NULL)`,
         `CREATE TABLE IF NOT EXISTS rpg_character_skills (character_id INT NOT NULL, skill_id INT NOT NULL, level INT NOT NULL DEFAULT 1, last_used BIGINT(255) DEFAULT NULL, PRIMARY KEY (character_id, skill_id))`,
@@ -261,7 +266,13 @@ const tableDefinitions = [
         `CREATE TABLE IF NOT EXISTS staff_permissions (rank_name VARCHAR(64) NOT NULL, permission VARCHAR(100) NOT NULL, PRIMARY KEY (rank_name, permission), FOREIGN KEY (rank_name) REFERENCES staff_ranks(name) ON DELETE CASCADE)`,
         `CREATE TABLE IF NOT EXISTS ai_chat_sessions (session_id VARCHAR(64) NOT NULL PRIMARY KEY, user_id VARCHAR(255) NOT NULL, title VARCHAR(255) DEFAULT NULL, created_at BIGINT(255) NOT NULL, updated_at BIGINT(255) NOT NULL, message_count INT NOT NULL DEFAULT 0, context_summary TEXT DEFAULT NULL, is_active BOOLEAN NOT NULL DEFAULT TRUE)`,
         `CREATE TABLE IF NOT EXISTS ai_chat_messages (id INT PRIMARY KEY AUTO_INCREMENT, session_id VARCHAR(64) NOT NULL, role VARCHAR(20) NOT NULL, content TEXT NOT NULL, tool_calls JSON DEFAULT NULL, tool_results JSON DEFAULT NULL, created_at BIGINT(255) NOT NULL, compressed BOOLEAN NOT NULL DEFAULT FALSE, INDEX idx_session_id (session_id))`,
-        `CREATE TABLE IF NOT EXISTS ai_memory_graph (id INT PRIMARY KEY AUTO_INCREMENT, user_id VARCHAR(255) NOT NULL, memory_type VARCHAR(50) NOT NULL, subject VARCHAR(255) NOT NULL, content TEXT NOT NULL, related_entities JSON DEFAULT NULL, confidence DECIMAL(4,3) NOT NULL DEFAULT 1.000, created_at BIGINT(255) NOT NULL, updated_at BIGINT(255) NOT NULL, last_accessed BIGINT(255) DEFAULT NULL, access_count INT NOT NULL DEFAULT 0, INDEX idx_user_type (user_id, memory_type), INDEX idx_subject (subject))`
+        `CREATE TABLE IF NOT EXISTS ai_memory_graph (id INT PRIMARY KEY AUTO_INCREMENT, user_id VARCHAR(255) NOT NULL, memory_type VARCHAR(50) NOT NULL, subject VARCHAR(255) NOT NULL, content TEXT NOT NULL, related_entities JSON DEFAULT NULL, confidence DECIMAL(4,3) NOT NULL DEFAULT 1.000, created_at BIGINT(255) NOT NULL, updated_at BIGINT(255) NOT NULL, last_accessed BIGINT(255) DEFAULT NULL, access_count INT NOT NULL DEFAULT 0, INDEX idx_user_type (user_id, memory_type), INDEX idx_subject (subject))`,
+        `CREATE TABLE IF NOT EXISTS reminders (id INT PRIMARY KEY AUTO_INCREMENT, user_id VARCHAR(255) NOT NULL, channel_id VARCHAR(255) DEFAULT NULL, message TEXT NOT NULL, remind_at BIGINT(255) NOT NULL, created_at BIGINT(255) NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'pending', INDEX idx_reminders_remind_at (remind_at), INDEX idx_reminders_status (status))`,
+        `CREATE TABLE IF NOT EXISTS automod_configs (guild_id VARCHAR(255) NOT NULL PRIMARY KEY, enabled BOOLEAN NOT NULL DEFAULT FALSE, spam_enabled BOOLEAN NOT NULL DEFAULT TRUE, spam_max_messages INT NOT NULL DEFAULT 5, spam_window_ms INT NOT NULL DEFAULT 5000, caps_enabled BOOLEAN NOT NULL DEFAULT TRUE, caps_percent INT NOT NULL DEFAULT 70, caps_min_length INT NOT NULL DEFAULT 10, mention_enabled BOOLEAN NOT NULL DEFAULT TRUE, mention_max INT NOT NULL DEFAULT 5, invite_enabled BOOLEAN NOT NULL DEFAULT TRUE, action VARCHAR(20) NOT NULL DEFAULT 'delete', created_at BIGINT(255) NOT NULL, updated_at BIGINT(255) NOT NULL)`,
+        `CREATE TABLE IF NOT EXISTS automod_log (id INT PRIMARY KEY AUTO_INCREMENT, guild_id VARCHAR(255) NOT NULL, user_id VARCHAR(255) NOT NULL, rule VARCHAR(50) NOT NULL, message_content TEXT, action_taken VARCHAR(20) NOT NULL, created_at BIGINT(255) NOT NULL, INDEX idx_automod_log_guild (guild_id), INDEX idx_automod_log_user (user_id))`,
+        `CREATE TABLE IF NOT EXISTS welcome_configs (guild_id VARCHAR(255) NOT NULL PRIMARY KEY, enabled BOOLEAN NOT NULL DEFAULT FALSE, channel_id VARCHAR(255) NOT NULL DEFAULT '0', welcome_message TEXT NOT NULL DEFAULT 'Welcome {user} to {server}!', goodbye_message TEXT NOT NULL DEFAULT '{user} has left {server}.', welcome_enabled BOOLEAN NOT NULL DEFAULT TRUE, goodbye_enabled BOOLEAN NOT NULL DEFAULT TRUE, created_at BIGINT(255) NOT NULL, updated_at BIGINT(255) NOT NULL)`,
+        `CREATE TABLE IF NOT EXISTS giveaways (id INT PRIMARY KEY AUTO_INCREMENT, guild_id VARCHAR(255) NOT NULL, channel_id VARCHAR(255) NOT NULL, message_id VARCHAR(255) DEFAULT NULL, prize VARCHAR(255) NOT NULL, description TEXT, winner_count INT NOT NULL DEFAULT 1, ends_at BIGINT(255) NOT NULL, created_by VARCHAR(255) NOT NULL, ended BOOLEAN NOT NULL DEFAULT FALSE, winner_ids JSON DEFAULT NULL, created_at BIGINT(255) NOT NULL, INDEX idx_giveaways_ended (ended), INDEX idx_giveaways_ends_at (ends_at))`,
+        `CREATE TABLE IF NOT EXISTS giveaway_entries (giveaway_id INT NOT NULL, user_id VARCHAR(255) NOT NULL, entered_at BIGINT(255) NOT NULL, PRIMARY KEY (giveaway_id, user_id))`
 ];
 
 export default async function queries(): Promise<void> {

@@ -1,6 +1,5 @@
 import { ChannelType, ChatInputCommandInteraction, EmbedBuilder, PermissionFlagsBits, SlashCommandBuilder, TextChannel } from "discord.js";
 import utils from "../utils";
-import langs from "langs";
 import db from "../mysql/database";
 import type { GlobalChat } from "../types/interfaces";
 import client from "..";
@@ -119,7 +118,7 @@ export default {
                         await utils.safeInteractionRespond(interaction, texts.errors.not_registered);
                         break;
                     }
-                    if (!langs.has(1, language) || language === "br" || language === "ch") {
+                    if (!utils.isValidLanguageCode(language)) {
                         await utils.safeInteractionRespond(interaction, texts.language.unsupported);
                         break;
                     }

@@ -1,11 +1,10 @@
 import db from "./mysql/database";
 import Log from "./Log";
-import type { ConsumableData, EquipmentData } from "./types/rpgInit";
 
 export async function initializeShopItems() {
     try {
         const existingItems: any = await db.query("SELECT COUNT(*) as count FROM rpg_items");
-        
+
         if (existingItems[0].count > 0) {
             Log.info("Shop items already initialized", { component: "RPG" });
             return;
@@ -32,8 +31,22 @@ export async function initializeShopItems() {
             { name: "Scholar's Amulet", description: "Wisdom boost", type: "accessory", rarity: "rare", base_value: 280, tradeable: true, stackable: false, max_stack: 1 }
         ];
 
-        for (const item of items) {
-            await db.query("INSERT INTO rpg_items SET ?", [item]);
+        const itemRows = items.map(item => [
+            item.name,
+            item.description,
+            item.type,
+            item.rarity,
+            item.base_value,
+            item.tradeable,
+            item.stackable,
+            item.max_stack
+        ]);
+        await db.query("INSERT INTO rpg_items (name, description, type, rarity, base_value, tradeable, stackable, max_stack) VALUES ?", [itemRows]);
+
+        const itemMap = new Map<string, number>();
+        const existingItemRows: any = await db.query("SELECT id, name FROM rpg_items");
+        for (const row of existingItemRows) {
+            itemMap.set(row.name, row.id);
         }
 
         const equipmentData = [
@@ -53,24 +66,24 @@ export async function initializeShopItems() {
             { item_name: "Scholar's Amulet", slot: "accessory1", required_level: 8, intelligence_bonus: 10 }
         ];
 
-        for (const eq of equipmentData) {
-            const item: any = await db.query("SELECT id FROM rpg_items WHERE name = ?", [eq.item_name]);
-            if (item[0]) {
-                await db.query("INSERT INTO rpg_equipment SET ?", [{
-                    item_id: item[0].id,
-                    slot: eq.slot,
-                    required_level: eq.required_level || 1,
-                    required_class: eq.required_class || null,
-                    strength_bonus: eq.strength_bonus || 0,
-                    defense_bonus: eq.defense_bonus || 0,
-                    agility_bonus: eq.agility_bonus || 0,
-                    intelligence_bonus: eq.intelligence_bonus || 0,
-                    luck_bonus: eq.luck_bonus || 0,
-                    hp_bonus: 0,
-                    mp_bonus: eq.mp_bonus || 0,
-                    special_effect: null
-                }]);
-            }
+        const eqRows = equipmentData
+            .filter(eq => itemMap.has(eq.item_name))
+            .map(eq => [
+                itemMap.get(eq.item_name),
+                eq.slot,
+                eq.required_level || 1,
+                eq.required_class || null,
+                eq.strength_bonus || 0,
+                eq.defense_bonus || 0,
+                eq.agility_bonus || 0,
+                eq.intelligence_bonus || 0,
+                eq.luck_bonus || 0,
+                0,
+                eq.mp_bonus || 0,
+                null
+            ]);
+        if (eqRows.length) {
+            await db.query("INSERT INTO rpg_equipment (item_id, slot, required_level, required_class, strength_bonus, defense_bonus, agility_bonus, intelligence_bonus, luck_bonus, hp_bonus, mp_bonus, special_effect) VALUES ?", [eqRows]);
         }
 
         const consumableData = [
@@ -80,17 +93,17 @@ export async function initializeShopItems() {
             { item_name: "Greater Mana Potion", effect_type: "heal_mp", effect_value: 100 }
         ];
 
-        for (const cons of consumableData) {
-            const item: any = await db.query("SELECT id FROM rpg_items WHERE name = ?", [cons.item_name]);
-            if (item[0]) {
-                await db.query("INSERT INTO rpg_consumables SET ?", [{
-                    item_id: item[0].id,
-                    effect_type: cons.effect_type,
-                    effect_value: cons.effect_value,
-                    duration: 0,
-                    cooldown: 0
-                }]);
-            }
+        const consRows = consumableData
+            .filter(cons => itemMap.has(cons.item_name))
+            .map(cons => [
+                itemMap.get(cons.item_name),
+                cons.effect_type,
+                cons.effect_value,
+                0,
+                0
+            ]);
+        if (consRows.length) {
+            await db.query("INSERT INTO rpg_consumables (item_id, effect_type, effect_value, duration, cooldown) VALUES ?", [consRows]);
         }
 
         Log.info("Shop items initialized successfully", { component: "RPG", count: items.length });
@@ -101,81 +114,76 @@ export async function initializeShopItems() {
 
 export async function initializeRPGData() {
     try {
-        const existingAchievements: any = await db.query("SELECT COUNT(*) as count FROM rpg_achievements");
-        
-        if (existingAchievements[0].count === 0) {
-            const achievements = [
-                { name: "First Blood", description: "Win your first battle", category: "combat", requirement_type: "battles_won", requirement_value: 1, reward_gold: 100, reward_experience: 50, icon: "⚔️" },
-                { name: "Warrior", description: "Win 50 battles", category: "combat", requirement_type: "battles_won", requirement_value: 50, reward_gold: 1000, reward_experience: 500, icon: "🗡️" },
-                { name: "Champion", description: "Win 200 battles", category: "combat", requirement_type: "battles_won", requirement_value: 200, reward_gold: 5000, reward_experience: 2000, icon: "👑" },
-                { name: "Level 10", description: "Reach level 10", category: "exploration", requirement_type: "level_reached", requirement_value: 10, reward_gold: 500, reward_experience: 0, icon: "📊" },
-                { name: "Level 25", description: "Reach level 25", category: "exploration", requirement_type: "level_reached", requirement_value: 25, reward_gold: 2000, reward_experience: 0, icon: "🌟" },
-                { name: "Wealthy", description: "Accumulate 10,000 gold", category: "collection", requirement_type: "gold_accumulated", requirement_value: 10000, reward_gold: 1000, reward_experience: 200, icon: "💰" },
-                { name: "Guild Founder", description: "Create a guild", category: "social", requirement_type: "guilds_created", requirement_value: 1, reward_gold: 500, reward_experience: 100, icon: "🏰" },
-                { name: "Dungeon Explorer", description: "Complete 10 dungeons", category: "exploration", requirement_type: "dungeons_completed", requirement_value: 10, reward_gold: 2000, reward_experience: 1000, icon: "🗺️" },
-                { name: "Master Crafter", description: "Craft 50 items", category: "crafting", requirement_type: "items_crafted", requirement_value: 50, reward_gold: 3000, reward_experience: 1500, icon: "🔨" },
-                { name: "Pet Collector", description: "Own 5 different pets", category: "collection", requirement_type: "pets_owned", requirement_value: 5, reward_gold: 2500, reward_experience: 800, icon: "🐾" }
-            ];
+        await Promise.all([
+            (async () => {
+                const existing: any = await db.query("SELECT COUNT(*) as count FROM rpg_achievements");
 
-            for (const ach of achievements) {
-                await db.query("INSERT INTO rpg_achievements SET ?", [ach]);
-            }
-            Log.info("Achievements initialized", { component: "RPG" });
-        }
+                if (existing[0].count === 0) {
+                    const rows = [
+                        { name: "First Blood", description: "Win your first battle", category: "combat", requirement_type: "battles_won", requirement_value: 1, reward_gold: 100, reward_experience: 50, icon: "⚔️" },
+                        { name: "Warrior", description: "Win 50 battles", category: "combat", requirement_type: "battles_won", requirement_value: 50, reward_gold: 1000, reward_experience: 500, icon: "🗡️" },
+                        { name: "Champion", description: "Win 200 battles", category: "combat", requirement_type: "battles_won", requirement_value: 200, reward_gold: 5000, reward_experience: 2000, icon: "👑" },
+                        { name: "Level 10", description: "Reach level 10", category: "exploration", requirement_type: "level_reached", requirement_value: 10, reward_gold: 500, reward_experience: 0, icon: "📊" },
+                        { name: "Level 25", description: "Reach level 25", category: "exploration", requirement_type: "level_reached", requirement_value: 25, reward_gold: 2000, reward_experience: 0, icon: "🌟" },
+                        { name: "Wealthy", description: "Accumulate 10,000 gold", category: "collection", requirement_type: "gold_accumulated", requirement_value: 10000, reward_gold: 1000, reward_experience: 200, icon: "💰" },
+                        { name: "Guild Founder", description: "Create a guild", category: "social", requirement_type: "guilds_created", requirement_value: 1, reward_gold: 500, reward_experience: 100, icon: "🏰" },
+                        { name: "Dungeon Explorer", description: "Complete 10 dungeons", category: "exploration", requirement_type: "dungeons_completed", requirement_value: 10, reward_gold: 2000, reward_experience: 1000, icon: "🗺️" },
+                        { name: "Master Crafter", description: "Craft 50 items", category: "crafting", requirement_type: "items_crafted", requirement_value: 50, reward_gold: 3000, reward_experience: 1500, icon: "🔨" },
+                        { name: "Pet Collector", description: "Own 5 different pets", category: "collection", requirement_type: "pets_owned", requirement_value: 5, reward_gold: 2500, reward_experience: 800, icon: "🐾" }
+                    ];
+                    await db.query("INSERT INTO rpg_achievements (name, description, category, requirement_type, requirement_value, reward_gold, reward_experience, icon) VALUES ?", [rows.map(r => [r.name, r.description, r.category, r.requirement_type, r.requirement_value, r.reward_gold, r.reward_experience, r.icon])]);
+                    Log.info("Achievements initialized", { component: "RPG" });
+                }
+            })(),
+            (async () => {
+                const existing: any = await db.query("SELECT COUNT(*) as count FROM rpg_crafting_materials");
 
-        const existingMaterials: any = await db.query("SELECT COUNT(*) as count FROM rpg_crafting_materials");
-        
-        if (existingMaterials[0].count === 0) {
-            const materials = [
-                { name: "Iron Ore", description: "Basic metal ore", rarity: "common", stack_size: 999, drop_rate: 25.00, emoji: "⛏️" },
-                { name: "Leather Scrap", description: "Tanned animal hide", rarity: "common", stack_size: 999, drop_rate: 30.00, emoji: "🦴" },
-                { name: "Magic Dust", description: "Mystical powder", rarity: "uncommon", stack_size: 999, drop_rate: 15.00, emoji: "✨" },
-                { name: "Dragon Scale", description: "Rare dragon material", rarity: "rare", stack_size: 99, drop_rate: 5.00, emoji: "🐉" },
-                { name: "Mithril Ore", description: "Legendary metal", rarity: "epic", stack_size: 50, drop_rate: 2.00, emoji: "💎" },
-                { name: "Phoenix Feather", description: "Mythical bird plume", rarity: "legendary", stack_size: 10, drop_rate: 0.50, emoji: "🔥" },
-                { name: "Crystal Shard", description: "Magical crystal fragment", rarity: "uncommon", stack_size: 999, drop_rate: 12.00, emoji: "💠" },
-                { name: "Ancient Wood", description: "Petrified timber", rarity: "rare", stack_size: 99, drop_rate: 8.00, emoji: "🌳" }
-            ];
+                if (existing[0].count === 0) {
+                    const rows = [
+                        { name: "Iron Ore", description: "Basic metal ore", rarity: "common", stack_size: 999, drop_rate: 25.00, emoji: "⛏️" },
+                        { name: "Leather Scrap", description: "Tanned animal hide", rarity: "common", stack_size: 999, drop_rate: 30.00, emoji: "🦴" },
+                        { name: "Magic Dust", description: "Mystical powder", rarity: "uncommon", stack_size: 999, drop_rate: 15.00, emoji: "✨" },
+                        { name: "Dragon Scale", description: "Rare dragon material", rarity: "rare", stack_size: 99, drop_rate: 5.00, emoji: "🐉" },
+                        { name: "Mithril Ore", description: "Legendary metal", rarity: "epic", stack_size: 50, drop_rate: 2.00, emoji: "💎" },
+                        { name: "Phoenix Feather", description: "Mythical bird plume", rarity: "legendary", stack_size: 10, drop_rate: 0.50, emoji: "🔥" },
+                        { name: "Crystal Shard", description: "Magical crystal fragment", rarity: "uncommon", stack_size: 999, drop_rate: 12.00, emoji: "💠" },
+                        { name: "Ancient Wood", description: "Petrified timber", rarity: "rare", stack_size: 99, drop_rate: 8.00, emoji: "🌳" }
+                    ];
+                    await db.query("INSERT INTO rpg_crafting_materials (name, description, rarity, stack_size, drop_rate, emoji) VALUES ?", [rows.map(r => [r.name, r.description, r.rarity, r.stack_size, r.drop_rate, r.emoji])]);
+                    Log.info("Crafting materials initialized", { component: "RPG" });
+                }
+            })(),
+            (async () => {
+                const existing: any = await db.query("SELECT COUNT(*) as count FROM rpg_pets");
 
-            for (const mat of materials) {
-                await db.query("INSERT INTO rpg_crafting_materials SET ?", [mat]);
-            }
-            Log.info("Crafting materials initialized", { component: "RPG" });
-        }
+                if (existing[0].count === 0) {
+                    const rows = [
+                        { name: "Wolf Pup", description: "Loyal canine companion", rarity: "common", base_price: 500, strength_bonus: 3, defense_bonus: 2, agility_bonus: 4, intelligence_bonus: 1, luck_bonus: 2, special_ability: "Increased critical chance", emoji: "🐺" },
+                        { name: "Fire Drake", description: "Small dragon hatchling", rarity: "rare", base_price: 5000, strength_bonus: 8, defense_bonus: 6, agility_bonus: 5, intelligence_bonus: 7, luck_bonus: 6, special_ability: "Burn damage over time", emoji: "🐲" },
+                        { name: "Shadow Cat", description: "Mysterious feline", rarity: "uncommon", base_price: 1500, strength_bonus: 4, defense_bonus: 3, agility_bonus: 8, intelligence_bonus: 3, luck_bonus: 7, special_ability: "Increased evasion", emoji: "🐈‍⬛" },
+                        { name: "Phoenix", description: "Legendary immortal bird", rarity: "legendary", base_price: 25000, strength_bonus: 10, defense_bonus: 10, agility_bonus: 12, intelligence_bonus: 15, luck_bonus: 15, special_ability: "Auto-revive once per battle", emoji: "🔥" },
+                        { name: "Slime", description: "Cute blob creature", rarity: "common", base_price: 200, strength_bonus: 1, defense_bonus: 4, agility_bonus: 1, intelligence_bonus: 1, luck_bonus: 3, special_ability: "Increased gold drops", emoji: "💧" },
+                        { name: "Battle Bear", description: "Fierce grizzly", rarity: "uncommon", base_price: 2000, strength_bonus: 7, defense_bonus: 8, agility_bonus: 3, intelligence_bonus: 2, luck_bonus: 4, special_ability: "Increased HP regeneration", emoji: "🐻" }
+                    ];
+                    await db.query("INSERT INTO rpg_pets (name, description, rarity, base_price, strength_bonus, defense_bonus, agility_bonus, intelligence_bonus, luck_bonus, special_ability, emoji) VALUES ?", [rows.map(r => [r.name, r.description, r.rarity, r.base_price, r.strength_bonus, r.defense_bonus, r.agility_bonus, r.intelligence_bonus, r.luck_bonus, r.special_ability, r.emoji])]);
+                    Log.info("Pets initialized", { component: "RPG" });
+                }
+            })(),
+            (async () => {
+                const existing: any = await db.query("SELECT COUNT(*) as count FROM rpg_dungeons");
 
-        const existingPets: any = await db.query("SELECT COUNT(*) as count FROM rpg_pets");
-        
-        if (existingPets[0].count === 0) {
-            const pets = [
-                { name: "Wolf Pup", description: "Loyal canine companion", rarity: "common", base_price: 500, strength_bonus: 3, defense_bonus: 2, agility_bonus: 4, intelligence_bonus: 1, luck_bonus: 2, special_ability: "Increased critical chance", emoji: "🐺" },
-                { name: "Fire Drake", description: "Small dragon hatchling", rarity: "rare", base_price: 5000, strength_bonus: 8, defense_bonus: 6, agility_bonus: 5, intelligence_bonus: 7, luck_bonus: 6, special_ability: "Burn damage over time", emoji: "🐲" },
-                { name: "Shadow Cat", description: "Mysterious feline", rarity: "uncommon", base_price: 1500, strength_bonus: 4, defense_bonus: 3, agility_bonus: 8, intelligence_bonus: 3, luck_bonus: 7, special_ability: "Increased evasion", emoji: "🐈‍⬛" },
-                { name: "Phoenix", description: "Legendary immortal bird", rarity: "legendary", base_price: 25000, strength_bonus: 10, defense_bonus: 10, agility_bonus: 12, intelligence_bonus: 15, luck_bonus: 15, special_ability: "Auto-revive once per battle", emoji: "🔥" },
-                { name: "Slime", description: "Cute blob creature", rarity: "common", base_price: 200, strength_bonus: 1, defense_bonus: 4, agility_bonus: 1, intelligence_bonus: 1, luck_bonus: 3, special_ability: "Increased gold drops", emoji: "💧" },
-                { name: "Battle Bear", description: "Fierce grizzly", rarity: "uncommon", base_price: 2000, strength_bonus: 7, defense_bonus: 8, agility_bonus: 3, intelligence_bonus: 2, luck_bonus: 4, special_ability: "Increased HP regeneration", emoji: "🐻" }
-            ];
-
-            for (const pet of pets) {
-                await db.query("INSERT INTO rpg_pets SET ?", [pet]);
-            }
-            Log.info("Pets initialized", { component: "RPG" });
-        }
-
-        const existingDungeons: any = await db.query("SELECT COUNT(*) as count FROM rpg_dungeons");
-        
-        if (existingDungeons[0].count === 0) {
-            const dungeons = [
-                { name: "Abandoned Mine", description: "Dark tunnels filled with monsters", required_level: 5, difficulty: "Easy", stages: 3, boss_name: "Mine Overlord", reward_gold_min: 200, reward_gold_max: 500, reward_exp_min: 300, reward_exp_max: 600, cooldown: 3600000 },
-                { name: "Haunted Castle", description: "Cursed fortress of the undead", required_level: 10, difficulty: "Normal", stages: 5, boss_name: "Vampire Lord", reward_gold_min: 800, reward_gold_max: 1500, reward_exp_min: 1000, reward_exp_max: 2000, cooldown: 7200000 },
-                { name: "Dragon's Lair", description: "Ancient dragon sanctuary", required_level: 20, difficulty: "Hard", stages: 7, boss_name: "Elder Dragon", reward_gold_min: 3000, reward_gold_max: 6000, reward_exp_min: 5000, reward_exp_max: 10000, cooldown: 14400000 },
-                { name: "Abyss", description: "Realm of eternal darkness", required_level: 35, difficulty: "Expert", stages: 10, boss_name: "Abyssal Demon", reward_gold_min: 10000, reward_gold_max: 20000, reward_exp_min: 20000, reward_exp_max: 40000, cooldown: 28800000 }
-            ];
-
-            for (const dungeon of dungeons) {
-                await db.query("INSERT INTO rpg_dungeons SET ?", [dungeon]);
-            }
-            Log.info("Dungeons initialized", { component: "RPG" });
-        }
+                if (existing[0].count === 0) {
+                    const rows = [
+                        { name: "Abandoned Mine", description: "Dark tunnels filled with monsters", required_level: 5, difficulty: "Easy", stages: 3, boss_name: "Mine Overlord", reward_gold_min: 200, reward_gold_max: 500, reward_exp_min: 300, reward_exp_max: 600, cooldown: 3600000 },
+                        { name: "Haunted Castle", description: "Cursed fortress of the undead", required_level: 10, difficulty: "Normal", stages: 5, boss_name: "Vampire Lord", reward_gold_min: 800, reward_gold_max: 1500, reward_exp_min: 1000, reward_exp_max: 2000, cooldown: 7200000 },
+                        { name: "Dragon's Lair", description: "Ancient dragon sanctuary", required_level: 20, difficulty: "Hard", stages: 7, boss_name: "Elder Dragon", reward_gold_min: 3000, reward_gold_max: 6000, reward_exp_min: 5000, reward_exp_max: 10000, cooldown: 14400000 },
+                        { name: "Abyss", description: "Realm of eternal darkness", required_level: 35, difficulty: "Expert", stages: 10, boss_name: "Abyssal Demon", reward_gold_min: 10000, reward_gold_max: 20000, reward_exp_min: 20000, reward_exp_max: 40000, cooldown: 28800000 }
+                    ];
+                    await db.query("INSERT INTO rpg_dungeons (name, description, required_level, difficulty, stages, boss_name, reward_gold_min, reward_gold_max, reward_exp_min, reward_exp_max, cooldown) VALUES ?", [rows.map(r => [r.name, r.description, r.required_level, r.difficulty, r.stages, r.boss_name, r.reward_gold_min, r.reward_gold_max, r.reward_exp_min, r.reward_exp_max, r.cooldown])]);
+                    Log.info("Dungeons initialized", { component: "RPG" });
+                }
+            })()
+        ]);
 
         Log.success("RPG data initialization complete", { component: "RPG" });
     } catch (error: any) {

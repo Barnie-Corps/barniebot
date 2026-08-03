@@ -278,15 +278,27 @@ export default {
                     .setTimestamp();
 
                 try {
+                    let tradeTexts = {
+                        title: "🤝 New Trade Offer!",
+                        description: `**${character.name}** wants to trade with you!`,
+                        theyOffer: "They Offer",
+                        nothing: "Nothing",
+                        tradeId: "Trade ID",
+                        footer: "Use /trade accept or /trade decline"
+                    };
+                    const targetLang = await utils.getUserLanguage(targetUser.id);
+                    if (targetLang !== "en") {
+                        try { tradeTexts = await utils.autoTranslate(tradeTexts, "en", targetLang); } catch {}
+                    }
                     const notifyEmbed = new EmbedBuilder()
                         .setColor("#F39C12")
-                        .setTitle("🤝 New Trade Offer!")
-                        .setDescription(`**${character.name}** wants to trade with you!`)
+                        .setTitle(tradeTexts.title)
+                        .setDescription(tradeTexts.description)
                         .addFields(
-                            { name: "They Offer", value: offerText || "Nothing", inline: false },
-                            { name: "Trade ID", value: `\`${tradeId[0].id}\``, inline: true }
+                            { name: tradeTexts.theyOffer, value: offerText || tradeTexts.nothing, inline: false },
+                            { name: tradeTexts.tradeId, value: `\`${tradeId[0].id}\``, inline: true }
                         )
-                        .setFooter({ text: "Use /trade accept or /trade decline" });
+                        .setFooter({ text: tradeTexts.footer });
 
                     await targetUser.send({ embeds: [notifyEmbed] });
                 } catch {}

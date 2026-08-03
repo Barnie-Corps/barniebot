@@ -38,4 +38,29 @@ db.on('error', (err) => {
     }
 });
 
+const promisify = (fn: any) => (...args: any[]) =>
+    new Promise((resolve, reject) => fn(...args, (err: any, res: any) => (err ? reject(err) : resolve(res))));
+
+export const withTransaction = async <T = void>(
+    fn: (conn: { query: (sql: string, params?: any[]) => Promise<any> }) => Promise<T>
+): Promise<T> => {
+    const conn: any = await new Promise((resolve, reject) =>
+        db.getConnection((err: any, c: any) => (err ? reject(err) : resolve(c)))
+    );
+    const query = promisify(conn.query.bind(conn));
+    try {
+        await promisify(conn.beginTransaction.bind(conn))();
+        const result = await fn({ query });
+        await promisify(conn.commit.bind(conn))();
+        return result;
+    } catch (error) {
+        try {
+            await promisify(conn.rollback.bind(conn))();
+        } catch { }
+        throw error;
+    } finally {
+        conn.release();
+    }
+};
+
 export default db;

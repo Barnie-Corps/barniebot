@@ -1335,11 +1335,11 @@ export default {
                 if (action === "browse") {
                     const listings: any = await db.query(
                         `SELECT m.*, i.name as item_name, i.rarity, c.name as seller_name 
-                        FROM rpg_marketplace m 
+                        FROM rpg_market_listings m 
                         JOIN rpg_items i ON m.item_id = i.id 
                         JOIN rpg_characters c ON m.seller_id = c.id 
-                        WHERE m.active = TRUE 
-                        ORDER BY m.created_at DESC LIMIT 10`
+                        WHERE m.sold = FALSE 
+                        ORDER BY m.listed_at DESC LIMIT 10`
                     );
 
                     if (!listings || listings.length === 0) {
@@ -1364,7 +1364,7 @@ export default {
                     for (const listing of listings.slice(0, 10)) {
                         const rarity = rarityColors[listing.rarity] || "⚪";
                         marketEmbed.addFields({
-                            name: `${rarity} ${listing.item_name} - 💰 ${listing.price.toLocaleString()}`,
+                            name: `${rarity} ${listing.item_name} - 💰 ${listing.price_per_unit.toLocaleString()}`,
                             value: `Seller: **${listing.seller_name}** | ID: ${listing.id}`,
                             inline: false
                         });
@@ -1415,12 +1415,14 @@ export default {
                     }
 
                     // Create listing
-                    await db.query("INSERT INTO rpg_marketplace SET ?", [{
+                    await db.query("INSERT INTO rpg_market_listings SET ?", [{
                         seller_id: character.id,
                         item_id: invItem[0].item_id,
-                        price: price,
-                        active: true,
-                        created_at: Date.now()
+                        quantity: 1,
+                        price_per_unit: price,
+                        sold: false,
+                        listed_at: Date.now(),
+                        expires_at: Date.now() + 30 * 24 * 60 * 60 * 1000
                     }]);
 
                     return utils.safeInteractionRespond(interaction, `✅ Item listed for **${price} gold**! Other players can now purchase it.`);
@@ -1428,10 +1430,10 @@ export default {
 
                 if (action === "mylistings") {
                     const myListings: any = await db.query(
-                        `SELECT m.*, i.name as item_name FROM rpg_marketplace m 
+                        `SELECT m.*, i.name as item_name FROM rpg_market_listings m 
                         JOIN rpg_items i ON m.item_id = i.id 
-                        WHERE m.seller_id = ? AND m.active = TRUE 
-                        ORDER BY m.created_at DESC`,
+                        WHERE m.seller_id = ? AND m.sold = FALSE 
+                        ORDER BY m.listed_at DESC`,
                         [character.id]
                     );
 
@@ -1448,7 +1450,7 @@ export default {
                     for (const listing of myListings) {
                         listingsEmbed.addFields({
                             name: `${listing.item_name}`,
-                            value: `💰 Price: ${listing.price.toLocaleString()} | ID: ${listing.id}`,
+                            value: `💰 Price: ${listing.price_per_unit.toLocaleString()} | ID: ${listing.id}`,
                             inline: false
                         });
                     }
@@ -1462,12 +1464,12 @@ export default {
                     return utils.safeInteractionRespond(interaction, "❌ Please provide a listing_id to purchase an item!");
                 }
 
-                const listing: any = await db.query(
-                    `SELECT m.*, i.name as item_name FROM rpg_marketplace m 
-                    JOIN rpg_items i ON m.item_id = i.id 
-                    WHERE m.id = ? AND m.active = TRUE`,
-                    [listingId]
-                );
+                    const listing: any = await db.query(
+                        `SELECT m.*, i.name as item_name FROM rpg_market_listings m 
+                        JOIN rpg_items i ON m.item_id = i.id 
+                        WHERE m.id = ? AND m.sold = FALSE`,
+                        [listingId]
+                    );
 
                 if (!listing[0]) {
                     return utils.safeInteractionRespond(interaction, "❌ Listing not found or no longer available!");
@@ -1477,14 +1479,14 @@ export default {
                     return utils.safeInteractionRespond(interaction, "❌ You cannot buy your own listings!");
                 }
 
-                if (character.gold < listing[0].price) {
-                    return utils.safeInteractionRespond(interaction, `❌ Not enough gold! You need ${listing[0].price} gold.`);
+                if (character.gold < listing[0].price_per_unit) {
+                    return utils.safeInteractionRespond(interaction, `❌ Not enough gold! You need ${listing[0].price_per_unit} gold.`);
                 }
 
                 // Process transaction
-                await db.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ?", [listing[0].price, character.id]);
-                await db.query("UPDATE rpg_characters SET gold = gold + ? WHERE id = ?", [listing[0].price, listing[0].seller_id]);
-                await db.query("UPDATE rpg_marketplace SET active = FALSE WHERE id = ?", [listingId]);
+                await db.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ?", [listing[0].price_per_unit, character.id]);
+                await db.query("UPDATE rpg_characters SET gold = gold + ? WHERE id = ?", [listing[0].price_per_unit, listing[0].seller_id]);
+                await db.query("UPDATE rpg_market_listings SET sold = TRUE WHERE id = ?", [listingId]);
 
                 // Add item to buyer's inventory
                 const existing: any = await db.query(
@@ -1534,7 +1536,7 @@ export default {
                     for (const quest of quests) {
                         questEmbed.addFields({
                             name: `${quest.name} (Level ${quest.required_level})`,
-                            value: `${quest.description}\n💰 Reward: ${quest.gold_reward} gold | ⭐ ${quest.exp_reward} exp | ID: ${quest.id}`,
+                            value: `${quest.description}\n💰 Reward: ${quest.reward_gold} gold | ⭐ ${quest.reward_experience} exp | ID: ${quest.id}`,
                             inline: false
                         });
                     }
@@ -1544,9 +1546,9 @@ export default {
 
                 if (action === "active") {
                     const activeQuests: any = await db.query(
-                        `SELECT cq.*, q.name, q.description, q.gold_reward, q.exp_reward FROM rpg_character_quests cq 
+                        `SELECT cq.*, q.name, q.description, q.reward_gold, q.reward_experience, q.requirement FROM rpg_character_quests cq 
                         JOIN rpg_quests q ON cq.quest_id = q.id 
-                        WHERE cq.character_id = ? AND cq.completed = FALSE`,
+                        WHERE cq.character_id = ? AND cq.status = 'active'`,
                         [character.id]
                     );
 
@@ -1563,7 +1565,7 @@ export default {
                     for (const quest of activeQuests) {
                         activeEmbed.addFields({
                             name: quest.name,
-                            value: `${quest.description}\nProgress: ${quest.progress}/${quest.requirement}\n💰 ${quest.gold_reward} | ⭐ ${quest.exp_reward} | ID: ${quest.quest_id}`,
+                            value: `${quest.description}\nProgress: ${quest.progress}/${quest.requirement}\n💰 ${quest.reward_gold} | ⭐ ${quest.reward_experience} | ID: ${quest.quest_id}`,
                             inline: false
                         });
                     }
@@ -1598,8 +1600,7 @@ export default {
                         character_id: character.id,
                         quest_id: questId,
                         progress: 0,
-                        requirement: quest[0].requirement,
-                        completed: false,
+                        status: 'active',
                         accepted_at: Date.now()
                     }]);
 
@@ -1612,9 +1613,9 @@ export default {
                     }
 
                     const charQuest: any = await db.query(
-                        `SELECT cq.*, q.name, q.gold_reward, q.exp_reward FROM rpg_character_quests cq 
+                        `SELECT cq.*, q.name, q.reward_gold, q.reward_experience, q.requirement FROM rpg_character_quests cq 
                         JOIN rpg_quests q ON cq.quest_id = q.id 
-                        WHERE cq.character_id = ? AND cq.quest_id = ? AND cq.completed = FALSE`,
+                        WHERE cq.character_id = ? AND cq.quest_id = ? AND cq.status = 'active'`,
                         [character.id, questId]
                     );
 
@@ -1627,13 +1628,13 @@ export default {
                     }
 
                     await db.query(
-                        "UPDATE rpg_character_quests SET completed = TRUE, completed_at = ? WHERE character_id = ? AND quest_id = ?",
+                        "UPDATE rpg_character_quests SET status = 'completed', completed_at = ? WHERE character_id = ? AND quest_id = ?",
                         [Date.now(), character.id, questId]
                     );
 
                     await db.query(
                         "UPDATE rpg_characters SET gold = gold + ?, experience = experience + ? WHERE id = ?",
-                        [charQuest[0].gold_reward, charQuest[0].exp_reward, character.id]
+                        [charQuest[0].reward_gold, charQuest[0].reward_experience, character.id]
                     );
 
                     const completeEmbed = new EmbedBuilder()

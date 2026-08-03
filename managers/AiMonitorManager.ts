@@ -44,7 +44,7 @@ export default class AiMonitorManager {
     private async intializeLocalModel(): Promise<void> {
         if (!ai.OllamaEnabled) throw new Error("Ollama integration is not enabled");
         try {
-            const response = await ai.GetSingleOllamaResponse("llama3:latest", [{ role: "system", content: "Respond with only true or false to this statement: you're ready." }], 100000);
+            const response = await ai.getSingleOllamaResponse(this.localModel, [{ role: "system", content: "Respond with only true or false to this statement: you're ready." }], 100000);
             Log.info("Successfully initialized local AI model", { component: "AiMonitor", model: this.localModel, testResponse: response });
         } catch (error: any) {
             Log.warn("Failed to initialize local AI model", { component: "AiMonitor", error: error.message });
@@ -783,7 +783,7 @@ export default class AiMonitorManager {
         else if (AI_DEBUG) {
             Log.debug("Using local model for triage", { component: "AiMonitor" });
         }
-        const response = this.useLocalModel && this.localModelReady ? await ai.GetSingleOllamaResponse(this.localModel, [{ role: "user", content: prompt }], 8000) : await NVIDIAModels.GetModelChatResponse([{ role: "system", content: prompt }], 8000, "monitor_small", false);
+        const response = this.useLocalModel && this.localModelReady ? await ai.getSingleOllamaResponse(this.localModel, [{ role: "user", content: prompt }], 8000) : await NVIDIAModels.GetModelChatResponse([{ role: "system", content: prompt }], 8000, "monitor_small", false);
         if (AI_DEBUG) {
             Log.debug("Triage response", { component: "AiMonitor", response: this.useLocalModel && this.localModelReady ? response : (response as any).content, local: this.useLocalModel && this.localModelReady });
         }

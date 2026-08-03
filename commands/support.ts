@@ -67,28 +67,29 @@ export default {
 
             let assignedStaff: string | null = null;
             try {
-                const staffRows = await db.query("SELECT uid FROM staff") as unknown as Array<{ uid: string }>;
+                const staffRows = await db.query("SELECT uid, hierarchy_position FROM staff") as unknown as Array<{ uid: string; hierarchy_position: number }>;
                 const staffIds = staffRows.map(row => row.uid);
                 const statuses: any = await db.query(
                     "SELECT user_id, status FROM staff_status WHERE user_id IN (?) AND status = 'available'",
                     [staffIds.length > 0 ? staffIds : ["none"]]
                 );
-                const availableStaffIds = statuses.map((s: any) => s.user_id);
-                if (availableStaffIds.length > 0) {
+                const availableSet = new Set(statuses.map((s: any) => s.user_id));
+                const availableStaff = staffRows.filter(r => availableSet.has(r.uid));
+                if (availableStaff.length > 0) {
                     const workloads: any = await db.query(
                         "SELECT assigned_to, COUNT(*) as count FROM support_tickets WHERE assigned_to IN (?) AND status = 'open' GROUP BY assigned_to",
-                        [availableStaffIds]
+                        [availableStaff.map(r => r.uid)]
                     );
                     const workloadMap = new Map<string, number>();
                     workloads.forEach((w: any) => workloadMap.set(w.assigned_to, w.count));
-                    let minWorkload = Infinity;
-                    for (const staffId of availableStaffIds) {
-                        const workload = workloadMap.get(staffId) || 0;
-                        if (workload < minWorkload) {
-                            minWorkload = workload;
-                            assignedStaff = staffId;
-                        }
-                    }
+                    const ownerHierarchy = utils.getStaffRankIndex("Owner");
+                    const candidates = availableStaff.map(r => {
+                        let hierarchy = Number(r.hierarchy_position);
+                        if (isNaN(hierarchy)) hierarchy = data.bot.owners.includes(r.uid) ? ownerHierarchy : 0;
+                        return { uid: r.uid, hierarchy, workload: workloadMap.get(r.uid) || 0 };
+                    });
+                    candidates.sort((a, b) => a.hierarchy - b.hierarchy || a.workload - b.workload || (a.uid < b.uid ? -1 : 1));
+                    assignedStaff = candidates[0].uid;
                 }
             } catch (error) {
                 console.error("Auto-assignment failed:", error);

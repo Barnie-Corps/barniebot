@@ -13,6 +13,8 @@ database_backups/
 temp/
 .vscode/
 barniebot.runtime.json
+.pm.pid
+.pm.status.json
 
 #Ignore vscode AI rules
 .github\instructions\codacy.instructions.md

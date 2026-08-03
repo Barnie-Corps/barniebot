@@ -25,20 +25,17 @@ const DefaultChatManagerOptions: ChatManagerOptions = {
 }
 const blacklist = new Set<string>(["1204899276229058625"]);
 const GUILD_CACHE_TTL = 15000;
-const LANGUAGE_CACHE_TTL = 600000;
 const LINK_REGEX = /(http|https):\/\/[\w-]+(\.[\w-]+)+([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])?/g;
 const RANK_CACHE_TTL = 300000;
 const MODERATION_CACHE_TTL = 60000;
 const APP_TRANSLATION_CACHE_TTL = 600000;
 
 const CACHE_GUILDS_KEY = "barniebot:chat:guilds:active";
-const CACHE_LANG_PREFIX = "barniebot:chat:lang:";
 const CACHE_RANK_PREFIX = "barniebot:chat:rank:";
 const CACHE_BLACKLIST_PREFIX = "barniebot:chat:blacklist:";
 const CACHE_MUTE_PREFIX = "barniebot:chat:mute:";
 const CACHE_TRANSLATION_PREFIX = "barniebot:chat:translation:";
 const CACHE_LOCAL_GUILDS_KEY = "barniebot:local:chat:guilds:active";
-const CACHE_LOCAL_LANG_PREFIX = "barniebot:local:chat:lang:";
 const CACHE_LOCAL_WEBHOOK_PREFIX = "barniebot:local:chat:webhook:";
 const CACHE_LOCAL_LANGUAGE_NAME_PREFIX = "barniebot:local:chat:language-name:";
 const CACHE_LOCAL_APP_TRANSLATION_PREFIX = "barniebot:local:chat:app-translation:";
@@ -72,7 +69,6 @@ export default class ChatManager extends EventEmitter {
     private isProcessingQueue = false;
     private queueScheduled = false;
     private activeGuildsPromise: Promise<any[]> | null = null;
-    private userLanguagePromises = new Map<string, Promise<string>>();
     private userRankPromises = new Map<string, Promise<string | null>>();
     constructor(public options: ChatManagerOptions = DefaultChatManagerOptions) {
         super();
@@ -87,7 +83,10 @@ export default class ChatManager extends EventEmitter {
     private async cleanupFailedGlobalChat(guildId: string, webhookId?: string): Promise<void> {
         try {
             await db.query("DELETE FROM globalchats WHERE guild = ?", [guildId]);
-            this.invalidateGuildCache();
+            const localCached = cacheManager.getLocal<any[]>(CACHE_LOCAL_GUILDS_KEY);
+            if (Array.isArray(localCached)) {
+                cacheManager.setLocal(CACHE_LOCAL_GUILDS_KEY, localCached.filter((g: any) => g.guild !== guildId), GUILD_CACHE_TTL);
+            }
             if (webhookId) cacheManager.deleteLocal(`${CACHE_LOCAL_WEBHOOK_PREFIX}${webhookId}`);
             Log.warn("Removed invalid globalchat target after delivery failure", { guildId, webhookId: webhookId ?? null });
         } catch (error) {
@@ -180,16 +179,16 @@ export default class ChatManager extends EventEmitter {
         let initialCheck: string;
         let response: string;
         Log.debug("Initial content for AI filter", { component: "ChatManager", content });
-        if (ai.OllamaEnabled) {
+        if (ai.OllamaEnabled && process.env.OLLAMA_CHAT_FILTER === "true") {
             Log.debug("Using Ollama for initial content check", { component: "ChatManager" });
-            initialCheck = (await ai.GetSingleOllamaResponse("qwen2.5:0.5b", [{ role: "system", content: `Is the following content potentially harmful or against community guidelines? Respond with "yes" or "no". Avoid anything else, just one word: "yes" or "no". Content: ${content}` }], 5000));
+            initialCheck = (await ai.getSingleOllamaResponse("qwen2.5:0.5b", [{ role: "system", content: `Is the following content potentially harmful or against community guidelines? Respond with "yes" or "no". Avoid anything else, just one word: "yes" or "no". Content: ${content}` }], 5000));
         }
         else initialCheck = (await NVIDIAModels.GetModelChatResponse([{ role: "system", content: `Is the following content potentially harmful or against community guidelines? Respond with "yes" or "no". Avoid anything else, just one word: "yes" or "no".  Content: ${content}` }], 5000, "monitor_small", false)).content;
         Log.debug("Initial AI filter response", { component: "ChatManager", initialCheck });
         const normalized = initialCheck.trim().toLowerCase();
         if (normalized.startsWith("no")) return false;
-        if (ai.OllamaEnabled) {
-            response = await ai.GetSingleOllamaResponse("phi3:latest", [{ role: "system", content: `Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 1 from [\"warn\",\"timeout\",\"blacklist\"]), warning_message(optional string for warn action), action_duration_ms(optional number), confidence(number 0-1). Never output compound actions. Prefer notify for uncertain cases. Reserve kick/ban for high risk with clear malicious evidence. Use recent_cases only as context; do not recommend punitive actions if the current content appears benign. If current content is benign, set suspicious=false, risk=low, recommended_actions=[]. Use language: ${userLanguage} for summary, reason, and warning_message.` }, { role: "system", content: `Content to analyze: ${content}` }]);
+        if (ai.OllamaEnabled && process.env.OLLAMA_CHAT_FILTER === "true") {
+            response = await ai.getSingleOllamaResponse("phi3:latest", [{ role: "system", content: `Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 1 from [\"warn\",\"timeout\",\"blacklist\"]), warning_message(optional string for warn action), action_duration_ms(optional number), confidence(number 0-1). Never output compound actions. Prefer notify for uncertain cases. Reserve kick/ban for high risk with clear malicious evidence. Use recent_cases only as context; do not recommend punitive actions if the current content appears benign. If current content is benign, set suspicious=false, risk=low, recommended_actions=[]. Use language: ${userLanguage} for summary, reason, and warning_message.` }, { role: "system", content: `Content to analyze: ${content}` }]);
         }
         else response = (await NVIDIAModels.GetModelChatResponse([{ role: "system", content: `Return JSON only with keys: suspicious(boolean), risk(\"low\"|\"medium\"|\"high\"), summary(string), reason(string), recommended_actions(array of up to 1 from [\"warn\",\"timeout\",\"blacklist\"]), warning_message(optional string for warn action), action_duration_ms(optional number), confidence(number 0-1). Never output compound actions. Prefer notify for uncertain cases. Reserve kick/ban for high risk with clear malicious evidence. Use recent_cases only as context; do not recommend punitive actions if the current content appears benign. If current content is benign, set suspicious=false, risk=low, recommended_actions=[]. Use language: ${userLanguage} for summary, reason, and warning_message.` }, { role: "system", content: `Content to analyze: ${content}` }], 8000, "monitor_small", false)).content;
         Log.debug("AI filter response", { component: "ChatManager", response });
@@ -251,7 +250,12 @@ export default class ChatManager extends EventEmitter {
         Log.debug("AI recommended action", { component: "ChatManager", action, reason: triagedResult.reason, confidence: triagedResult.confidence });
         switch (action) {
             case "warn": {
-                await message.author.send(`You have received an automatic warning from the AI for the following reason: ${triagedResult.reason}\n\nMessage content: ${message.content}\n\nWarning message from the AI: ${triagedResult.warning_message}\n\n-# Be aware that although this warning will NOT be saved to your warnings registry, we may still consider it in future decisions.`).catch(() => { });
+                let warnMsg = `You have received an automatic warning from the AI for the following reason: ${triagedResult.reason}\n\nMessage content: ${message.content}\n\nWarning message from the AI: ${triagedResult.warning_message}\n\n-# Be aware that although this warning will NOT be saved to your warnings registry, we may still consider it in future decisions.`;
+                const warnLang = await this.getUserLanguage(message.author.id);
+                if (warnLang !== "en") {
+                    try { warnMsg = (await utils.translate(warnMsg, "en", warnLang)).text || warnMsg; } catch {}
+                }
+                await message.author.send(warnMsg).catch(() => { });
                 await this.announce(`User ${message.author.username} has been automatically warned by the AI for suspicious content.`, "en");
                 break;
             }
@@ -269,7 +273,12 @@ export default class ChatManager extends EventEmitter {
                 break;
             }
             case "blacklist": {
-                await message.author.send(`You have been automatically blacklisted by the AI for the following reason: ${triagedResult.reason}\n\nMessage content: ${message.content}\n\n-# This means you will be blocked from using the global chat feature. If you believe this was a mistake, please contact the support server and provide the following information:\n\nMessage ID: ${message.id}\nUser ID: ${message.author.id}\nSummary from AI: ${triagedResult.summary}\nReason from AI: ${triagedResult.reason}`).catch(() => { });
+                let blacklistMsg = `You have been automatically blacklisted by the AI for the following reason: ${triagedResult.reason}\n\nMessage content: ${message.content}\n\n-# This means you will be blocked from using the global chat feature. If you believe this was a mistake, please contact the support server and provide the following information:\n\nMessage ID: ${message.id}\nUser ID: ${message.author.id}\nSummary from AI: ${triagedResult.summary}\nReason from AI: ${triagedResult.reason}`;
+                const blacklistLang = await this.getUserLanguage(message.author.id);
+                if (blacklistLang !== "en") {
+                    try { blacklistMsg = (await utils.translate(blacklistMsg, "en", blacklistLang)).text || blacklistMsg; } catch {}
+                }
+                await message.author.send(blacklistMsg).catch(() => { });
                 await db.query("INSERT INTO global_bans (id, active, times) VALUES (?, TRUE, 1) ON DUPLICATE KEY UPDATE active = TRUE, times = times + 1", [message.author.id]);
                 await this.announce(`User ${message.author.username} has been automatically blacklisted by the AI for suspicious content.`, "en");
                 break;
@@ -506,7 +515,7 @@ export default class ChatManager extends EventEmitter {
             const users: Array<{ uid: string; time_left: number }> = [];
             for (const [k, v] of this.cache.entries()) users.push({ uid: k, time_left: v.time_left });
             if (users.length === 0) return;
-            const result: any = await utils.processRateLimitsWorker(users, [], 1000);
+            const result = utils.processRateLimitsWorker(users, [], 1000);
             for (const uid of (result?.users?.expired ?? [])) this.cache.delete(uid);
             for (const updated of (result?.users?.keep ?? [])) {
                 const original = this.cache.get(updated.uid) || {};
@@ -526,7 +535,7 @@ export default class ChatManager extends EventEmitter {
             const limits: Array<{ uid: string; time_left: number; username: string }> = [];
             for (const [k, v] of this.ratelimits.entries()) limits.push({ uid: k, time_left: v.time_left, username: v.username });
             if (limits.length === 0) return;
-            const result: any = await utils.processRateLimitsWorker([], limits, 1000);
+            const result = utils.processRateLimitsWorker([], limits, 1000);
             for (const exp of (result?.limits?.expired ?? [])) {
                 this.ratelimits.delete(exp.uid);
                 Log.info(`User removed from ratelimit`, { userId: exp.uid });
@@ -630,7 +639,7 @@ export default class ChatManager extends EventEmitter {
             const localCacheKey = normalizedTarget || targetLanguage;
             const localCached = cache.get(localCacheKey);
             if (localCached) return localCached;
-            const appCacheKey = `${sourceLanguage}:${targetLanguage}:${baseContent.substring(0, 100)}`;
+            const appCacheKey = `${CACHE_LOCAL_APP_TRANSLATION_PREFIX}${this.translationCacheKey(sourceLanguage, targetLanguage, baseContent)}`;
             const now = Date.now();
             const appCached = cacheManager.getLocal<{ text: string }>(`${CACHE_LOCAL_APP_TRANSLATION_PREFIX}${appCacheKey}`);
             if (appCached?.text) return appCached.text;
@@ -681,30 +690,7 @@ export default class ChatManager extends EventEmitter {
         };
     }
     private async getUserLanguage(userId: string): Promise<string> {
-        const localCacheKey = `${CACHE_LOCAL_LANG_PREFIX}${userId}`;
-        const localCached = cacheManager.getLocal<{ lang: string }>(localCacheKey);
-        if (localCached?.lang) return localCached.lang;
-        const inflight = this.userLanguagePromises.get(userId);
-        if (inflight) return inflight;
-        const task = (async () => {
-            const cacheKey = `${CACHE_LANG_PREFIX}${userId}`;
-            const globalCached = await cacheManager.get<{ lang: string }>(cacheKey);
-            if (globalCached?.lang) {
-                cacheManager.setLocal(localCacheKey, { lang: globalCached.lang }, LANGUAGE_CACHE_TTL);
-                return globalCached.lang;
-            }
-            const result: any = await db.query("SELECT * FROM languages WHERE userid = ?", [userId]);
-            const language = result?.[0]?.lang ?? "en";
-            cacheManager.setLocal(localCacheKey, { lang: language }, LANGUAGE_CACHE_TTL);
-            Promise.resolve(cacheManager.set(cacheKey, { lang: language }, LANGUAGE_CACHE_TTL)).catch(() => { });
-            return language;
-        })();
-        this.userLanguagePromises.set(userId, task);
-        try {
-            return await task;
-        } finally {
-            this.userLanguagePromises.delete(userId);
-        }
+        return utils.getUserLanguage(userId);
     }
     private getWebhook(graw: any): WebhookClient {
         const cacheKey = `${CACHE_LOCAL_WEBHOOK_PREFIX}${graw.webhook_id}`;

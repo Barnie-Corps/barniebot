@@ -7,16 +7,17 @@ export type { WorkerHandle } from "../types/worker";
 
 export default class WorkerManager extends EventEmitter {
     private Cache: Collection<string, WorkerHandle> = new Collection();
-    private RunningCache: Collection<string, WorkerHandle> = new Collection();
+    private RunningCache: Set<string> = new Set();
     private waitingQueues: Map<string, WorkerWaiter[]> = new Map();
     private keepAliveTimers: Map<string, NodeJS.Timeout> = new Map();
     private reservations: Set<string> = new Set();
+    private reservationTimers: Map<string, NodeJS.Timeout> = new Map();
     private byType: Map<string, Set<string>> = new Map();
     private availableByType: Map<string, Set<string>> = new Map();
     private metrics: Map<string, { lastPingMs?: number; avgPingMs?: number; failures: number; lastActiveAt?: number }> = new Map();
     private pendingResponses: Map<string, Map<string, PendingResponse>> = new Map();
 
-    constructor(public IDLength: number = 20, private cachePublic: boolean = false, public readonly typeLimit = 10, private keepAliveIntervalMs = 30000) {
+    constructor(public IDLength: number = 20, public readonly typeLimit = 10, private keepAliveIntervalMs = 30000) {
         super();
     }
 
@@ -29,6 +30,7 @@ export default class WorkerManager extends EventEmitter {
         const available = this.getAvailableWorker(type);
         if (available) {
             this.reservations.add(available.id);
+            this.scheduleReservationTimeout(available.id);
             return available;
         }
         return new Promise((resolve, reject) => {
@@ -101,6 +103,7 @@ export default class WorkerManager extends EventEmitter {
             this.Cache.delete(id);
             this.RunningCache.delete(id);
             this.reservations.delete(id);
+            this.clearReservationTimer(id);
             this.removeFromIndices(id, type);
             this.clearKeepAliveTimer(id);
             this.metrics.delete(id);
@@ -115,9 +118,10 @@ export default class WorkerManager extends EventEmitter {
         if (!worker) throw new Error(`Worker ${id} not found`);
         const messageId = this.GenerateID(this.IDLength);
         this.reservations.delete(id);
+        this.clearReservationTimer(id);
         this.clearKeepAliveTimer(id);
         worker.workerData.worker.postMessage({ id: messageId, data: message });
-        this.RunningCache.set(id, { type: worker.workerData.type, id, worker: worker.workerData.worker });
+        this.RunningCache.add(id);
         this.removeAvailable(id, worker.workerData.type);
         return messageId;
     }
@@ -170,6 +174,7 @@ export default class WorkerManager extends EventEmitter {
                 Log.info(`Worker with ID ${id} and type ${workerData?.type} was terminated.`, { workerId: id, workerType: workerData?.type });
             }
             this.reservations.delete(id);
+            this.clearReservationTimer(id);
             this.removeFromIndices(id, workerData.type);
             this.clearKeepAliveTimer(id);
             this.fulfillWaiters(workerData.type);
@@ -262,10 +267,6 @@ export default class WorkerManager extends EventEmitter {
         return created.length;
     }
 
-    public get cache() {
-        return this.cachePublic ? this.Cache : null;
-    }
-
     public getWorkerStats(): {
         total: number;
         byType: Record<string, { total: number; available: number; running: number; avgPingMs?: number; lastPingMs?: number }>;
@@ -326,6 +327,26 @@ export default class WorkerManager extends EventEmitter {
         this.Cache.forEach(w => this.terminateWorker(w.id));
     }
 
+    private scheduleReservationTimeout(id: string): void {
+        this.clearReservationTimer(id);
+        const timer = setTimeout(() => {
+            this.reservationTimers.delete(id);
+            if (this.reservations.has(id)) {
+                this.reservations.delete(id);
+            }
+        }, 5000);
+        if (typeof timer.unref === "function") timer.unref();
+        this.reservationTimers.set(id, timer);
+    }
+
+    private clearReservationTimer(id: string): void {
+        const timer = this.reservationTimers.get(id);
+        if (timer) {
+            clearTimeout(timer);
+            this.reservationTimers.delete(id);
+        }
+    }
+
     private enqueueWaiter(type: string, waiter: WorkerWaiter): void {
         const queue = this.waitingQueues.get(type) ?? [];
         queue.push(waiter);
@@ -359,6 +380,7 @@ export default class WorkerManager extends EventEmitter {
                 waiter.timeoutHandle = undefined;
             }
             this.reservations.add(next.id);
+            this.scheduleReservationTimeout(next.id);
             try {
                 waiter.resolve(next);
             } catch (error) {
@@ -374,6 +396,7 @@ export default class WorkerManager extends EventEmitter {
         if (!this.Cache.has(id)) return;
         this.RunningCache.delete(id);
         this.reservations.delete(id);
+        this.clearReservationTimer(id);
         this.addAvailable(id, type);
         this.scheduleKeepAlive(id, type);
         this.fulfillWaiters(type);

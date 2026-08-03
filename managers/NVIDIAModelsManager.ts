@@ -4,6 +4,7 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import * as path from "path";
 import { promises as fs } from "fs";
+import * as https from "https";
 import sharp from "sharp";
 import type { NIMChatMessage, NIMChatResult, NIMChatSession, NIMToolDefinition } from "../types/nvidia";
 export type { NIMToolCall, NIMChatResponse, NIMChatResult, NIMChatMessage, NIMToolDefinition, NIMChatSession } from "../types/nvidia";
@@ -18,13 +19,16 @@ const stripThink = (text: string): string => {
 class NIMChatSessionImpl implements NIMChatSession {
     private messages: NIMChatMessage[] = [];
     private lastToolCalls: Array<{ id: string; name: string }> = [];
+    private timeoutMs: number;
     constructor(
         private openai: OpenAi,
         private model: string,
         private tools: NIMToolDefinition[] | undefined,
         private config: { max_tokens?: number; temperature?: number; top_p?: number; chat_template_kwargs?: any },
-        systemInstruction?: string
+        systemInstruction?: string,
+        timeoutMs: number = 120000
     ) {
+        this.timeoutMs = timeoutMs;
         if (systemInstruction) {
             this.messages.push({ role: "system", content: systemInstruction });
         }
@@ -35,6 +39,10 @@ class NIMChatSessionImpl implements NIMChatSession {
         } catch {
             return value;
         }
+    }
+    private shouldIncludeChatTemplate(model: string): boolean {
+        const supported = ["deepseek-ai", "stepfun-ai", "minimaxai", "qwen"];
+        return supported.some(p => model.toLowerCase().startsWith(p));
     }
     private createToolMessage(name: string, result: any) {
         const toolCallId = this.lastToolCalls.find(call => call.name === name)?.id;
@@ -62,7 +70,11 @@ class NIMChatSessionImpl implements NIMChatSession {
     }
     public addSystemMessage(content: string): void {
         if (!content || !content.trim()) return;
-        this.messages.push({ role: "system", content: content.trim() });
+        let insertAt = 0;
+        while (insertAt < this.messages.length && this.messages[insertAt].role === "system") {
+            insertAt++;
+        }
+        this.messages.splice(insertAt, 0, { role: "system", content: content.trim() });
     }
     public async sendMessage(input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>): Promise<NIMChatResult> {
         if (typeof input === "string") {
@@ -75,51 +87,81 @@ class NIMChatSessionImpl implements NIMChatSession {
                 this.messages.push(this.createToolMessage(name, result));
             }
         }
-        const response = await this.openai.chat.completions.create({
-            model: this.model,
-            messages: this.messages,
-            tools: this.tools,
-            tool_choice: this.tools && this.tools.length > 0 ? "auto" : undefined,
-            max_tokens: this.config.max_tokens,
-            temperature: this.config.temperature,
-            top_p: this.config.top_p,
-            stream: false,
-            ...(this.config.chat_template_kwargs && { chat_template_kwargs: this.config.chat_template_kwargs })
-        });
-        const message = response.choices[0]?.message as any;
-        if (message) {
-            this.messages.push(message as ChatCompletionMessageParam);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+        let lastError: any;
+        for (let attempt = 0; attempt < 3; attempt++) {
+            if (attempt > 0) await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+            try {
+                const response = await this.openai.chat.completions.create({
+                    model: this.model,
+                    messages: this.messages,
+                    tools: this.tools,
+                    tool_choice: this.tools && this.tools.length > 0 ? "auto" : undefined,
+                    max_tokens: this.config.max_tokens,
+                    temperature: this.config.temperature,
+                    top_p: this.config.top_p,
+                    stream: false,
+                    ...(this.shouldIncludeChatTemplate(this.model) && this.config.chat_template_kwargs && { chat_template_kwargs: this.config.chat_template_kwargs })
+                }, { signal: controller.signal as any });
+                clearTimeout(timer);
+                const message = response.choices[0]?.message as any;
+                if (message) {
+                    this.messages.push(message as ChatCompletionMessageParam);
+                }
+                const toolCalls = Array.isArray(message?.tool_calls)
+                    ? message.tool_calls.map((call: any) => ({
+                        name: call.function?.name,
+                        args: this.parseArgs(call.function?.arguments ?? "")
+                    }))
+                    : undefined;
+                this.lastToolCalls = Array.isArray(message?.tool_calls)
+                    ? message.tool_calls.map((call: any) => ({ id: call.id, name: call.function?.name }))
+                    : [];
+                const text = stripThink(message?.content ?? "");
+                return { response: { text: () => text, functionCalls: () => toolCalls } };
+            } catch (err: any) {
+                lastError = err;
+                const isRetryable = err?.status === 429 || err?.status === 503 || err?.code === "ETIMEDOUT" || err?.code === "ECONNRESET" || err?.message?.includes("ResourceExhausted") || err?.message?.includes("All workers are busy");
+                if (!isRetryable) break;
+            }
         }
-        const toolCalls = Array.isArray(message?.tool_calls)
-            ? message.tool_calls.map((call: any) => ({
-                name: call.function?.name,
-                args: this.parseArgs(call.function?.arguments ?? "")
-            }))
-            : undefined;
-        this.lastToolCalls = Array.isArray(message?.tool_calls)
-            ? message.tool_calls.map((call: any) => ({ id: call.id, name: call.function?.name }))
-            : [];
-        const text = stripThink(message?.content ?? "");
-        return { response: { text: () => text, functionCalls: () => toolCalls } };
+        clearTimeout(timer);
+        throw lastError || new Error("Failed to get AI response after retries");
     }
 }
 
 export default class NVIDIAModelsManager {
-    private openai: OpenAi;
-    private apiKey: string;
+    private clients: Array<{ key: string; openai: OpenAi }>;
+    private currentIndex: number = 0;
 
-    constructor(apiKey: string) {
-        this.apiKey = apiKey;
-        this.openai = new OpenAi({
-            apiKey,
-            baseURL: "https://integrate.api.nvidia.com/v1"
-        });
+    constructor(apiKeys: string[]) {
+        if (!apiKeys || apiKeys.length === 0) {
+            throw new Error("At least one NVIDIA API key is required");
+        }
+        const agent = new https.Agent({ keepAlive: true, timeout: 120000 });
+        this.clients = apiKeys.map(key => ({
+            key,
+            openai: new OpenAi({
+                apiKey: key,
+                baseURL: "https://integrate.api.nvidia.com/v1",
+                timeout: 120000,
+                httpAgent: agent
+            })
+        }));
+    }
+
+    private getNextClient(): { key: string; openai: OpenAi } {
+        const client = this.clients[this.currentIndex];
+        this.currentIndex = (this.currentIndex + 1) % this.clients.length;
+        return client;
     };
     public GetConversationSafety = async (messages: ChatCompletionMessageParam[], timeoutMs: number = 2000): Promise<{ safe: boolean, reason?: string }> => {
         try {
+            const { openai } = this.getNextClient();
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), Math.max(500, timeoutMs));
-            const response = await this.openai.chat.completions.create({
+            const response = await openai.chat.completions.create({
                 model: "nvidia/llama-3.1-nemoguard-8b-content-safety",
                 messages,
                 stream: false
@@ -135,6 +177,7 @@ export default class NVIDIAModelsManager {
     };
     public GetModelChatResponse = async (messages: ChatCompletionMessageParam[], timeoutMs: number = 2000, task: string, think: boolean): Promise<{ content: string, reasoning?: string }> => {
         try {
+            const { openai } = this.getNextClient();
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), Math.max(500, timeoutMs));
             const selectedTask = this.NormalizeTask(task);
@@ -142,7 +185,7 @@ export default class NVIDIAModelsManager {
             if (!modelConfig.name) {
                 throw new Error(`No model found for task: ${task}`);
             }
-            const response = await this.openai.chat.completions.create({
+            const response = await openai.chat.completions.create({
                 model: modelConfig.name,
                 messages: messages,
                 stream: false,
@@ -174,10 +217,11 @@ export default class NVIDIAModelsManager {
 
         return aliases[normalized] || normalized;
     }
-    public CreateChatSession = (options: { tools?: NIMToolDefinition[]; systemInstruction?: string; maxTokens?: number; temperature?: number; topP?: number; model?: string } = {}): NIMChatSession => {
-        const model = options.model ?? "deepseek-ai/deepseek-v3.1-terminus";
+    public CreateChatSession = (options: { tools?: NIMToolDefinition[]; systemInstruction?: string; maxTokens?: number; temperature?: number; topP?: number; model?: string; timeout?: number } = {}): NIMChatSession => {
+        const { openai } = this.getNextClient();
+        const model = options.model ?? "stepfun-ai/step-3.7-flash";
         return new NIMChatSessionImpl(
-            this.openai,
+            openai,
             model,
             options.tools,
             {
@@ -186,14 +230,15 @@ export default class NVIDIAModelsManager {
                 top_p: options.topP ?? 0.8,
                 chat_template_kwargs: { thinking: false },
             },
-            options.systemInstruction
+            options.systemInstruction,
+            options.timeout
         );
     }
     private GetTaskBasedModel = (task: string): { name: string, hasReasoning: boolean, hasThinkMode: boolean } => {
         const base = { name: "minimaxai/minimax-m2.7", hasReasoning: false, hasThinkMode: true };
         const monitorSmall = { name: "meta/llama-3.1-8b-instruct", hasReasoning: false, hasThinkMode: false };
         const taskModels: { [key: string]: { name: string, hasReasoning: boolean, hasThinkMode: boolean } } = {
-            "chat": base,
+            "chat": { name: "stepfun-ai/step-3.7-flash", hasReasoning: false, hasThinkMode: true },
             "reasoning": {
                 name: "deepseek-ai/deepseek-v3.2",
                 hasReasoning: true,
@@ -354,8 +399,9 @@ message WordInfo {
             const protoDescriptor = grpc.loadPackageDefinition(packageDefinition) as any;
             const rivaPackage = protoDescriptor.nvidia.riva.asr;
 
+            const { key } = this.getNextClient();
             const metadata = new grpc.Metadata();
-            metadata.add("authorization", `Bearer ${this.apiKey}`);
+            metadata.add("authorization", `Bearer ${key}`);
             if (functionId) {
                 metadata.add("function-id", functionId);
             }
@@ -521,8 +567,9 @@ enum AudioEncoding {
             const protoDescriptor = grpc.loadPackageDefinition(packageDefinition) as any;
             const rivaPackage = protoDescriptor.nvidia.riva.tts;
 
+            const { key } = this.getNextClient();
             const metadata = new grpc.Metadata();
-            metadata.add("authorization", `Bearer ${this.apiKey}`);
+            metadata.add("authorization", `Bearer ${key}`);
 
             const finalFunctionId = functionId || process.env.NVIDIA_TTS_FUNCTION_ID;
             if (finalFunctionId) {
@@ -670,65 +717,69 @@ enum AudioEncoding {
         ];
     }
     public GetVisualDescription = async (imageUrl: string, messageId: string, language: string, timeoutMs: number = 30000): Promise<string> => {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
-        try {
-            const workspaceDir = path.join(__dirname, "..", "ai_workspace");
-            await fs.mkdir(workspaceDir, { recursive: true });
+        const workspaceDir = path.join(__dirname, "..", "ai_workspace");
+        await fs.mkdir(workspaceDir, { recursive: true });
 
-            const imgResp = await fetch(imageUrl, { signal: controller.signal as any });
-            if (!imgResp.ok) {
+        const imgResp = await fetch(imageUrl);
+        if (!imgResp.ok) return "";
+        const arrayBuffer = await imgResp.arrayBuffer();
+        const originalBuffer = Buffer.from(arrayBuffer);
+
+        const resizedBuffer = await sharp(originalBuffer)
+            .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
+            .png({ quality: 100, compressionLevel: 4 })
+            .toBuffer();
+
+        const b64 = resizedBuffer.toString("base64");
+        const mime = "image/png";
+        if (AI_DEBUG) console.log("[Vision] Resized image base64 length:", b64.length, "chars (~", Math.round(b64.length / 4), "tokens)");
+        const payload = {
+            model: "nvidia/nemotron-nano-12b-v2-vl",
+            messages: [{
+                role: "user",
+                content: [
+                    { type: "text", text: `Describe this image in detail, including any text, UI elements, games, apps, or websites shown (use this language: ${language}).` },
+                    { type: "image_url", image_url: { url: `data:${mime};base64,${b64}` } }
+                ]
+            }],
+            max_tokens: 1024,
+            temperature: 0.7,
+            top_p: 0.9,
+            frequency_penalty: 0.0,
+            presence_penalty: 0.0,
+            stream: false
+        };
+        const body = JSON.stringify(payload);
+        const triedKeys = new Set<string>();
+        for (let attempt = 0; attempt < this.clients.length; attempt++) {
+            const { key } = this.getNextClient();
+            if (triedKeys.has(key)) continue;
+            triedKeys.add(key);
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
+            try {
+                const visionResp = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${key}`, Accept: "application/json", "Content-Type": "application/json" },
+                    body,
+                    signal: controller.signal as any
+                });
                 clearTimeout(timer);
-                return "";
+                if (AI_DEBUG) console.log("[Vision] Response status:", visionResp.status, "key:", key.slice(0, 10) + "...");
+                if (!visionResp.ok) {
+                    const errorText = await visionResp.text().catch(() => "");
+                    console.error("[Vision] API error:", visionResp.status, errorText);
+                    continue;
+                }
+                const json: any = await visionResp.json();
+                const result = String(json?.choices?.[0]?.message?.content || "").trim();
+                if (AI_DEBUG) console.log("[Vision] Result:", result.length, "chars -", result.substring(0, 100));
+                return result || "No visual details detected.";
+            } catch (err) {
+                clearTimeout(timer);
+                console.error("[Vision] Exception:", err);
             }
-            const arrayBuffer = await imgResp.arrayBuffer();
-            const originalBuffer = Buffer.from(arrayBuffer);
-
-            const resizedBuffer = await sharp(originalBuffer)
-                .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
-                .png({ quality: 100, compressionLevel: 4 })
-                .toBuffer();
-
-            const b64 = resizedBuffer.toString("base64");
-            const mime = "image/png";
-            if (AI_DEBUG) console.log("[Vision] Resized image base64 length:", b64.length, "chars (~", Math.round(b64.length / 4), "tokens)");
-            const payload = {
-                model: "meta/llama-4-maverick-17b-128e-instruct",
-                messages: [{ role: "user", content: `Describe this image in detail, including any text, UI elements, games, apps, or websites shown (use this language: ${language}): <img src=\"data:${mime};base64,${b64}\" />` }],
-                max_tokens: 1024,
-                temperature: 0.7,
-                top_p: 0.9,
-                frequency_penalty: 0.0,
-                presence_penalty: 0.0,
-                stream: false
-            };
-            const visionResp = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                    Authorization: `Bearer ${this.apiKey}`,
-                    Accept: "application/json",
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify(payload),
-                signal: controller.signal as any
-            });
-            if (AI_DEBUG) console.log("[Vision] Response status:", visionResp.status, visionResp.statusText);
-            clearTimeout(timer);
-
-            if (!visionResp.ok) {
-                const errorText = await visionResp.text().catch(() => "");
-                console.error("[Vision] API error:", visionResp.status, errorText);
-                return "";
-            }
-
-            const json: any = await visionResp.json();
-            const result = String(json?.choices?.[0]?.message?.content || "").trim();
-            if (AI_DEBUG) console.log("[Vision] Result:", result.length, "chars -", result.substring(0, 100));
-            return result || "No visual details detected.";
-        } catch (err) {
-            clearTimeout(timer);
-            console.error("[Vision] Exception:", err);
-            return "";
         }
+        return "";
     };
 };

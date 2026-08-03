@@ -9,7 +9,6 @@ import path from "path";
 import data from "../data";
 import NVIDIAModels from "../NVIDIAModels";
 import { Ollama } from "ollama";
-import OpenAI from "openai";
 
 const AI_DEBUG = process.env.AI_DEBUG === "1";
 
@@ -20,12 +19,26 @@ class AiManager extends EventEmitter {
     private localFunctionHandlers: Map<string, Record<string, (args: any, message: Message) => Promise<any>>> = new Map();
     private bootstrappedChats: Set<string> = new Set();
     private ollamaClient: Ollama;
+    private ollamaChatModel: string;
+    private ollamaModerationModel: string;
+    private ollamaVisionModel: string;
     constructor(private ratelimit: number, private max: number, private timeout: number, private enableOllama: boolean, private ollamaSettings?: { host: string, port: number, baseUrl: string }) {
         super();
         Log.info("AiManager initialized", { component: "AiManager" });
-        setInterval(() => this.ClearTimeouts(), 1000);
-        this.ollamaClient = new Ollama({
-            host: `${ollamaSettings?.host}:${ollamaSettings?.port}` || "localhost:11436",
+        setInterval(() => this.clearTimeouts(), 1000);
+        const host = ollamaSettings?.host || "localhost";
+        const port = ollamaSettings?.port || 11434;
+        this.ollamaClient = new Ollama({ host: `${host}:${port}` });
+        this.ollamaChatModel = process.env.OLLAMA_CHAT_MODEL || "qwen2.5:0.5b";
+        this.ollamaModerationModel = process.env.OLLAMA_MODERATION_MODEL || "phi3:latest";
+        this.ollamaVisionModel = process.env.OLLAMA_VISION_MODEL || "llava:latest";
+    }
+    private clearTimeouts(): void {
+        const cutoff = Date.now() - this.timeout;
+        this.promptRateLimits.forEach((timestamps, id) => {
+            const filtered = timestamps.filter(ts => ts >= cutoff);
+            if (filtered.length > 0) this.promptRateLimits.set(id, filtered);
+            else this.promptRateLimits.delete(id);
         });
     }
     public setLocalFunctionHandlers(id: string, handlers: Record<string, (args: any, message: Message) => Promise<any>>): void {
@@ -34,38 +47,6 @@ class AiManager extends EventEmitter {
     public clearLocalFunctionHandlers(id: string): void {
         this.localFunctionHandlers.delete(id);
     }
-    public get OllamaClient(): Ollama {
-        return this.ollamaClient;
-    }
-    public get OllamaEnabled(): boolean {
-        return this.enableOllama;
-    }
-    public GetSingleOllamaResponse(model: string, messages: Array<any>, timeoutMs?: number): Promise<string> {
-        if (!this.enableOllama) {
-            return Promise.reject(new Error("Ollama integration is disabled"));
-        }
-        return new Promise(async (resolve, reject) => {
-            try {
-                const controller = new AbortController();
-                const timeout = setTimeout(() => {
-                    controller.abort();
-                }, timeoutMs ?? 60000);
-                const response = await this.ollamaClient.chat({
-                    model,
-                    messages,
-                    stream: false
-                });
-                clearTimeout(timeout);
-                if (typeof response.message?.content === "string") {
-                    resolve(response.message.content);
-                } else {
-                    reject(new Error("No response from Ollama"));
-                }
-            } catch (error) {
-                reject(error instanceof Error ? error : new Error(String(error)));
-            }
-        });
-    };
     private isPromptRateLimited(id: string): boolean {
         const now = Date.now();
         const windowStart = now - this.timeout;
@@ -79,9 +60,31 @@ class AiManager extends EventEmitter {
         this.promptRateLimits.set(id, recent);
         return false;
     }
-    public async ExecuteFunctionVoice(id: string, name: string, args: any, message: Message | null, options?: { suppressProgress?: boolean }): Promise<any> {
+    public async removeRatelimit(id: string): Promise<void> {
+        this.promptRateLimits.delete(id);
+    }
+    public async getResponse(id: string, text: string): Promise<any> {
+        if (this.isPromptRateLimited(id)) return "You are sending too many messages, please wait a few seconds before sending another message.";
+        const chat = await this.getChat(id, text);
+        await this.ensureToolBootstrap(id, chat);
+        let response = await utils.getAiResponse(text, chat);
+        const hasToolCalls = Array.isArray(response?.toolCalls) ? response.toolCalls.length > 0 : Boolean(response?.call);
+        const hasText = typeof response?.text === "string" && response.text.trim().length > 0;
+        if (!hasText && !hasToolCalls) {
+            chat.addSystemMessage?.("You did not return a valid response. Always return a user-facing message or a tool call.");
+        }
+        return response;
+    }
+    public async getVoiceResponse(id: string, text: string): Promise<any> {
+        if (this.isPromptRateLimited(id)) return { text: "You are sending too many messages, please wait a few seconds before sending another message.", call: null };
+        const chat = await this.getVoiceChat(id);
+        await this.ensureToolBootstrap(id, chat);
+        const response = await utils.getAiResponse(text, chat);
+        return response;
+    }
+    public async executeFunctionVoice(id: string, name: string, args: any, message: Message | null, options?: { suppressProgress?: boolean }): Promise<any> {
         const suppressProgress = options?.suppressProgress ?? false;
-        const chat = await this.GetVoiceChat(id);
+        const chat = await this.getVoiceChat(id);
         const func: any = utils.AIFunctions[name as keyof typeof utils.AIFunctions];
         if (!func) {
             if (message && !suppressProgress) await message.edit(`The AI requested an unknown function, attempting to recover... ${data.bot.loadingEmoji.mention}`);
@@ -100,7 +103,7 @@ class AiManager extends EventEmitter {
                 let lastResult: any;
                 for (const call of followupCalls) {
                     if (message && !suppressProgress) await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
-                    lastResult = await this.ExecuteFunctionVoice(id, call.name, call.args, message, options);
+                    lastResult = await this.executeFunctionVoice(id, call.name, call.args, message, options);
                 }
                 return lastResult;
             }
@@ -162,7 +165,7 @@ class AiManager extends EventEmitter {
                 if (message && !suppressProgress) {
                     await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
                 }
-                lastResult = await this.ExecuteFunctionVoice(id, call.name, call.args, message, options);
+                lastResult = await this.executeFunctionVoice(id, call.name, call.args, message, options);
             }
             return lastResult;
         }
@@ -175,7 +178,7 @@ class AiManager extends EventEmitter {
                 await message.edit(combined);
             }
             for (const call of toolParse.toolCalls) {
-                await this.ExecuteFunctionVoice(id, call.name, call.args, message, options);
+                await this.executeFunctionVoice(id, call.name, call.args, message, options);
             }
             return combined;
         }
@@ -214,40 +217,13 @@ class AiManager extends EventEmitter {
         }
         return reply;
     }
-    public async RemoveRatelimit(id: string): Promise<void> {
-        this.promptRateLimits.delete(id);
-    }
-    public async GetResponse(id: string, text: string): Promise<any> {
-        if (this.isPromptRateLimited(id)) return "You are sending too many messages, please wait a few seconds before sending another message.";
-        const chat = await this.GetChat(id, text);
-        await this.ensureToolBootstrap(id, chat);
-        let response = await utils.getAiResponse(text, chat);
-        const hasToolCalls = Array.isArray(response?.toolCalls) ? response.toolCalls.length > 0 : Boolean(response?.call);
-        const hasText = typeof response?.text === "string" && response.text.trim().length > 0;
-        if (!hasText && !hasToolCalls) {
-            chat.addSystemMessage?.("You did not return a valid response. Always return a user-facing message or a tool call.");
-        }
-        return response;
-    }
-    public async GetSingleResponse(id: string, text: string): Promise<string> {
-        if (this.isPromptRateLimited(id)) return "You are sending too many messages, please wait a few seconds before sending another message.";
-        const response = await NVIDIAModels.GetModelChatResponse([{ role: "user", content: text }], 20000, "chat", false);
-        return response.content;
-    }
-    public async GetVoiceResponse(id: string, text: string): Promise<any> {
-        if (this.isPromptRateLimited(id)) return { text: "You are sending too many messages, please wait a few seconds before sending another message.", call: null };
-        const chat = await this.GetVoiceChat(id);
-        await this.ensureToolBootstrap(id, chat);
-        const response = await utils.getAiResponse(text, chat);
-        return response;
-    }
-    public async ExecuteFunction(id: string, name: string, args: any, message: Message, Queue?: NIMToolCall[], options?: { suppressProgress?: boolean; deferEdit?: boolean }): Promise<any> {
+    public async executeFunction(id: string, name: string, args: any, message: Message, Queue?: NIMToolCall[], options?: { suppressProgress?: boolean; deferEdit?: boolean }): Promise<any> {
         const suppressProgress = options?.suppressProgress ?? true;
         const deferEdit = options?.deferEdit ?? false;
         const startedAt = Date.now();
         let status = "unknown";
         try {
-            const chat = await this.GetChat(id, "");
+            const chat = await this.getChat(id, "");
             const localHandlers = this.localFunctionHandlers.get(id);
             const localHandler = localHandlers ? localHandlers[name ?? Queue![0].name] : undefined;
             const func: any = localHandler ? null : utils.AIFunctions[name as keyof typeof utils.AIFunctions ?? Queue![0].name as keyof typeof utils.AIFunctions];
@@ -274,7 +250,7 @@ class AiManager extends EventEmitter {
                         if (!suppressProgress) {
                             await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
                         }
-                        lastResult = await this.ExecuteFunction(id, call.name, call.args, message, Queue!.slice(1), { ...options, deferEdit: childDeferEdit });
+                        lastResult = await this.executeFunction(id, call.name, call.args, message, Queue!.slice(1), { ...options, deferEdit: childDeferEdit });
                     }
                     status = "followup";
                     return lastResult;
@@ -353,7 +329,7 @@ class AiManager extends EventEmitter {
                     if (message && !suppressProgress) {
                         await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
                     }
-                    lastResult = await this.ExecuteFunction(id, call.name, call.args, message, undefined, { ...options, deferEdit: childDeferEdit });
+                    lastResult = await this.executeFunction(id, call.name, call.args, message, undefined, { ...options, deferEdit: childDeferEdit });
                 }
                 status = "followup";
                 return lastResult;
@@ -369,7 +345,7 @@ class AiManager extends EventEmitter {
                 for (let i = 0; i < toolParse.toolCalls.length; i++) {
                     const call = toolParse.toolCalls[i];
                     const childDeferEdit = deferEdit || i < toolParse.toolCalls.length - 1;
-                    await this.ExecuteFunction(id, call.name, call.args, message, undefined, { ...options, deferEdit: childDeferEdit });
+                    await this.executeFunction(id, call.name, call.args, message, undefined, { ...options, deferEdit: childDeferEdit });
                 }
                 status = "followup";
                 return combined;
@@ -423,7 +399,7 @@ class AiManager extends EventEmitter {
             const _durationMs = Date.now() - startedAt;
         }
     }
-    private async GetChat(id: string, text: string): Promise<NIMChatSession> {
+    private async getChat(id: string, text: string): Promise<NIMChatSession> {
         let chat = this.chats.get(id);
         if (!chat) {
             chat = NVIDIAModels.CreateChatSession({
@@ -437,7 +413,7 @@ class AiManager extends EventEmitter {
         }
         return this.chats.get(id) as NIMChatSession;
     }
-    private async GetVoiceChat(id: string): Promise<NIMChatSession> {
+    private async getVoiceChat(id: string): Promise<NIMChatSession> {
         let chat = this.voiceChats.get(id);
         if (!chat) {
             chat = NVIDIAModels.CreateChatSession({
@@ -451,21 +427,11 @@ class AiManager extends EventEmitter {
         }
         return this.voiceChats.get(id) as NIMChatSession;
     }
-    private ClearTimeouts(): void {
-        const cutoff = Date.now() - this.timeout;
-        this.promptRateLimits.forEach((timestamps, id) => {
-            const filtered = timestamps.filter(ts => ts >= cutoff);
-            if (filtered.length > 0) this.promptRateLimits.set(id, filtered);
-            else this.promptRateLimits.delete(id);
-        });
-    }
-
-    public async ClearChat(id: string): Promise<void> {
+    public async clearChat(id: string): Promise<void> {
         this.chats.delete(id);
         this.voiceChats.delete(id);
         this.bootstrappedChats.delete(id);
     }
-
     private async ensureToolBootstrap(id: string, chat: NIMChatSession): Promise<void> {
         if (this.bootstrappedChats.has(id)) return;
         this.bootstrappedChats.add(id);
@@ -492,5 +458,62 @@ class AiManager extends EventEmitter {
             chat.primeTools(toolResults);
         }
     }
+    public get OllamaEnabled(): boolean {
+        return this.enableOllama;
+    }
+    public get OllamaChatModel(): string {
+        return this.ollamaChatModel;
+    }
+    public get OllamaModerationModel(): string {
+        return this.ollamaModerationModel;
+    }
+    public get OllamaVisionModel(): string {
+        return this.ollamaVisionModel;
+    }
+    public async checkOllamaHealth(): Promise<{ online: boolean; models: string[]; error?: string }> {
+        if (!this.enableOllama) return { online: false, models: [], error: "Ollama integration is disabled" };
+        try {
+            const models = await this.ollamaClient.list();
+            const names = models.models.map(m => m.name);
+            return { online: true, models: names };
+        } catch (error: any) {
+            return { online: false, models: [], error: error.message ?? "Failed to connect to Ollama" };
+        }
+    }
+    public async getOllamaModels(): Promise<string[]> {
+        if (!this.enableOllama) return [];
+        try {
+            const models = await this.ollamaClient.list();
+            return models.models.map(m => m.name);
+        } catch {
+            return [];
+        }
+    }
+    public getSingleOllamaResponse(model: string, messages: Array<any>, timeoutMs?: number): Promise<string> {
+        if (!this.enableOllama) {
+            return Promise.reject(new Error("Ollama integration is disabled"));
+        }
+        return new Promise(async (resolve, reject) => {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), timeoutMs ?? 60000);
+            try {
+                const response = await this.ollamaClient.chat({
+                    model,
+                    messages,
+                    stream: false
+                });
+                clearTimeout(timeout);
+                if (typeof response.message?.content === "string") {
+                    resolve(response.message.content);
+                } else {
+                    reject(new Error("No response from Ollama"));
+                }
+            } catch (error) {
+                clearTimeout(timeout);
+                reject(error instanceof Error ? error : new Error(String(error)));
+            }
+        });
+    }
 }
+
 export default AiManager;
