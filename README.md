@@ -12,7 +12,7 @@ BarnieBot is your server stack in a single process: global chat, AI, RPG, modera
 
 ## ✨ Quick Hits
 - Encrypted global chat with auto-translation across connected guilds.
-- NVIDIA NIM + DeepSeek for chat, voice, and image understanding.
+- NVIDIA NIM for chat, voice, and image understanding.
 - Full RPG loop: characters, gear, trading, and turn-based combat.
 - Thirteen-tier staff system with audits, warnings, mutes, and tickets.
 
@@ -35,7 +35,7 @@ BarnieBot is your server stack in a single process: global chat, AI, RPG, modera
 
 **Global Chat Network** – Bridges multiple Discord servers with encrypted cross-guild messaging, automatic translation (20+ languages), staff rank suffixes, anti-impersonation protection, and global custom commands (`b.rules`, `b.help`).
 
-**AI Powered** – NVIDIA NIM integration with DeepSeek for chat (`/ai chat`), tasked Q&A (`/ai ask`), image understanding, and voice conversations with speech-to-text.
+**AI Powered** – NVIDIA NIM integration for chat (`/ai chat`), tasked Q&A (`/ai ask`), image understanding, and voice conversations with speech-to-text.
 
 **RPG System** – Complete character progression with account registration, 5 unique classes (Warrior, Mage, Rogue, Paladin, Archer), stat management, equipment system (7 slots), inventory management, shop with database-driven items, player-to-player trading, turn-based combat with difficulty scaling, quest system, and leaderboards. Includes single-session login enforcement, account status management (freeze/ban), and comprehensive admin tools.
 
