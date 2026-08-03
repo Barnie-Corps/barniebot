@@ -830,59 +830,66 @@ export default class AiMonitorManager {
             eventType,
             data
         });
-        const chat = NVIDIAModels.CreateChatSession({
-            tools: tools as any,
-            model: "minimaxai/minimax-m2.7",
-            maxTokens: 1024,
-            temperature: 0.4,
-            topP: 0.8,
-            systemInstruction: "You are an AI monitor investigator. You may call tools to verify suspicious activity. Avoid false positives and demand evidence before punitive actions. Only call tools provided. Never fabricate tool outputs. Return JSON only."
-        });
-        let result = await chat.sendMessage(prompt);
-        for (let i = 0; i < 3; i += 1) {
-            const calls = result.response.functionCalls() || [];
-            if (!calls.length) {
-                const text = result.response.text();
-                return this.parseJson<ReviewResult>(text, {
-                    suspicious: false,
-                    risk: "low",
-                    summary: "not suspicious",
-                    reason: "",
-                    recommended_actions: ["notify"],
-                    confidence: 0
-                });
-            }
-            const toolPayload = [] as Array<{ functionResponse: { name: string; response: { result: any } } }>;
-            for (const call of calls) {
-                if (AI_DEBUG) {
-                    console.log("[AI Monitor] tool call", {
-                        tool: call.name,
-                        eventType,
-                        guildId: data?.guild?.id ?? null
+        try {
+            const chat = NVIDIAModels.CreateChatSession({
+                tools: tools as any,
+                model: "nvidia/llama-3.3-nemotron-super-49b-v1",
+                maxTokens: 1024,
+                temperature: 0.4,
+                topP: 0.8,
+                systemInstruction: "You are an AI monitor investigator. You may call tools to verify suspicious activity. Avoid false positives and demand evidence before punitive actions. Only call tools provided. Never fabricate tool outputs. Return JSON only."
+            });
+            let result = await chat.sendMessage(prompt);
+            for (let i = 0; i < 3; i += 1) {
+                const calls = result.response.functionCalls() || [];
+                if (!calls.length) {
+                    const text = result.response.text();
+                    return this.parseJson<ReviewResult>(text, {
+                        suspicious: false,
+                        risk: "low",
+                        summary: "not suspicious",
+                        reason: "",
+                        recommended_actions: ["notify"],
+                        confidence: 0
                     });
                 }
-                const toolResult = await executeAiMonitorTool(call.name as AIMonitorToolName, call.args, {
-                    guildId: data?.guild?.id ?? null,
-                    requesterId: "__ai_monitor__"
-                });
-                toolPayload.push({
-                    functionResponse: {
-                        name: call.name,
-                        response: { result: toolResult }
+                const toolPayload = [] as Array<{ functionResponse: { name: string; response: { result: any } } }>;
+                for (const call of calls) {
+                    if (AI_DEBUG) {
+                        console.log("[AI Monitor] tool call", {
+                            tool: call.name,
+                            eventType,
+                            guildId: data?.guild?.id ?? null
+                        });
                     }
-                });
+                    const toolResult = await executeAiMonitorTool(call.name as AIMonitorToolName, call.args, {
+                        guildId: data?.guild?.id ?? null,
+                        requesterId: "__ai_monitor__"
+                    });
+                    toolPayload.push({
+                        functionResponse: {
+                            name: call.name,
+                            response: { result: toolResult }
+                        }
+                    });
+                }
+                result = await chat.sendMessage(toolPayload);
             }
-            result = await chat.sendMessage(toolPayload);
+            const finalText = result.response.text();
+            return this.parseJson<ReviewResult>(finalText, {
+                suspicious: false,
+                risk: "low",
+                summary: "not suspicious",
+                reason: "",
+                recommended_actions: ["notify"],
+                confidence: 0
+            });
+        } catch (error: any) {
+            if (AI_DEBUG) {
+                Log.debug("Tool review failed, falling back to plain review", { component: "AiMonitor", error: error?.message || String(error) });
+            }
+            return this.review(eventType, data, language);
         }
-        const finalText = result.response.text();
-        return this.parseJson<ReviewResult>(finalText, {
-            suspicious: false,
-            risk: "low",
-            summary: "not suspicious",
-            reason: "",
-            recommended_actions: ["notify"],
-            confidence: 0
-        });
     }
 
     private normalizeRecommendedActions(review: ReviewResult): ActionType[] {

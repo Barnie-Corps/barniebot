@@ -235,7 +235,7 @@ export default class NVIDIAModelsManager {
         );
     }
     private GetTaskBasedModel = (task: string): { name: string, hasReasoning: boolean, hasThinkMode: boolean } => {
-        const base = { name: "minimaxai/minimax-m2.7", hasReasoning: false, hasThinkMode: true };
+        const base = { name: "nvidia/llama-3.3-nemotron-super-49b-v1", hasReasoning: false, hasThinkMode: false };
         const monitorSmall = { name: "meta/llama-3.1-8b-instruct", hasReasoning: false, hasThinkMode: false };
         const taskModels: { [key: string]: { name: string, hasReasoning: boolean, hasThinkMode: boolean } } = {
             "chat": { name: "stepfun-ai/step-3.7-flash", hasReasoning: false, hasThinkMode: true },
@@ -250,7 +250,7 @@ export default class NVIDIAModelsManager {
                 hasThinkMode: false
             },
             "programming": {
-                name: "minimaxai/minimax-m2.7",
+                name: "nvidia/llama-3.3-nemotron-super-49b-v1",
                 hasReasoning: false,
                 hasThinkMode: false
             },
