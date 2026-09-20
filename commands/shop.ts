@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, AutocompleteInteraction } from "discord.js";
-import db from "../mysql/database";
+import db, { withTransaction } from "../mysql/database";
 import utils from "../utils";
 import { RPGItem, RPGInventoryItem } from "../types/interfaces";
 
@@ -208,10 +208,47 @@ export default {
 
                 const item = shopItem[0];
                 const totalCost = (item.base_value || 0) * quantity;
-                
-                if (character.gold < totalCost) {
-                    return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.not_enough_gold + totalCost + texts.errors.but_only_have + character.gold + "!");
+
+                try {
+                    await withTransaction(async (conn) => {
+                        const debitResult: any = await conn.query(
+                            "UPDATE rpg_characters SET gold = gold - ? WHERE id = ? AND gold >= ?",
+                            [totalCost, character.id, totalCost]
+                        );
+                        if (Number(debitResult?.affectedRows ?? 0) === 0) {
+                            throw new Error("#NOT_ENOUGH_GOLD");
+                        }
+
+                        const existingItem = await conn.query(
+                            "SELECT * FROM rpg_inventory WHERE character_id = ? AND item_id = ?",
+                            [character.id, item.id]
+                        ) as unknown as RPGInventoryItem[];
+
+                        if (existingItem[0] && item.stackable) {
+                            await conn.query(
+                                "UPDATE rpg_inventory SET quantity = quantity + ? WHERE id = ?",
+                                [quantity, existingItem[0].id]
+                            );
+                        } else {
+                            await conn.query("INSERT INTO rpg_inventory SET ?", [{
+                                character_id: character.id,
+                                item_id: item.id,
+                                quantity: quantity,
+                                acquired_at: Date.now(),
+                                bound: false
+                            }]);
+                        }
+                    });
+                } catch (error: any) {
+                    if (error?.message === "#NOT_ENOUGH_GOLD") {
+                        return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.not_enough_gold + totalCost + texts.errors.but_only_have + character.gold + "!");
+                    }
+                    console.error("Shop buy failed:", error);
+                    return utils.safeInteractionRespond(interaction, "❌ An error occurred while processing your purchase.");
                 }
+
+                const freshGold = (await db.query("SELECT gold FROM rpg_characters WHERE id = ?", [character.id]) as unknown as any[]);
+                const remainingGold = Number(freshGold?.[0]?.gold ?? character.gold - totalCost);
 
                 const emojiMap: Record<string, string> = {
                     "Health Potion": "❤️",
@@ -234,28 +271,6 @@ export default {
                     "Scholar's Amulet": "📿"
                 };
 
-                const existingItem = (await db.query(
-                    "SELECT * FROM rpg_inventory WHERE character_id = ? AND item_id = ?",
-                    [character.id, item.id]
-                ) as unknown as RPGInventoryItem[]);
-
-                if (existingItem[0] && item.stackable) {
-                    await db.query(
-                        "UPDATE rpg_inventory SET quantity = quantity + ? WHERE id = ?",
-                        [quantity, existingItem[0].id]
-                    );
-                } else {
-                    await db.query("INSERT INTO rpg_inventory SET ?", [{
-                        character_id: character.id,
-                        item_id: item.id,
-                        quantity: quantity,
-                        acquired_at: Date.now(),
-                        bound: false
-                    }]);
-                }
-
-                await db.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ?", [totalCost, character.id]);
-
                 const emoji = emojiMap[item.name] || "📦";
                 const purchaseEmbed = new EmbedBuilder()
                     .setColor("#2ECC71")
@@ -263,7 +278,7 @@ export default {
                     .setDescription(texts.buy.you_bought + quantity + "x " + emoji + " " + item.name + "!")
                     .addFields(
                         { name: texts.buy.total_cost, value: "💰 " + totalCost.toLocaleString() + " Gold", inline: true },
-                        { name: texts.buy.remaining_gold, value: "💰 " + (character.gold - totalCost).toLocaleString(), inline: true }
+                        { name: texts.buy.remaining_gold, value: "💰 " + remainingGold.toLocaleString(), inline: true }
                     )
                     .setFooter({ text: texts.buy.thank_you })
                     .setTimestamp();
@@ -310,13 +325,34 @@ export default {
 
                 const sellPrice = Math.floor(invItem[0].base_value * 0.5 * quantity);
 
-                if (invItem[0].quantity <= quantity) {
-                    await db.query("DELETE FROM rpg_inventory WHERE id = ?", [inventoryId]);
-                } else {
-                    await db.query("UPDATE rpg_inventory SET quantity = quantity - ? WHERE id = ?", [quantity, inventoryId]);
+                try {
+                    await withTransaction(async (conn) => {
+                        const inventoryResult: any = await conn.query(
+                            invItem[0].quantity <= quantity
+                                ? "SELECT * FROM rpg_inventory WHERE id = ? AND quantity = ? FOR UPDATE"
+                                : "SELECT * FROM rpg_inventory WHERE id = ? FOR UPDATE",
+                            invItem[0].quantity <= quantity ? [inventoryId, invItem[0].quantity] : [inventoryId]
+                        );
+                        if (!inventoryResult?.[0]) {
+                            throw new Error("#ITEM_GONE");
+                        }
+                        if (invItem[0].quantity <= quantity) {
+                            await conn.query("DELETE FROM rpg_inventory WHERE id = ?", [inventoryId]);
+                        } else {
+                            await conn.query("UPDATE rpg_inventory SET quantity = quantity - ? WHERE id = ? AND quantity >= ?", [quantity, inventoryId, quantity]);
+                        }
+                        await conn.query("UPDATE rpg_characters SET gold = gold + ? WHERE id = ?", [sellPrice, character.id]);
+                    });
+                } catch (error: any) {
+                    if (error?.message === "#ITEM_GONE") {
+                        return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.item_not_found);
+                    }
+                    console.error("Shop sell failed:", error);
+                    return utils.safeInteractionRespond(interaction, "❌ An error occurred while selling your item.");
                 }
 
-                await db.query("UPDATE rpg_characters SET gold = gold + ? WHERE id = ?", [sellPrice, character.id]);
+                const freshGoldAfterSell = (await db.query("SELECT gold FROM rpg_characters WHERE id = ?", [character.id]) as unknown as any[]);
+                const newGoldTotal = Number(freshGoldAfterSell?.[0]?.gold ?? character.gold + sellPrice);
 
                 const sellEmbed = new EmbedBuilder()
                     .setColor("#F39C12")
@@ -324,7 +360,7 @@ export default {
                     .setDescription(texts.sell.you_sold + quantity + "x " + invItem[0].name + "!")
                     .addFields(
                         { name: texts.sell.gold_received, value: "💰 " + sellPrice.toLocaleString(), inline: true },
-                        { name: texts.sell.new_total, value: "💰 " + (character.gold + sellPrice).toLocaleString(), inline: true }
+                        { name: texts.sell.new_total, value: "💰 " + newGoldTotal.toLocaleString(), inline: true }
                     )
                     .setFooter({ text: texts.sell.come_back })
                     .setTimestamp();

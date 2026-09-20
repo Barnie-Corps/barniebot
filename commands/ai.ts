@@ -183,6 +183,7 @@ export default {
             common: {
                 question: "Your question was:",
                 thinking: "💭 Thinking...",
+                building_response: "Building response...",
                 started_chat: "The chat with the AI has started. You can say one of the following phrases to stop it:",
                 free_tier_started: "Free tier active.",
                 free_tier_remaining: "Messages remaining today:",
@@ -258,13 +259,16 @@ export default {
         const reply = (content: any) => {
             return utils.safeInteractionRespond(interaction, content);
         }
-        const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> => {
+        const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, controller?: AbortController): Promise<T | null> => {
             let timer: NodeJS.Timeout | null = null;
             try {
                 return await Promise.race([
                     promise,
                     new Promise<null>(resolve => {
-                        timer = setTimeout(() => resolve(null), timeoutMs);
+                        timer = setTimeout(() => {
+                            controller?.abort();
+                            resolve(null);
+                        }, timeoutMs);
                     })
                 ]);
             } finally {
@@ -399,23 +403,20 @@ export default {
                             return;
                         }
                         await utils.consumeAiChatDailyQuota(message.author.id);
-                        await (interaction.channel as TextChannel).sendTyping?.();
+
+                        const placeholderText = `${data.bot.loadingEmoji.mention} ${texts.common.building_response}`;
+                        const placeholder = await message.reply(placeholderText);
 
                         let imageDescription = "";
                         if (message.attachments.size > 0) {
-                            if (message.attachments.size > 1) return await message.reply(texts.errors.max_attachments);
+                            if (message.attachments.size > 1) return await placeholder.edit(texts.errors.max_attachments).catch(() => { });
                             const attachment = message.attachments.first();
                             if (attachment) {
-                                const analyzingMsg = await message.reply(texts.common.analyzing_image);
                                 try {
                                     imageDescription = await NVIDIAModels.GetVisualDescription(attachment.url, message.id, lang);
-                                    await analyzingMsg.delete().catch(() => { });
-                                } catch {
-                                    await analyzingMsg.delete().catch(() => { });
-                                }
+                                } catch {}
                             }
                         }
-                        if (message.attachments.size > 0) await (interaction.channel as TextChannel).sendTyping?.();
 
                         const speakerLabel = message.author.id === convoOwnerId
                             ? `Speaker: Conversation owner (${message.author.username}, ${message.author.id})`
@@ -425,33 +426,53 @@ export default {
                             : message.content;
                         const userContent = `${speakerLabel}\n${payloadContent}`;
 
+                        let bufferedText = "";
+                        let lastEditAt = 0;
+                        const flushDisplay = async (force: boolean) => {
+                            const now = Date.now();
+                            if (!force && now - lastEditAt < 1500) return;
+                            lastEditAt = now;
+                            await placeholder.edit(bufferedText || placeholderText).catch(() => { });
+                        };
+                        const onChunk = (delta: string) => {
+                            if (chatEnded) return;
+                            if (bufferedText.length + delta.length > 2000) return;
+                            bufferedText += delta;
+                            flushDisplay(false).catch(() => { });
+                        };
+
+                        const controller = new AbortController();
+                        const streamPromise = withTimeout(
+                            ai.getResponseStream(convoOwnerId, userContent, onChunk, controller.signal).catch(() => null),
+                            120000,
+                            controller
+                        );
                         const safety = await NVIDIAModels.GetConversationSafety([
                             { role: "user", content: userContent }
                         ]);
                         if (!safety.safe && !(await utils.getUserStaffRank(message.author.id))) {
+                            controller.abort();
                             if (lang !== "en") {
                                 safety.reason = (await utils.translate(safety.reason || "", "en", lang)).text;
                             }
                             const reason = safety.reason ? `\n${texts.common.reasons}: ${safety.reason}` : "";
-                            await message.reply(`${texts.errors.unsafe_message}${reason}`);
+                            await placeholder.edit(`${texts.errors.unsafe_message}${reason}`).catch(() => { });
                             collector?.stop();
                             return;
                         }
-                        const typingInterval = setInterval(() => {
-                            (interaction.channel as TextChannel).sendTyping?.().catch(() => {});
-                        }, 10000);
-                        let response;
-                        try {
-                            response = await withTimeout(ai.getResponse(interaction.user.id, userContent), 120000);
-                            if (!response) {
-                                console.warn("AI response timeout");
-                                return await message.reply(texts.errors.no_response);
-                            }
-                        } finally {
-                            clearInterval(typingInterval);
+                        const response = await streamPromise;
+                        if (chatEnded) return;
+                        if (!response) {
+                            await placeholder.edit(texts.errors.no_response).catch(() => { });
+                            return;
                         }
-                        const structuredToolCalls = Array.isArray((response as any).toolCalls)
-                            ? (response as any).toolCalls
+                        if (typeof response === "string") {
+                            await placeholder.edit(response).catch(() => { });
+                            return;
+                        }
+                        await flushDisplay(true);
+                        const structuredToolCalls = Array.isArray(response.toolCalls)
+                            ? response.toolCalls
                             : response.call ? [response.call] : [];
                         const toolParse = utils.parseToolCalls(response.text);
                         const toolCalls = structuredToolCalls.length ? structuredToolCalls : toolParse.toolCalls;
@@ -459,12 +480,13 @@ export default {
                         const hasToolCalls = toolCalls.length > 0;
                         if ((!response.text || response.text.length < 1) && !hasToolCalls) {
                             if (AI_DEBUG) console.log("No response from AI", response);
-                            return await message.reply(texts.errors.no_response);
+                            await placeholder.edit(texts.errors.no_response).catch(() => { });
+                            return;
                         }
                         if (hasToolCalls) {
                             const endCall = toolCalls.find((call: FunctionCall) => call.name === "end_conversation");
                             if (endCall) {
-                                await message.reply(`${texts.common.ai_left} ${endCall.args?.reason || "No reason provided."}`);
+                                await placeholder.edit(`${texts.common.ai_left} ${endCall.args?.reason || "No reason provided."}`).catch(() => { });
                                 collector?.stop();
                                 return;
                             }
@@ -473,16 +495,16 @@ export default {
                             }
                             const toolLine = `Processing... ${data.bot.loadingEmoji.mention}`;
                             const combined = cleanedResponseText ? `${cleanedResponseText}\n\n${toolLine}` : toolLine;
-                            const msg = await message.reply(combined);
+                            await placeholder.edit(combined).catch(() => { });
                             let lastResult: any = null;
                             for (let i = 0; i < toolCalls.length; i++) {
                                 const call = toolCalls[i];
                                 const remaining = toolCalls.slice(i + 1);
                                 const deferEdit = i < toolCalls.length - 1;
-                                lastResult = await ai.executeFunction(interaction.user.id, call.name, call.args, msg, remaining, { suppressProgress: true, deferEdit });
+                                lastResult = await ai.executeFunction(convoOwnerId, call.name, call.args, placeholder, remaining, { suppressProgress: true, deferEdit });
                             }
                             if (typeof lastResult === "string" && !lastResult.trim()) {
-                                await msg.edit(texts.errors.no_response);
+                                await placeholder.edit(texts.errors.no_response).catch(() => { });
                             }
                             return;
                         }
@@ -490,7 +512,7 @@ export default {
                             await utils.sendLongTextResponse(message, cleanedResponseText || response.text, texts.errors.long_response, "ai-response");
                             return;
                         }
-                        await message.reply(cleanedResponseText || response.text);
+                        await placeholder.edit(cleanedResponseText || response.text).catch(() => { });
                     } catch (error) {
                         if (chatEnded) return;
                         console.error("AI chat handling failed:", error);

@@ -2,6 +2,24 @@ import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionR
 import db from "../mysql/database";
 import utils from "../utils";
 import * as fs from "fs";
+import * as crypto from "crypto";
+
+const verifyAttempts = new Map<string, { count: number; resetAt: number }>();
+const isVerifyRateLimited = (uid: string): boolean => {
+    const now = Date.now();
+    const entry = verifyAttempts.get(uid);
+    if (!entry || entry.resetAt <= now) return false;
+    return entry.count >= 5;
+};
+const recordVerifyAttempt = (uid: string): void => {
+    const now = Date.now();
+    const entry = verifyAttempts.get(uid);
+    if (!entry || entry.resetAt <= now) {
+        verifyAttempts.set(uid, { count: 1, resetAt: now + 60000 });
+    } else {
+        entry.count += 1;
+    }
+};
 
 export default {
     data: new SlashCommandBuilder()
@@ -136,7 +154,7 @@ export default {
                     }
                 }
 
-                const verification_code = Math.floor(100000 + Math.random() * 900000);
+                const verification_code = crypto.randomInt(100000, 1000000);
 
                 const passwordSetupEmbed = new EmbedBuilder()
                     .setColor("#3498DB")
@@ -326,13 +344,19 @@ export default {
             case "verify": {
                 const code = interaction.options.getString("code", true).trim();
 
+                if (isVerifyRateLimited(interaction.user.id)) {
+                    return utils.safeInteractionRespond(interaction, `❌ ${texts.errors.cooldown}`);
+                }
+
+                recordVerifyAttempt(interaction.user.id);
+
                 if (!/^\d{6}$/.test(code)) {
                     return utils.safeInteractionRespond(interaction, `❌ ${texts.errors.invalid_code}`);
                 }
 
                 const account: any = await db.query(
-                    "SELECT * FROM registered_accounts WHERE verification_code = ? AND verified = FALSE",
-                    [code]
+                    "SELECT * FROM registered_accounts WHERE uid = ? AND verification_code = ? AND verified = FALSE",
+                    [interaction.user.id, code]
                 );
 
                 if (account.length < 1) {
@@ -340,6 +364,7 @@ export default {
                 }
 
                 const acc = account[0];
+                verifyAttempts.delete(interaction.user.id);
 
                 await db.query(
                     "UPDATE registered_accounts SET verified = TRUE, verified_at = ?, verification_code = '0' WHERE id = ?",
@@ -386,7 +411,7 @@ export default {
                     return utils.safeInteractionRespond(interaction, `❌ ${texts.errors.cooldown}`);
                 }
 
-                const new_code = Math.floor(100000 + Math.random() * 900000);
+                const new_code = crypto.randomInt(100000, 1000000);
 
                 await db.query(
                     "UPDATE registered_accounts SET verification_code = ?, created_at = ? WHERE id = ?",

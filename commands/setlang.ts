@@ -12,12 +12,22 @@ export default {
     category: "Utility",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         let newLang = interaction.options.getString("language");
+        const translateFor = async (text: string, target: string) => {
+            if (target === "en") return text;
+            try {
+                const result = await utils.translate(text, "en", target);
+                return result?.text || text;
+            } catch {
+                return text;
+            }
+        };
+        const errBox = async (commandLine: string, errText: string) => "```\n" + commandLine + "\n" + await translateFor(`ERR: ${errText}`, lang) + "\n```";
         const respond = async (text: string) => utils.safeInteractionRespond(interaction, { content: text, ephemeral: true });
-        if (!newLang) return respond("```\n" + `/setlang <language>\n${utils.createSpaces(`/setlang <`.length)}${utils.createArrows("language".length)}\n\nERR: Missing required argument.` + "\n```");
+        if (!newLang) return respond(await errBox(`/setlang <language>\n${utils.createSpaces(`/setlang <`.length)}${utils.createArrows("language".length)}\n`, "Missing required argument."));
         newLang = newLang.toLowerCase();
-        if (newLang === lang) return respond("```\n" + `/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Cannot set same language twice.` + "\n```");
-        if (newLang.length > 2) return respond("```\n" + `/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Language code cannot have more than 2 characters.` + "\n```");
-        if (!utils.isValidLanguageCode(newLang)) return respond("```\n" + `/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n\nERR: Invalid language code.` + "\n```");
+        if (newLang === lang) return respond(await errBox(`/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n`, "Cannot set same language twice."));
+        if (newLang.length > 2) return respond(await errBox(`/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n`, "Language code cannot have more than 2 characters."));
+        if (!utils.isValidLanguageCode(newLang)) return respond(await errBox(`/setlang ${newLang}\n${utils.createSpaces(`/setlang `.length)}${utils.createArrows(newLang.length)}\n`, "Invalid language code."));
         const foundLang = await db.query("SELECT * FROM languages WHERE userid = ?", [interaction.user.id]) as unknown as UserLanguage[];
         if (foundLang[0]) {
             await db.query("UPDATE languages SET ? WHERE userid = ?", [{ lang: newLang }, interaction.user.id]);

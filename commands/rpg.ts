@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from "discord.js";
-import db from "../mysql/database";
+import db, { withTransaction } from "../mysql/database";
 import utils from "../utils";
 import type { RPGSession, RPGCharacter } from "../types/interfaces";
 
@@ -1483,31 +1483,67 @@ export default {
                     return utils.safeInteractionRespond(interaction, `❌ Not enough gold! You need ${listing[0].price_per_unit} gold.`);
                 }
 
-                // Process transaction
-                await db.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ?", [listing[0].price_per_unit, character.id]);
-                await db.query("UPDATE rpg_characters SET gold = gold + ? WHERE id = ?", [listing[0].price_per_unit, listing[0].seller_id]);
-                await db.query("UPDATE rpg_market_listings SET sold = TRUE WHERE id = ?", [listingId]);
+                try {
+                    await withTransaction(async (conn) => {
+                        const listingRows = await conn.query(
+                            `SELECT m.*, i.name as item_name FROM rpg_market_listings m 
+                            JOIN rpg_items i ON m.item_id = i.id 
+                            WHERE m.id = ? AND m.sold = FALSE
+                            LIMIT 1 FOR UPDATE`,
+                            [listingId]
+                        ) as unknown as any[];
+                        const current = listingRows[0];
+                        if (!current) {
+                            throw new Error("#LISTING_GONE");
+                        }
+                        if (current.seller_id === character.id) {
+                            throw new Error("#OWN_LISTING");
+                        }
+                        const debitResult: any = await conn.query(
+                            "UPDATE rpg_characters SET gold = gold - ? WHERE id = ? AND gold >= ?",
+                            [current.price_per_unit, character.id, current.price_per_unit]
+                        );
+                        if (Number(debitResult?.affectedRows ?? 0) === 0) {
+                            throw new Error("#NOT_ENOUGH_GOLD");
+                        }
+                        await conn.query("UPDATE rpg_characters SET gold = gold + ? WHERE id = ?", [current.price_per_unit, current.seller_id]);
+                        await conn.query("UPDATE rpg_market_listings SET sold = TRUE WHERE id = ?", [listingId]);
 
-                // Add item to buyer's inventory
-                const existing: any = await db.query(
-                    "SELECT * FROM rpg_inventory WHERE character_id = ? AND item_id = ?",
-                    [character.id, listing[0].item_id]
-                );
+                        const existing = await conn.query(
+                            "SELECT * FROM rpg_inventory WHERE character_id = ? AND item_id = ?",
+                            [character.id, current.item_id]
+                        ) as unknown as any[];
 
-                if (existing[0]) {
-                    await db.query(
-                        "UPDATE rpg_inventory SET quantity = quantity + 1 WHERE character_id = ? AND item_id = ?",
-                        [character.id, listing[0].item_id]
-                    );
-                } else {
-                    await db.query("INSERT INTO rpg_inventory SET ?", [{
-                        character_id: character.id,
-                        item_id: listing[0].item_id,
-                        quantity: 1
-                    }]);
+                        if (existing[0]) {
+                            await conn.query(
+                                "UPDATE rpg_inventory SET quantity = quantity + 1 WHERE character_id = ? AND item_id = ?",
+                                [character.id, current.item_id]
+                            );
+                        } else {
+                            await conn.query("INSERT INTO rpg_inventory SET ?", [{
+                                character_id: character.id,
+                                item_id: current.item_id,
+                                quantity: 1
+                            }]);
+                        }
+                    });
+                } catch (error: any) {
+                    if (error?.message === "#LISTING_GONE") {
+                        return utils.safeInteractionRespond(interaction, "❌ Listing not found or no longer available!");
+                    }
+                    if (error?.message === "#OWN_LISTING") {
+                        return utils.safeInteractionRespond(interaction, "❌ You cannot buy your own listings!");
+                    }
+                    if (error?.message === "#NOT_ENOUGH_GOLD") {
+                        return utils.safeInteractionRespond(interaction, `❌ Not enough gold! You need ${listing[0].price_per_unit} gold.`);
+                    }
+                    console.error("Market purchase failed:", error);
+                    return utils.safeInteractionRespond(interaction, "❌ An error occurred while processing your purchase.");
                 }
 
-                return utils.safeInteractionRespond(interaction, `✅ Purchased **${listing[0].item_name}** for **${listing[0].price} gold**!`);
+                const priceToShow = listing[0].price_per_unit; 
+                const itemNameToShow = listing[0].item_name;
+                return utils.safeInteractionRespond(interaction, `✅ Purchased **${itemNameToShow}** for **${priceToShow} gold**!`);
             }
 
             case "quest": {

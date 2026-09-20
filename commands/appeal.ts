@@ -15,30 +15,51 @@ export default {
     const appealReason = interaction.options.getString("reason", true);
     const user = interaction.user;
 
+    let texts = {
+      notFound: `Warning #${warningId} not found or doesn't belong to you.`,
+      pending: `Warning #${warningId} has already been appealed and is pending review.`,
+      approved: `Warning #${warningId} has already been appealed and was approved.`,
+      denied: `Warning #${warningId} has already been appealed and was denied. Appeals cannot be resubmitted.`,
+      expired: `Warning #${warningId} has already expired and doesn't need to be appealed.`,
+      inactive: `Warning #${warningId} is already inactive.`,
+      onePoint: "1 point",
+      points: `${0} points`,
+      submittedTitle: "📋 Appeal Submitted",
+      submittedDescription: `Your appeal for warning #${warningId} has been submitted and is pending staff review.`,
+      originalWarning: "Original Warning",
+      yourAppeal: "Your Appeal",
+      whatsNext: "What's Next?",
+      whatsNextValue: "Staff will review your appeal and make a decision. You'll be notified of the outcome.",
+      footer: "Please be patient while staff reviews your appeal."
+    };
+    if (lang !== "en") {
+      texts = await utils.autoTranslate(texts, "en", lang).catch(() => texts);
+    }
+
     const warningData: any = await db.query("SELECT * FROM global_warnings WHERE id = ? AND userid = ?", [warningId, user.id]);
 
     if (!warningData[0]) {
-      return utils.safeInteractionRespond(interaction, `Warning #${warningId} not found or doesn't belong to you.`);
+      return utils.safeInteractionRespond(interaction, texts.notFound);
     }
 
     const warning = warningData[0];
 
     if (warning.appealed) {
       if (warning.appeal_status === "pending") {
-        return utils.safeInteractionRespond(interaction, `Warning #${warningId} has already been appealed and is pending review.`);
+        return utils.safeInteractionRespond(interaction, texts.pending);
       } else if (warning.appeal_status === "approved") {
-        return utils.safeInteractionRespond(interaction, `Warning #${warningId} has already been appealed and was approved.`);
+        return utils.safeInteractionRespond(interaction, texts.approved);
       } else if (warning.appeal_status === "denied") {
-        return utils.safeInteractionRespond(interaction, `Warning #${warningId} has already been appealed and was denied. Appeals cannot be resubmitted.`);
+        return utils.safeInteractionRespond(interaction, texts.denied);
       }
     }
 
     if (warning.expires_at <= Date.now()) {
-      return utils.safeInteractionRespond(interaction, `Warning #${warningId} has already expired and doesn't need to be appealed.`);
+      return utils.safeInteractionRespond(interaction, texts.expired);
     }
 
     if (!warning.active) {
-      return utils.safeInteractionRespond(interaction, `Warning #${warningId} is already inactive.`);
+      return utils.safeInteractionRespond(interaction, texts.inactive);
     }
 
     await db.query(
@@ -60,7 +81,7 @@ export default {
     };
 
     const emoji = categoryEmojis[warning.category] || "⚠️";
-    const pointsText = warning.points === 1 ? "1 point" : `${warning.points} points`;
+    const pointsText = warning.points === 1 ? texts.onePoint : texts.points.replace("0", String(warning.points));
 
     let staffNotification = `📋 **New Warning Appeal** #${warningId}\n\n`;
     staffNotification += `**User:** ${user.username} (${user.id})\n`;
@@ -75,14 +96,14 @@ export default {
 
     const confirmEmbed = new EmbedBuilder()
       .setColor("Blue")
-      .setTitle("📋 Appeal Submitted")
-      .setDescription(`Your appeal for warning #${warningId} has been submitted and is pending staff review.`)
+      .setTitle(texts.submittedTitle)
+      .setDescription(texts.submittedDescription)
       .addFields(
-        { name: "Original Warning", value: `${emoji} ${warning.category} - ${pointsText}\n${warning.reason}` },
-        { name: "Your Appeal", value: appealReason },
-        { name: "What's Next?", value: "Staff will review your appeal and make a decision. You'll be notified of the outcome." }
+        { name: texts.originalWarning, value: `${emoji} ${warning.category} - ${pointsText}\n${warning.reason}` },
+        { name: texts.yourAppeal, value: appealReason },
+        { name: texts.whatsNext, value: texts.whatsNextValue }
       )
-      .setFooter({ text: "Please be patient while staff reviews your appeal." })
+      .setFooter({ text: texts.footer })
       .setTimestamp();
 
     return utils.safeInteractionRespond(interaction, { embeds: [confirmEmbed] });

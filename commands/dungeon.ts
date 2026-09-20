@@ -197,15 +197,14 @@ export default {
                 return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.too_injured + "`/rpg rest`." });
             }
 
-            await db.query("INSERT INTO rpg_dungeon_runs SET ?", [{
-                character_id: character.id,
-                dungeon_id: dungeonId,
-                stage: 1,
-                status: "in_progress",
-                started_at: Date.now(),
-                completed_at: null,
-                rewards_claimed: false
-            }]);
+            const enteredRun: any = await db.query(
+                "INSERT INTO rpg_dungeon_runs (character_id, dungeon_id, stage, status, started_at, completed_at, rewards_claimed) SELECT ?, ?, 1, 'in_progress', ?, NULL, FALSE FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM rpg_dungeon_runs WHERE character_id = ? AND status = 'in_progress')",
+                [character.id, dungeonId, Date.now(), character.id]
+            );
+
+            if (Number(enteredRun?.affectedRows ?? 0) === 0) {
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.already_in_dungeon + "`/dungeon continue`" + texts.errors.or_abandon });
+            }
 
             const embed = new EmbedBuilder()
                 .setColor("#8B0000")

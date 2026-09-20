@@ -13,7 +13,8 @@ export type NIMToolDefinition = {
     };
 };
 export type NIMChatSession = {
-    sendMessage: (input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>) => Promise<NIMChatResult>;
+    sendMessage: (input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>, signal?: AbortSignal) => Promise<NIMChatResult>;
+    sendMessageStream?: (input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>, onChunk?: (delta: string) => void, signal?: AbortSignal) => Promise<NIMChatResult>;
     primeTools?: (toolResults: Array<{ name: string; result: any; args?: any }>) => void;
     addSystemMessage?: (content: string) => void;
 };

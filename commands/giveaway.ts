@@ -46,6 +46,8 @@ export default {
             no_perms: "You don't have permission to manage giveaways.",
             not_found: "Giveaway not found.",
             ended: "Giveaway ended.",
+            already_ended: "This giveaway has already ended.",
+            not_ended: "This giveaway is still running.",
             no_entries: "No entries, couldn't pick a winner.",
             winner: "Winner",
             rerolled: "Winner rerolled!",
@@ -110,6 +112,7 @@ export default {
             const id = interaction.options.getString("id", true);
             const rows = await db.query("SELECT * FROM giveaways WHERE id = ? AND guild_id = ?", [id, guildId]) as unknown as any[];
             if (!rows[0]) return respond({ content: texts.not_found });
+            if (rows[0].ended) return respond({ content: texts.already_ended });
             await endGiveaway(rows[0], texts);
             return respond({ content: texts.ended });
         }
@@ -117,6 +120,7 @@ export default {
             const id = interaction.options.getString("id", true);
             const rows = await db.query("SELECT * FROM giveaways WHERE id = ? AND guild_id = ?", [id, guildId]) as unknown as any[];
             if (!rows[0]) return respond({ content: texts.not_found });
+            if (!rows[0].ended) return respond({ content: texts.not_ended });
             const giveaway = rows[0];
             const entries = await db.query("SELECT user_id FROM giveaway_entries WHERE giveaway_id = ?", [id]) as unknown as any[];
             const userIds = entries.map((e: any) => e.user_id);

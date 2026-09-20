@@ -12,18 +12,26 @@ export default {
                 .setRequired(false)
         ),
     category: "Utility",
-    async execute(interaction: ChatInputCommandInteraction) {
+    async execute(interaction: ChatInputCommandInteraction, lang: string) {
         const target = interaction.options.getUser("target") ?? interaction.user;
+
+        let texts = {
+            avatarOf: `${target.username}'s Avatar`,
+            requestedBy: `Requested by ${interaction.user.username}`
+        };
+        if (lang !== "en") {
+            texts = await utils.autoTranslate(texts, "en", lang);
+        }
 
         const embed = new EmbedBuilder()
             .setAuthor({
                 name: interaction.user.username,
                 iconURL: interaction.user.displayAvatarURL()
             })
-            .setTitle(`${target.username}'s Avatar`)
+            .setTitle(texts.avatarOf)
             .setImage(target.displayAvatarURL({ size: 1024 }))
             .setColor("Purple")
-            .setFooter({ text: `Requested by ${interaction.user.username}` })
+            .setFooter({ text: texts.requestedBy })
             .setTimestamp();
 
         await utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });

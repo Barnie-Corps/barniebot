@@ -105,16 +105,22 @@ const buildTranscriptFiles = async (ticket: LocalTicket, channel: TextChannel, c
         </div>`;
     }
     let htmlTemplate = fs.readFileSync("./transcript_placeholder.html", "utf-8");
+    const escapeHtml = (value: any): string => String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     htmlTemplate = htmlTemplate
         .replace(/{ticketId}/g, String(ticket.id))
-        .replace(/{username}/g, user?.tag ?? ticket.creator_id)
-        .replace(/{userId}/g, ticket.creator_id)
+        .replace(/{username}/g, escapeHtml(user?.tag ?? ticket.creator_id))
+        .replace(/{userId}/g, escapeHtml(ticket.creator_id))
         .replace(/{status}/g, "Closed")
         .replace(/{statusClass}/g, "status-closed")
         .replace(/{createdAt}/g, new Date(ticket.created_at).toLocaleString())
         .replace(/{closedAt}/g, new Date(closedAt).toLocaleString())
-        .replace(/{origin}/g, `Guild: ${ticket.guild_id}`)
-        .replace(/{initialMessage}/g, ticket.initial_message)
+        .replace(/{origin}/g, `Guild: ${escapeHtml(ticket.guild_id)}`)
+        .replace(/{initialMessage}/g, escapeHtml(ticket.initial_message))
         .replace(/{messages}/g, messagesHtml);
     const textPath = path.join(process.cwd(), `local-ticket-${ticket.id}.txt`);
     const htmlPath = path.join(process.cwd(), `local-ticket-${ticket.id}.html`);

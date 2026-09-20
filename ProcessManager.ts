@@ -12,6 +12,9 @@ const red = color(31);
 const cyan = color(36);
 const dim = color(2);
 
+try { process.stdout.on("error", () => {}); } catch {}
+try { process.stderr.on("error", () => {}); } catch {}
+
 type PMState = "starting" | "running" | "restarting" | "shuttingDown" | "stopped";
 
 const RESTART_WINDOW_MS = 3600000;
@@ -127,7 +130,7 @@ export default class ProcessManager {
         process.on("SIGTERM", () => this.shutdown("SIGTERM"));
         process.on("uncaughtException", (error: Error) => {
             this.log(`Uncaught exception: ${error.stack || error.message}`);
-            this.restart("uncaught exception in process manager");
+            this.scheduleRestart("uncaught exception in process manager");
         });
         process.on("unhandledRejection", (error: any) => {
             this.log(`Unhandled rejection: ${(error as Error)?.stack || (error as Error)?.message || String(error)}`);
@@ -172,13 +175,16 @@ export default class ProcessManager {
 
     private attachHandlers(): void {
         if (!this.child) return;
+        const noop = (): void => {};
         if (this.child.stdout) {
             this.child.stdout.on("data", (data: Buffer) => this.handleChildStream("out", data));
+            this.child.stdout.on("error", noop);
         }
         if (this.child.stderr) {
             this.child.stderr.on("data", (data: Buffer) => this.handleChildStream("err", data));
+            this.child.stderr.on("error", noop);
         }
-        this.child.on("exit", (code: number | null, signal: NodeJS.Signals | null) => this.handleExit(code, signal));
+        this.child.on("exit", (code: number | null, signal: NodeJS.Signals | null) => this.handleExit(code, signal, this.child?.pid ?? null));
         this.child.on("error", (error: Error) => {
             this.log(`Process spawn error: ${error.message}`);
             this.child = null;
@@ -189,24 +195,34 @@ export default class ProcessManager {
             }
             this.lastCrashPattern = "spawn error";
             this.lastCrashContext = error.stack || error.message;
-            this.handleExit(null, null);
+            this.handleExit(null, null, null);
         });
     }
 
     private handleChildStream(stream: "out" | "err", data: Buffer): void {
-        const output = data.toString();
-        this.lastOutputAt = Date.now();
-        if (stream === "out") process.stdout.write(output);
-        else process.stderr.write(output);
-        this.writeChildLog(stream, output);
-        this.outputBuffer = (this.outputBuffer + output).slice(-OUTPUT_BUFFER_LIMIT);
-        this.analyzeOutput();
+        try {
+            const output = data.toString();
+            this.lastOutputAt = Date.now();
+            try {
+                if (stream === "out") process.stdout.write(output);
+                else process.stderr.write(output);
+            } catch {
+            }
+            this.writeChildLog(stream, output);
+            this.outputBuffer = (this.outputBuffer + output).slice(-OUTPUT_BUFFER_LIMIT);
+            this.analyzeOutput();
+        } catch (error) {
+            this.log(`Failed to handle child stream: ${error instanceof Error ? error.message : String(error)}`);
+        }
     }
 
-    private handleExit(code: number | null, signal: NodeJS.Signals | null): void {
+    private handleExit(code: number | null, signal: NodeJS.Signals | null, exitedPid: number | null): void {
         this.stopHangWatch();
+        if (exitedPid !== null && this.child?.pid !== undefined && this.child.pid !== exitedPid) {
+            this.log(`Ignoring stale exit event for PID ${exitedPid} (current child PID ${this.child.pid}).`);
+            return;
+        }
         this.log(`Bot exited with code ${code}, signal ${signal}${classifyCrash(code, signal) === "clean" ? " (clean)" : ""}`);
-        const exitedPid = this.child?.pid;
         this.child = null;
         this.processStartTime = 0;
 
@@ -268,7 +284,7 @@ export default class ProcessManager {
         }
     }
 
-    private killProcessGroup(pid: number | undefined, signal: NodeJS.Signals): void {
+    private killProcessGroup(pid: number | null | undefined, signal: NodeJS.Signals): void {
         if (!pid || process.platform === "win32") return;
         try {
             process.kill(-pid, signal);

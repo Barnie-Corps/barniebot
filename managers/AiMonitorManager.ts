@@ -13,6 +13,8 @@ import ai from "../ai";
 
 const LOG_LABEL_CACHE_PREFIX = "barniebot:local:aimonitor:log-labels:";
 
+const MAX_QUEUED_EVENTS_PER_GUILD = 200;
+
 export default class AiMonitorManager {
     private rateLimits = new Map<string, { windowStart: number; count: number }>();
     private joinBurst = new Map<string, { windowStart: number; count: number }>();
@@ -287,6 +289,10 @@ export default class AiMonitorManager {
     private async enqueueEvent(event: Omit<QueuedMonitorEvent, "resolve" | "enqueuedAt">): Promise<void> {
         return await new Promise(resolve => {
             const queue = this.queuedEvents.get(event.guild.id) ?? [];
+            while (queue.length >= MAX_QUEUED_EVENTS_PER_GUILD) {
+                const dropped = queue.shift();
+                dropped?.resolve();
+            }
             queue.push({
                 ...event,
                 enqueuedAt: Date.now(),
@@ -833,7 +839,7 @@ export default class AiMonitorManager {
         try {
             const chat = NVIDIAModels.CreateChatSession({
                 tools: tools as any,
-                model: "nvidia/llama-3.3-nemotron-super-49b-v1",
+                model: "nvidia/nemotron-3-super-120b-a12b",
                 maxTokens: 1024,
                 temperature: 0.4,
                 topP: 0.8,
@@ -1744,6 +1750,18 @@ export default class AiMonitorManager {
         }
         const config = await this.getConfig(record.guild_id);
         const labelConfig = await this.getLogLabels(config?.monitor_language ?? "en");
+        const inGuildMember = interaction.member as GuildMember | null;
+        const hasModPermissions = Boolean(inGuildMember?.permissions?.has?.([PermissionFlagsBits.ModerateMembers, PermissionFlagsBits.ManageGuild]));
+        const hasWhitelistedRole = config !== null && this.isRoleWhitelisted(inGuildMember, config);
+        let isGlobalStaff = false;
+        try {
+            isGlobalStaff = await utils.isStaff(interaction.user.id);
+        } catch {
+        }
+        if (!hasModPermissions && !hasWhitelistedRole && !isGlobalStaff) {
+            await interaction.editReply({ content: "You don't have permission to act on this case." });
+            return true;
+        }
         if (event === "aimon_fp") {
             if (record.user_id) {
                 await this.bumpEntityStats(record.guild_id, this.makeEntityKey("user", record.user_id), "user", {

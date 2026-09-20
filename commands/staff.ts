@@ -61,11 +61,13 @@ export default {
                 }
             }
             case "info": {
+                if (!executorRank) return utils.safeInteractionRespond(interaction, "Staff access required to view staff info.");
                 const user = interaction.options.getUser("user", true);
                 const rank = await utils.getUserStaffRank(user.id);
                 return utils.safeInteractionRespond(interaction, rank ? `${user.username} rank: ${rank}` : `${user.username} has no rank.`);
             }
             case "list": {
+                if (!executorRank) return utils.safeInteractionRespond(interaction, "Staff access required to view the staff list.");
                 const rows = (await db.query("SELECT * FROM staff") as unknown as StaffMember[]);
                 if (!Array.isArray(rows) || rows.length === 0) return utils.safeInteractionRespond(interaction, "No staff registered.");
                 const byRank: Record<string, string[]> = {};
@@ -81,6 +83,7 @@ export default {
                 return utils.safeInteractionRespond(interaction, { embeds: [embed], content: null });
             }
             case "cases": {
+                if (!executorRank) return utils.safeInteractionRespond(interaction, "Staff access required to view moderation cases.");
                 const user = interaction.options.getUser("user", true);
                 const PAGE_SIZE = 10;
                 const reqPage = interaction.options.getInteger("page") ?? 1;
@@ -162,7 +165,7 @@ export default {
                                     .setStyle(ButtonStyle.Danger);
                                 const row = new ActionRowBuilder<ButtonBuilder>().addComponents(prev, next, close);
 
-                                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: null, components: [row] });
+                                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: null, components: [row], ephemeral: true });
             }
         }
     },

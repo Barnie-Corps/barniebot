@@ -22,6 +22,18 @@ export default {
             await utils.safeInteractionRespond(interaction, 'Member not found');
             return;
         }
+        const executorRank = await utils.getUserStaffRank(interaction.user.id);
+        const targetRank = await utils.getUserStaffRank(user.id);
+        if (targetRank) {
+            if (!executorRank) {
+                await utils.safeInteractionRespond(interaction, "You cannot kick a staff member.");
+                return;
+            }
+            if (utils.getStaffRankIndex(targetRank) >= utils.getStaffRankIndex(executorRank)) {
+                await utils.safeInteractionRespond(interaction, "You cannot kick someone of equal or higher staff rank.");
+                return;
+            }
+        }
         try {
             await member.kick();
             await utils.safeInteractionRespond(interaction, ':white_check_mark:');

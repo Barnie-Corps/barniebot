@@ -1,6 +1,6 @@
 import EventEmitter from "events";
 import utils from "../utils";
-import type { NIMChatSession, NIMToolCall } from "../types/nvidia";
+import type { NIMChatResult, NIMChatSession, NIMToolCall } from "../types/nvidia";
 import Log from "../Log";
 import AIFunctions from "../AIFunctions";
 import { Message, ActionRowBuilder, ButtonBuilder } from "discord.js";
@@ -18,13 +18,16 @@ class AiManager extends EventEmitter {
     private voiceChats: Map<string, NIMChatSession> = new Map();
     private localFunctionHandlers: Map<string, Record<string, (args: any, message: Message) => Promise<any>>> = new Map();
     private bootstrappedChats: Set<string> = new Set();
+    private chatLastUsed: Map<string, number> = new Map();
+    private sessionIdleTimeoutMs: number;
     private ollamaClient: Ollama;
     private ollamaChatModel: string;
     private ollamaModerationModel: string;
     private ollamaVisionModel: string;
-    constructor(private ratelimit: number, private max: number, private timeout: number, private enableOllama: boolean, private ollamaSettings?: { host: string, port: number, baseUrl: string }) {
+    constructor(private ratelimit: number, private max: number, private timeout: number, private enableOllama: boolean, private ollamaSettings?: { host: string, port: number, baseUrl: string }, sessionIdleTimeoutMs?: number) {
         super();
         Log.info("AiManager initialized", { component: "AiManager" });
+        this.sessionIdleTimeoutMs = sessionIdleTimeoutMs ?? 2 * 60 * 60 * 1000;
         setInterval(() => this.clearTimeouts(), 1000);
         const host = ollamaSettings?.host || "localhost";
         const port = ollamaSettings?.port || 11434;
@@ -39,6 +42,15 @@ class AiManager extends EventEmitter {
             const filtered = timestamps.filter(ts => ts >= cutoff);
             if (filtered.length > 0) this.promptRateLimits.set(id, filtered);
             else this.promptRateLimits.delete(id);
+        });
+        const idleCutoff = Date.now() - this.sessionIdleTimeoutMs;
+        this.chatLastUsed.forEach((lastUsed, id) => {
+            if (lastUsed < idleCutoff) {
+                this.chats.delete(id);
+                this.voiceChats.delete(id);
+                this.bootstrappedChats.delete(id);
+                this.chatLastUsed.delete(id);
+            }
         });
     }
     public setLocalFunctionHandlers(id: string, handlers: Record<string, (args: any, message: Message) => Promise<any>>): void {
@@ -74,6 +86,48 @@ class AiManager extends EventEmitter {
             chat.addSystemMessage?.("You did not return a valid response. Always return a user-facing message or a tool call.");
         }
         return response;
+    }
+    public async getResponseStream(id: string, text: string, onChunk?: (delta: string) => void, signal?: AbortSignal): Promise<any> {
+        if (this.isPromptRateLimited(id)) return "You are sending too many messages, please wait a few seconds before sending another message.";
+        const chat = await this.getChat(id, text);
+        await this.ensureToolBootstrap(id, chat);
+        try {
+            const result = await chat.sendMessageStream!(text, onChunk, signal);
+            const response = this.buildResponseResult(result);
+            const hasToolCalls = Array.isArray(response?.toolCalls) ? response.toolCalls.length > 0 : Boolean(response?.call);
+            const hasText = typeof response?.text === "string" && response.text.trim().length > 0;
+            if (!hasText && !hasToolCalls) {
+                chat.addSystemMessage?.("You did not return a valid response. Always return a user-facing message or a tool call.");
+            }
+            return response;
+        } catch (error: any) {
+            console.error("Error getting AI stream response:", error);
+            if (signal?.aborted) throw error;
+            try {
+                const result = await chat.sendMessage(text, signal);
+                return this.buildResponseResult(result);
+            } catch (error2: any) {
+                console.error("Error getting AI fallback response:", error2);
+                return { text: "Error: Could not get a response from the AI service. Please try again later.", call: null, toolCalls: [] };
+            }
+        }
+    }
+    private buildResponseResult(result: NIMChatResult): any {
+        const response = result.response;
+        const text = response.text();
+        const toolParse = utils.parseToolCalls(text);
+        const structuredCalls = response.functionCalls() ?? [];
+        const callMap = new Map<string, { name: string; args: any }>();
+        for (const call of structuredCalls) {
+            callMap.set(`${call.name}:${JSON.stringify(call.args ?? {})}`, call);
+        }
+        for (const call of toolParse.toolCalls) {
+            const key = `${call.name}:${JSON.stringify(call.args ?? {})}`;
+            if (!callMap.has(key)) callMap.set(key, call);
+        }
+        const mergedCalls = Array.from(callMap.values());
+        const cleanedText = toolParse.cleanedText || text;
+        return { text: cleanedText, call: mergedCalls[0] ?? null, toolCalls: mergedCalls };
     }
     public async getVoiceResponse(id: string, text: string): Promise<any> {
         if (this.isPromptRateLimited(id)) return { text: "You are sending too many messages, please wait a few seconds before sending another message.", call: null };
@@ -400,6 +454,7 @@ class AiManager extends EventEmitter {
         }
     }
     private async getChat(id: string, text: string): Promise<NIMChatSession> {
+        this.chatLastUsed.set(id, Date.now());
         let chat = this.chats.get(id);
         if (!chat) {
             chat = NVIDIAModels.CreateChatSession({
@@ -407,13 +462,14 @@ class AiManager extends EventEmitter {
                 maxTokens: 800,
                 temperature: 0.7,
                 topP: 0.8,
-                systemInstruction: "Before responding to any user message at the start of the conversation, call the tools get_user_data, get_memory_graph, and fetch_ai_rules in that order. Use get_memory_graph instead of get_memories for enhanced context with memory types (personal, preferences, relationships, facts). When you learn important information about the user, use add_memory_to_graph with appropriate memoryType and subject to build a rich knowledge graph. For support or policy questions, call search_knowledge first and cite source titles. Do not include <think> tags in responses. Never emit tool call markup like <|tool_call_begin|> in text; only use the tool calling interface. If a tool call fails, respond without tool markup."
+                systemInstruction: "You are BarnieBot, a Discord moderation and utility bot. User data, memory graph, and AI rules are provided in your context automatically. Use get_memory_graph instead of get_memories for enhanced context with memory types (personal, preferences, relationships, facts). When you learn important information about the user, use add_memory_to_graph with appropriate memoryType and subject to build a rich knowledge graph. For support or policy questions, call search_knowledge first and cite source titles. Do not include <think> tags in responses. Never emit tool call markup like <|tool_call_begin|> in text; only use the tool calling interface. If a tool call fails, respond without tool markup. Never call tools for casual messages, greetings, small talk, or simple questions; only call a tool when the user explicitly asks for an action or information that requires it."
             });
             this.chats.set(id, chat);
         }
         return this.chats.get(id) as NIMChatSession;
     }
     private async getVoiceChat(id: string): Promise<NIMChatSession> {
+        this.chatLastUsed.set(id, Date.now());
         let chat = this.voiceChats.get(id);
         if (!chat) {
             chat = NVIDIAModels.CreateChatSession({
@@ -421,7 +477,7 @@ class AiManager extends EventEmitter {
                 maxTokens: 256,
                 temperature: 0.7,
                 topP: 0.8,
-                systemInstruction: "You are the assistant's voice mode. Respond concisely (ideally 1–2 short sentences or tight bullets). Use the user's language. Avoid long explanations, code blocks, and heavy markdown unless explicitly requested. Before responding to any user message, call the tools get_user_data, get_memory_graph, and fetch_ai_rules in that order. Use get_memory_graph for enhanced memory with types (personal, preferences, relationships, facts) instead of get_memories. For support or policy questions, call search_knowledge first. Do not include <think> tags in responses. Never emit tool call markup like <|tool_call_begin|> in text; only use the tool calling interface. If a tool call fails, respond without tool markup."
+                systemInstruction: "You are the assistant's voice mode. Respond concisely (ideally 1–2 short sentences or tight bullets). Use the user's language. Avoid long explanations, code blocks, and heavy markdown unless explicitly requested. User data, memory graph, and AI rules are provided in your context automatically. Use get_memory_graph for enhanced memory with types (personal, preferences, relationships, facts) instead of get_memories. For support or policy questions, call search_knowledge first. Do not include <think> tags in responses. Never emit tool call markup like <|tool_call_begin|> in text; only use the tool calling interface. If a tool call fails, respond without tool markup. Never call tools for casual messages, greetings, small talk, or simple questions; only call a tool when the user explicitly asks for an action or information that requires it."
             });
             this.voiceChats.set(id, chat);
         }
@@ -431,31 +487,36 @@ class AiManager extends EventEmitter {
         this.chats.delete(id);
         this.voiceChats.delete(id);
         this.bootstrappedChats.delete(id);
+        this.chatLastUsed.delete(id);
     }
     private async ensureToolBootstrap(id: string, chat: NIMChatSession): Promise<void> {
         if (this.bootstrappedChats.has(id)) return;
         this.bootstrappedChats.add(id);
-        const toolResults: Array<{ name: string; result: any; args?: any }> = [];
-        try {
-            const userData = await utils.AIFunctions.get_user_data(id);
-            toolResults.push({ name: "get_user_data", result: userData, args: {} });
-        } catch (error: any) {
-            toolResults.push({ name: "get_user_data", result: { error: error?.message || String(error) }, args: {} });
-        }
-        try {
-            const memoryGraph = await utils.AIFunctions.get_memory_graph({ userId: id, limit: 50 });
-            toolResults.push({ name: "get_memory_graph", result: memoryGraph, args: { userId: id, limit: 50 } });
-        } catch (error: any) {
-            toolResults.push({ name: "get_memory_graph", result: { error: error?.message || String(error) }, args: { userId: id } });
-        }
-        try {
-            const rules = await utils.AIFunctions.fetch_ai_rules();
-            toolResults.push({ name: "fetch_ai_rules", result: rules, args: {} });
-        } catch (error: any) {
-            toolResults.push({ name: "fetch_ai_rules", result: { error: error?.message || String(error) }, args: {} });
-        }
+        const [userData, memoryGraph, rules] = await Promise.all([
+            (async () => {
+                try {
+                    return { name: "get_user_data", result: await utils.AIFunctions.get_user_data(id), args: {} };
+                } catch (error: any) {
+                    return { name: "get_user_data", result: { error: error?.message || String(error) }, args: {} };
+                }
+            })(),
+            (async () => {
+                try {
+                    return { name: "get_memory_graph", result: await utils.AIFunctions.get_memory_graph({ userId: id, limit: 50 }), args: { userId: id, limit: 50 } };
+                } catch (error: any) {
+                    return { name: "get_memory_graph", result: { error: error?.message || String(error) }, args: { userId: id } };
+                }
+            })(),
+            (async () => {
+                try {
+                    return { name: "fetch_ai_rules", result: await utils.AIFunctions.fetch_ai_rules(), args: {} };
+                } catch (error: any) {
+                    return { name: "fetch_ai_rules", result: { error: error?.message || String(error) }, args: {} };
+                }
+            })()
+        ]);
         if (typeof chat.primeTools === "function") {
-            chat.primeTools(toolResults);
+            chat.primeTools([userData, memoryGraph, rules]);
         }
     }
     public get OllamaEnabled(): boolean {

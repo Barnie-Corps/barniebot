@@ -64,15 +64,59 @@ export default {
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         const session = await getSession(interaction.user.id);
         if (!session) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ You need to log in first! Use `/login` to access your account." });
+            let text = "❌ You need to log in first! Use `/login` to access your account.";
+            if (lang !== "en") text = (await utils.translate(text, "en", lang).catch(() => ({ text }))).text;
+            return utils.safeInteractionRespond(interaction, { content: text });
         }
 
         const character = await getCharacter(session.account_id);
         if (!character) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ You need to create a character first! Use `/rpg create` to begin your adventure." });
+            let text = "❌ You need to create a character first! Use `/rpg create` to begin your adventure.";
+            if (lang !== "en") text = (await utils.translate(text, "en", lang).catch(() => ({ text }))).text;
+            return utils.safeInteractionRespond(interaction, { content: text });
         }
 
         const sub = interaction.options.getSubcommand();
+
+        let texts = {
+            alreadyInGuild: "❌ You're already in a guild! Leave your current guild first.",
+            defaultDescription: "A new guild",
+            needGoldToCreate: "❌ You need 5000 gold to create a guild!",
+            nameTaken: "❌ A guild with this name already exists!",
+            guildCreatedTitle: "{emblem} Guild Created!",
+            guildCreatedDesc: "**{name}** has been established!",
+            founderField: "Founder",
+            levelField: "Level",
+            membersField: "Members",
+            descriptionField: "Description",
+            footerInvite: "Invite members with /guild invite",
+            guildNotFoundLong: "❌ Guild not found or you're not in a guild!",
+            noDescription: "No description.",
+            founderName: "👑 Founder",
+            levelName: "📊 Level",
+            membersName: "👥 Members",
+            guildGoldName: "💰 Guild Gold",
+            experienceName: "⭐ Experience",
+            foundedName: "📅 Founded",
+            guildNotFound: "❌ Guild not found!",
+            guildFull: "❌ This guild is full!",
+            joinedGuild: "✅ You've joined **{emblem} {name}**! Welcome aboard!",
+            notInGuild: "❌ You're not in a guild!",
+            leaderCannotLeave: "❌ Guild leaders cannot leave! Transfer leadership or disband the guild first.",
+            leftGuild: "✅ You've left **{name}**.",
+            notEnoughGold: "❌ You don't have enough gold!",
+            donated: "✅ You donated **{amount} gold** to **{emblem} {name}**!\n+{amount} contribution points",
+            membersTitle: "{emblem} {name} - Members",
+            membersTotal: "Total: {count}/{capacity}",
+            memberValue: "Level {level} {cls} | Contribution: {points}",
+            noGuilds: "📜 No guilds have been created yet! Be the first with `/guild create`",
+            guildListTitle: "🏰 Guild List",
+            guildListDesc: "Top guilds in the realm",
+            guildListItem: "*{desc}*\n👥 {count}/{capacity} | 💰 {gold}"
+        };
+        if (lang !== "en") {
+            texts = await utils.autoTranslate(texts, "en", lang).catch(() => texts);
+        }
 
         if (sub === "create") {
             const membershipCheck = (await db.query(
@@ -81,20 +125,20 @@ export default {
             ) as unknown as RPGGuildMember[]);
             
             if (membershipCheck[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ You're already in a guild! Leave your current guild first." });
+                return utils.safeInteractionRespond(interaction, { content: texts.alreadyInGuild });
             }
 
             const name = interaction.options.getString("name", true);
-            const description = interaction.options.getString("description") || "A new guild";
+            const description = interaction.options.getString("description") || texts.defaultDescription;
             const emblem = interaction.options.getString("emblem") || "🛡️";
 
             if (character.gold < 5000) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ You need 5000 gold to create a guild!" });
+                return utils.safeInteractionRespond(interaction, { content: texts.needGoldToCreate });
             }
 
             const existingGuild = (await db.query("SELECT * FROM rpg_guilds WHERE name = ?", [name]) as unknown as RPGGuild[]);
             if (existingGuild[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ A guild with this name already exists!" });
+                return utils.safeInteractionRespond(interaction, { content: texts.nameTaken });
             }
 
             const result = (await db.query("INSERT INTO rpg_guilds SET ?", [{
@@ -121,15 +165,15 @@ export default {
 
             const embed = new EmbedBuilder()
                 .setColor("#9B59B6")
-                .setTitle(`${emblem} Guild Created!`)
-                .setDescription(`**${name}** has been established!`)
+                .setTitle(texts.guildCreatedTitle.replace("{emblem}", emblem))
+                .setDescription(texts.guildCreatedDesc.replace("{name}", name))
                 .addFields(
-                    { name: "Founder", value: character.name, inline: true },
-                    { name: "Level", value: "1", inline: true },
-                    { name: "Members", value: "1/20", inline: true },
-                    { name: "Description", value: description, inline: false }
+                    { name: texts.founderField, value: character.name, inline: true },
+                    { name: texts.levelField, value: "1", inline: true },
+                    { name: texts.membersField, value: "1/20", inline: true },
+                    { name: texts.descriptionField, value: description, inline: false }
                 )
-                .setFooter({ text: "Invite members with /guild invite" })
+                .setFooter({ text: texts.footerInvite })
                 .setTimestamp();
 
             return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
@@ -151,7 +195,7 @@ export default {
             }
 
             if (!guild) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ Guild not found or you're not in a guild!" });
+                return utils.safeInteractionRespond(interaction, { content: texts.guildNotFoundLong });
             }
 
             const members = (await db.query(
@@ -164,14 +208,14 @@ export default {
             const embed = new EmbedBuilder()
                 .setColor("#9B59B6")
                 .setTitle(`${guild.emblem_icon} ${guild.name}`)
-                .setDescription(guild.description ?? "No description.")
+                .setDescription(guild.description ?? texts.noDescription)
                 .addFields(
-                    { name: "👑 Founder", value: founder[0]?.name || "Unknown", inline: true },
-                    { name: "📊 Level", value: guild.level.toString(), inline: true },
-                    { name: "👥 Members", value: `${members[0]?.count ?? 0}/${guild.member_capacity ?? 0}`, inline: true },
-                    { name: "💰 Guild Gold", value: guild.gold.toLocaleString(), inline: true },
-                    { name: "⭐ Experience", value: (guild.exp ?? guild.experience ?? 0).toLocaleString(), inline: true },
-                    { name: "📅 Founded", value: `<t:${Math.floor(guild.created_at / 1000)}:R>`, inline: true }
+                    { name: texts.founderName, value: founder[0]?.name || "Unknown", inline: true },
+                    { name: texts.levelName, value: guild.level.toString(), inline: true },
+                    { name: texts.membersName, value: `${members[0]?.count ?? 0}/${guild.member_capacity ?? 0}`, inline: true },
+                    { name: texts.guildGoldName, value: guild.gold.toLocaleString(), inline: true },
+                    { name: texts.experienceName, value: (guild.exp ?? guild.experience ?? 0).toLocaleString(), inline: true },
+                    { name: texts.foundedName, value: `<t:${Math.floor(guild.created_at / 1000)}:R>`, inline: true }
                 )
                 .setTimestamp();
 
@@ -185,14 +229,14 @@ export default {
             ) as unknown as RPGGuildMember[]);
             
             if (membershipCheck[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ You're already in a guild! Leave your current guild first." });
+                return utils.safeInteractionRespond(interaction, { content: texts.alreadyInGuild });
             }
 
             const guildName = interaction.options.getString("name", true);
             const guild = (await db.query("SELECT * FROM rpg_guilds WHERE name = ?", [guildName]) as unknown as RPGGuild[]);
 
             if (!guild[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ Guild not found!" });
+                return utils.safeInteractionRespond(interaction, { content: texts.guildNotFound });
             }
 
             const memberCount = (await db.query(
@@ -201,7 +245,7 @@ export default {
             ) as unknown as GuildCountRow[]);
 
             if ((memberCount[0]?.count ?? 0) >= (guild[0].member_capacity ?? 0)) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ This guild is full!" });
+                return utils.safeInteractionRespond(interaction, { content: texts.guildFull });
             }
 
             await db.query("INSERT INTO rpg_guild_members SET ?", [{
@@ -212,7 +256,7 @@ export default {
                 contribution_points: 0
             }]);
 
-            return utils.safeInteractionRespond(interaction, { content: `✅ You've joined **${guild[0].emblem_icon} ${guild[0].name}**! Welcome aboard!` });
+            return utils.safeInteractionRespond(interaction, { content: texts.joinedGuild.replace("{emblem}", guild[0].emblem_icon ?? "").replace("{name}", guild[0].name) });
         }
 
         if (sub === "leave") {
@@ -222,23 +266,23 @@ export default {
             ) as unknown as (RPGGuildMember & { name: string })[]);
             
             if (!membership[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ You're not in a guild!" });
+                return utils.safeInteractionRespond(interaction, { content: texts.notInGuild });
             }
 
             if (membership[0].role === "leader") {
-                return utils.safeInteractionRespond(interaction, { content: "❌ Guild leaders cannot leave! Transfer leadership or disband the guild first." });
+                return utils.safeInteractionRespond(interaction, { content: texts.leaderCannotLeave });
             }
 
             await db.query("DELETE FROM rpg_guild_members WHERE character_id = ?", [character.id]);
             
-            return utils.safeInteractionRespond(interaction, { content: `✅ You've left **${membership[0].name}**.` });
+            return utils.safeInteractionRespond(interaction, { content: texts.leftGuild.replace("{name}", membership[0].name) });
         }
 
         if (sub === "donate") {
             const amount = interaction.options.getInteger("amount", true);
 
             if (character.gold < amount) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ You don't have enough gold!" });
+                return utils.safeInteractionRespond(interaction, { content: texts.notEnoughGold });
             }
 
             const membership = (await db.query(
@@ -247,16 +291,17 @@ export default {
             ) as unknown as (RPGGuildMember & { name: string; emblem_icon: string })[]);
 
             if (!membership[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ You're not in a guild!" });
-            }            await db.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ?", [amount, character.id]);
+                return utils.safeInteractionRespond(interaction, { content: texts.notInGuild });
+            }
+            await db.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ?", [amount, character.id]);
             await db.query("UPDATE rpg_guilds SET gold = gold + ? WHERE id = ?", [amount, membership[0].guild_id]);
             await db.query(
                 "UPDATE rpg_guild_members SET contribution_points = contribution_points + ? WHERE character_id = ? AND guild_id = ?",
                 [amount, character.id, membership[0].guild_id]
             );
 
-            return utils.safeInteractionRespond(interaction, { 
-                content: `✅ You donated **${amount} gold** to **${membership[0].emblem_icon} ${membership[0].name}**!\n+${amount} contribution points` 
+            return utils.safeInteractionRespond(interaction, {
+                content: texts.donated.replace("{amount}", String(amount)).replace("{emblem}", membership[0].emblem_icon).replace("{name}", membership[0].name)
             });
         }
 
@@ -267,7 +312,7 @@ export default {
             ) as unknown as RPGGuild[]);
             
             if (!membership[0]) {
-                return utils.safeInteractionRespond(interaction, { content: "❌ You're not in a guild!" });
+                return utils.safeInteractionRespond(interaction, { content: texts.notInGuild });
             }
 
             const members = (await db.query(
@@ -281,15 +326,15 @@ export default {
 
             const embed = new EmbedBuilder()
                 .setColor("#9B59B6")
-                .setTitle(`${membership[0].emblem_icon} ${membership[0].name} - Members`)
-                .setDescription(`Total: ${members.length}/${membership[0].member_capacity}`)
+                .setTitle(texts.membersTitle.replace("{emblem}", membership[0].emblem_icon ?? "").replace("{name}", membership[0].name))
+                .setDescription(texts.membersTotal.replace("{count}", String(members.length)).replace("{capacity}", String(membership[0].member_capacity)))
                 .setTimestamp();
 
             for (const member of members.slice(0, 25)) {
                 const roleIcon = member.role === "leader" ? "👑" : member.role === "officer" ? "⭐" : "👤";
                 embed.addFields({
                     name: `${roleIcon} ${member.name}`,
-                    value: `Level ${member.level} ${member.class} | Contribution: ${member.contribution_points}`,
+                    value: texts.memberValue.replace("{level}", String(member.level)).replace("{cls}", member.class).replace("{points}", String(member.contribution_points)),
                     inline: true
                 });
             }
@@ -303,19 +348,23 @@ export default {
             ) as unknown as GuildWithCounts[]);
 
             if (guilds.length === 0) {
-                return utils.safeInteractionRespond(interaction, { content: "📜 No guilds have been created yet! Be the first with `/guild create`" });
+                return utils.safeInteractionRespond(interaction, { content: texts.noGuilds });
             }
 
             const embed = new EmbedBuilder()
                 .setColor("#9B59B6")
-                .setTitle("🏰 Guild List")
-                .setDescription("Top guilds in the realm")
+                .setTitle(texts.guildListTitle)
+                .setDescription(texts.guildListDesc)
                 .setTimestamp();
 
             for (const guild of guilds) {
                 embed.addFields({
                     name: `${guild.emblem_icon} ${guild.name} [Lvl ${guild.level}]`,
-                    value: `*${guild.description}*\n👥 ${guild.member_count}/${guild.member_capacity} | 💰 ${guild.gold.toLocaleString()}`,
+                    value: texts.guildListItem
+                        .replace("{desc}", guild.description ?? "")
+                        .replace("{count}", String(guild.member_count ?? 0))
+                        .replace("{capacity}", String(guild.member_capacity ?? 0))
+                        .replace("{gold}", guild.gold.toLocaleString()),
                     inline: false
                 });
             }

@@ -102,11 +102,21 @@ export default {
             const gold = Math.floor(baseGold * streakMultiplier);
             const exp = Math.floor(baseExp * streakMultiplier);
             
-            await db.query(
-                "UPDATE rpg_daily_rewards SET last_claim = ?, streak = ?, total_claims = total_claims + 1 WHERE character_id = ?",
-                [now, newStreak, character.id]
+            const claimThreshold = now - oneDay;
+            const claimResult: any = await db.query(
+                "UPDATE rpg_daily_rewards SET last_claim = ?, streak = ?, total_claims = total_claims + 1 WHERE character_id = ? AND last_claim <= ?",
+                [now, newStreak, character.id, claimThreshold]
             );
-            
+            if (Number(claimResult?.affectedRows ?? 0) === 0) {
+                const timeSinceClaim = now - dailyData[0].last_claim;
+                const timeLeft = oneDay - timeSinceClaim;
+                const hoursLeft = Math.floor(timeLeft / 3600000);
+                const minutesLeft = Math.floor((timeLeft % 3600000) / 60000);
+                return utils.safeInteractionRespond(interaction, {
+                    content: "⏰ " + texts.errors.already_claimed + hoursLeft + texts.errors.hours + " " + minutesLeft + texts.errors.minutes + texts.errors.come_back
+                });
+            }
+
             await db.query(
                 "UPDATE rpg_characters SET gold = gold + ?, experience = experience + ? WHERE id = ?",
                 [gold, exp, character.id]

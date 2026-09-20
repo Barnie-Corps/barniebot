@@ -69,6 +69,22 @@ process.on("uncaughtException", (err: any) => {
 process.on("unhandledRejection", (err: any) => {
     Log.error("Unhandled rejection", err as any);
 });
+
+process.stdout.on("error", () => {});
+process.stderr.on("error", () => {});
+process.stdin.on("error", () => {});
+
+const handleShutdownSignal = (signal: string): void => {
+    Log.info(`Received ${signal}, shutting down gracefully`, { component: "Shutdown" });
+    try {
+        client.destroy();
+    } catch (error) {
+        Log.warn("Error during client destroy on shutdown", { component: "Shutdown", error: String(error) });
+    }
+    setTimeout(() => process.exit(0), 1000);
+};
+process.on("SIGTERM", () => handleShutdownSignal("SIGTERM"));
+process.on("SIGINT", () => handleShutdownSignal("SIGINT"));
 const client = new Client({
     intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.GuildMessageTyping, GatewayIntentBits.GuildEmojisAndStickers, GatewayIntentBits.DirectMessages, GatewayIntentBits.DirectMessageTyping, GatewayIntentBits.DirectMessageReactions, GatewayIntentBits.GuildVoiceStates],
     partials: [Partials.Channel, Partials.GuildMember, Partials.Message, Partials.User]
@@ -91,6 +107,10 @@ const aiMonitor = new AiMonitorManager(client, true, "phi3:latest");
         totalCommands: commandsDir.length
     });
 })();
+
+client.on("error", (error: Error) => {
+    Log.error("Discord client error", error);
+});
 
 client.on("clientReady", async (): Promise<any> => {
     (global as any).client = client;
@@ -1985,7 +2005,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     const confirmRow = new ActionRowBuilder<ButtonBuilder>()
                         .addComponents(
                             new ButtonBuilder()
-                                .setCustomId(`confirm_delete-${ticketId}`)
+                                .setCustomId(`confirm_delete-${interaction.user.id}-${ticketId}`)
                                 .setLabel("Confirm Delete")
                                 .setStyle(ButtonStyle.Danger)
                                 .setEmoji("✅"),
@@ -2007,7 +2027,17 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                 break;
             }
             case "confirm_delete": {
-                const [ticketIdStr] = args;
+                const [clickerId, ticketIdStr] = args;
+                if (clickerId !== interaction.user.id) {
+                    if (interaction.isRepliable()) await interaction.update({ content: "Only the moderator who requested deletion can confirm it.", embeds: [], components: [] });
+                    break;
+                }
+                const confirmStaffRank = await utils.getUserStaffRank(interaction.user.id);
+                if (!confirmStaffRank) {
+                    if (interaction.isRepliable()) await interaction.update({ content: "Staff permission is required to delete ticket channels.", embeds: [], components: [] });
+                    break;
+                }
+                const ticketId = parseInt(ticketIdStr);
 
                 try {
                     if (interaction.isRepliable()) {

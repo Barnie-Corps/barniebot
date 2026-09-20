@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
-import db from "../mysql/database";
+import db, { withTransaction } from "../mysql/database";
 import client from "..";
 import utils from "../utils";
 import { RPGSession, RPGCharacter } from "../types/interfaces";
@@ -177,6 +177,10 @@ export default {
                     return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.must_offer_something);
                 }
 
+                if (item1Id && item2Id && item1Id === item2Id) {
+                    return utils.safeInteractionRespond(interaction, "❌ " + "You cannot offer the same item twice!");
+                }
+
                 if (gold > character.gold) {
                     return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.only_have + character.gold + texts.errors.gold);
                 }
@@ -247,7 +251,7 @@ export default {
                     offeredItems.push({ id: item2Id, name: item[0].name, quantity: item2Qty });
                 }
 
-                await db.query("INSERT INTO rpg_trades SET ?", [{
+                const insertResult: any = await db.query("INSERT INTO rpg_trades SET ?", [{
                     initiator_id: character.id,
                     receiver_id: targetCharacter.id,
                     initiator_gold: gold,
@@ -258,7 +262,10 @@ export default {
                     created_at: Date.now()
                 }]);
 
-                const tradeId: any = await db.query("SELECT LAST_INSERT_ID() as id");
+                const tradeId = Number(insertResult?.insertId ?? 0);
+                if (!tradeId) {
+                    return utils.safeInteractionRespond(interaction, "❌ Failed to create trade.");
+                }
 
                 let offerText = "";
                 if (gold > 0) offerText += `💰 ${gold.toLocaleString()} Gold\n`;
@@ -272,7 +279,7 @@ export default {
                     .setDescription(`You offered a trade to **${targetCharacter.name}**!`)
                     .addFields(
                         { name: "Your Offer", value: offerText || "Nothing", inline: false },
-                        { name: "Trade ID", value: `\`${tradeId[0].id}\``, inline: true }
+                        { name: "Trade ID", value: `\`${tradeId}\``, inline: true }
                     )
                     .setFooter({ text: "Waiting for the other player to respond..." })
                     .setTimestamp();
@@ -296,7 +303,7 @@ export default {
                         .setDescription(tradeTexts.description)
                         .addFields(
                             { name: tradeTexts.theyOffer, value: offerText || tradeTexts.nothing, inline: false },
-                            { name: tradeTexts.tradeId, value: `\`${tradeId[0].id}\``, inline: true }
+                            { name: tradeTexts.tradeId, value: `\`${tradeId}\``, inline: true }
                         )
                         .setFooter({ text: tradeTexts.footer });
 
@@ -380,138 +387,205 @@ export default {
 
             case "accept": {
                 const tradeId = interaction.options.getInteger("trade_id", true);
-
-                const trade: any = await db.query(
-                    "SELECT * FROM rpg_trades WHERE id = ? AND receiver_id = ? AND status = 'pending'",
-                    [tradeId, character.id]
-                );
-
-                if (!trade[0]) {
-                    return utils.safeInteractionRespond(interaction, "❌ Trade not found or already completed!");
-                }
-
-                const initiator: any = await db.query("SELECT * FROM rpg_characters WHERE id = ?", [trade[0].initiator_id]);
-
                 const gold = interaction.options.getInteger("gold") || 0;
                 const item1Id = interaction.options.getInteger("item1_id");
                 const item1Qty = interaction.options.getInteger("item1_quantity") || 1;
                 const item2Id = interaction.options.getInteger("item2_id");
                 const item2Qty = interaction.options.getInteger("item2_quantity") || 1;
 
-                if (gold > character.gold) {
-                    return utils.safeInteractionRespond(interaction, `❌ You only have ${character.gold} gold!`);
+                if (item1Id && item2Id && item1Id === item2Id) {
+                    return utils.safeInteractionRespond(interaction, "❌ You cannot offer the same item twice!");
                 }
 
-                const returnItems: any[] = [];
-                
-                if (item1Id) {
-                    const item: any = await db.query(
-                        `SELECT inv.*, i.name, i.tradeable FROM rpg_inventory inv 
-                        JOIN rpg_items i ON inv.item_id = i.id 
-                        WHERE inv.id = ? AND inv.character_id = ?`,
-                        [item1Id, character.id]
-                    );
-                    
-                    if (!item[0] || !item[0].tradeable || item[0].bound || item[0].quantity < item1Qty) {
+                let initiatorName = "";
+                try {
+                    await withTransaction(async (conn) => {
+                        const tradeRows = await conn.query(
+                            "SELECT * FROM rpg_trades WHERE id = ? AND receiver_id = ? AND status = 'pending' LIMIT 1 FOR UPDATE",
+                            [tradeId, character.id]
+                        ) as unknown as any[];
+                        const txnTrade = tradeRows[0];
+                        if (!txnTrade) {
+                            throw new Error("#NOT_FOUND");
+                        }
+
+                        const initiatorRows = await conn.query(
+                            "SELECT * FROM rpg_characters WHERE id = ? FOR UPDATE",
+                            [txnTrade.initiator_id]
+                        ) as unknown as any[];
+                        const initiator = initiatorRows[0];
+                        if (!initiator) {
+                            throw new Error("#INITIATOR_GONE");
+                        }
+                        initiatorName = initiator.name;
+
+                        const BUYER_GOLD_ERR = "#NOT_ENOUGH_GOLD";
+                        if (gold < 0 || gold > character.gold) {
+                            throw new Error(BUYER_GOLD_ERR);
+                        }
+
+                        const returnItems: any[] = [];
+                        if (item1Id) {
+                            const item = await conn.query(
+                                `SELECT inv.*, i.name, i.tradeable FROM rpg_inventory inv 
+                                JOIN rpg_items i ON inv.item_id = i.id 
+                                WHERE inv.id = ? AND inv.character_id = ? LIMIT 1 FOR UPDATE`,
+                                [item1Id, character.id]
+                            ) as unknown as any[];
+                            if (!item[0] || !item[0].tradeable || item[0].bound || item[0].quantity < item1Qty) {
+                                throw new Error("#INVALID_ITEM");
+                            }
+                            returnItems.push({ id: item1Id, name: item[0].name, quantity: item1Qty, item_id: item[0].item_id });
+                        }
+
+                        if (item2Id) {
+                            const item = await conn.query(
+                                `SELECT inv.*, i.name, i.tradeable FROM rpg_inventory inv 
+                                JOIN rpg_items i ON inv.item_id = i.id 
+                                WHERE inv.id = ? AND inv.character_id = ? LIMIT 1 FOR UPDATE`,
+                                [item2Id, character.id]
+                            ) as unknown as any[];
+                            if (!item[0] || !item[0].tradeable || item[0].bound || item[0].quantity < item2Qty) {
+                                throw new Error("#INVALID_ITEM");
+                            }
+                            returnItems.push({ id: item2Id, name: item[0].name, quantity: item2Qty, item_id: item[0].item_id });
+                        }
+
+                        const initiatorItems = (() => {
+                            try {
+                                return JSON.parse(txnTrade.initiator_items) as any[];
+                            } catch {
+                                return [];
+                            }
+                        })();
+
+                        for (const item of initiatorItems) {
+                            const invItem = await conn.query(
+                                "SELECT * FROM rpg_inventory WHERE id = ? AND character_id = ? LIMIT 1 FOR UPDATE",
+                                [item.id, txnTrade.initiator_id]
+                            ) as unknown as any[];
+                            if (!invItem[0] || invItem[0].quantity < item.quantity) {
+                                throw new Error("#INITIATOR_ITEMS_GONE");
+                            }
+                        }
+
+                        if (initiator.gold < txnTrade.initiator_gold) {
+                            throw new Error("#INITIATOR_NO_GOLD");
+                        }
+
+                        for (const item of initiatorItems) {
+                            const invItem = await conn.query(
+                                "SELECT * FROM rpg_inventory WHERE id = ? LIMIT 1 FOR UPDATE",
+                                [item.id]
+                            ) as unknown as any[];
+                            if (!invItem[0]) {
+                                throw new Error("#INITIATOR_ITEMS_GONE");
+                            }
+                            const itemId = invItem[0].item_id;
+                            if (invItem[0].quantity <= item.quantity) {
+                                await conn.query("DELETE FROM rpg_inventory WHERE id = ?", [item.id]);
+                            } else {
+                                const decResult: any = await conn.query(
+                                    "UPDATE rpg_inventory SET quantity = quantity - ? WHERE id = ? AND quantity >= ?",
+                                    [item.quantity, item.id, item.quantity]
+                                );
+                                if (Number(decResult?.affectedRows ?? 0) === 0) {
+                                    throw new Error("#INITIATOR_ITEMS_GONE");
+                                }
+                            }
+
+                            const existingItem = await conn.query(
+                                "SELECT * FROM rpg_inventory WHERE character_id = ? AND item_id = ? LIMIT 1 FOR UPDATE",
+                                [character.id, itemId]
+                            ) as unknown as any[];
+
+                            if (existingItem[0]) {
+                                await conn.query("UPDATE rpg_inventory SET quantity = quantity + ? WHERE id = ?", [item.quantity, existingItem[0].id]);
+                            } else {
+                                await conn.query("INSERT INTO rpg_inventory SET ?", [{
+                                    character_id: character.id,
+                                    item_id: itemId,
+                                    quantity: item.quantity,
+                                    acquired_at: Date.now(),
+                                    bound: false
+                                }]);
+                            }
+                        }
+
+                        await conn.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ?", [txnTrade.initiator_gold, txnTrade.initiator_id]);
+                        await conn.query("UPDATE rpg_characters SET gold = gold + ? WHERE id = ?", [txnTrade.initiator_gold, character.id]);
+
+                        for (const item of returnItems) {
+                            const invItem = await conn.query(
+                                "SELECT * FROM rpg_inventory WHERE id = ? LIMIT 1 FOR UPDATE",
+                                [item.id]
+                            ) as unknown as any[];
+                            if (!invItem[0]) {
+                                throw new Error("#INVALID_ITEM");
+                            }
+                            if (invItem[0].quantity <= item.quantity) {
+                                await conn.query("DELETE FROM rpg_inventory WHERE id = ?", [item.id]);
+                            } else {
+                                const decResult: any = await conn.query(
+                                    "UPDATE rpg_inventory SET quantity = quantity - ? WHERE id = ? AND quantity >= ?",
+                                    [item.quantity, item.id, item.quantity]
+                                );
+                                if (Number(decResult?.affectedRows ?? 0) === 0) {
+                                    throw new Error("#INVALID_ITEM");
+                                }
+                            }
+
+                            const existingItem = await conn.query(
+                                "SELECT * FROM rpg_inventory WHERE character_id = ? AND item_id = ? LIMIT 1 FOR UPDATE",
+                                [initiator.id, item.item_id]
+                            ) as unknown as any[];
+
+                            if (existingItem[0]) {
+                                await conn.query("UPDATE rpg_inventory SET quantity = quantity + ? WHERE id = ?", [item.quantity, existingItem[0].id]);
+                            } else {
+                                await conn.query("INSERT INTO rpg_inventory SET ?", [{
+                                    character_id: initiator.id,
+                                    item_id: item.item_id,
+                                    quantity: item.quantity,
+                                    acquired_at: Date.now(),
+                                    bound: false
+                                }]);
+                            }
+                        }
+
+                        await conn.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ?", [gold, character.id]);
+                        await conn.query("UPDATE rpg_characters SET gold = gold + ? WHERE id = ?", [gold, txnTrade.initiator_id]);
+
+                        await conn.query("UPDATE rpg_trades SET status = 'completed', receiver_gold = ?, receiver_items = ?, completed_at = ? WHERE id = ?",
+                            [gold, JSON.stringify(returnItems), Date.now(), tradeId]);
+                    });
+                } catch (error: any) {
+                    if (error?.message === "#NOT_FOUND") {
+                        return utils.safeInteractionRespond(interaction, "❌ Trade not found or already completed!");
+                    }
+                    if (error?.message === "#INVALID_ITEM") {
                         return utils.safeInteractionRespond(interaction, "❌ Invalid item in your return offer!");
                     }
-                    
-                    returnItems.push({ id: item1Id, name: item[0].name, quantity: item1Qty, item_id: item[0].item_id });
-                }
-
-                if (item2Id) {
-                    const item: any = await db.query(
-                        `SELECT inv.*, i.name, i.tradeable FROM rpg_inventory inv 
-                        JOIN rpg_items i ON inv.item_id = i.id 
-                        WHERE inv.id = ? AND inv.character_id = ?`,
-                        [item2Id, character.id]
-                    );
-                    
-                    if (!item[0] || !item[0].tradeable || item[0].bound || item[0].quantity < item2Qty) {
-                        return utils.safeInteractionRespond(interaction, "❌ Invalid item in your return offer!");
+                    if (error?.message === "#NOT_ENOUGH_GOLD") {
+                        return utils.safeInteractionRespond(interaction, `❌ You only have ${character.gold} gold!`);
                     }
-                    
-                    returnItems.push({ id: item2Id, name: item[0].name, quantity: item2Qty, item_id: item[0].item_id });
-                }
-
-                const initiatorItems = JSON.parse(trade[0].initiator_items);
-                
-                for (const item of initiatorItems) {
-                    const invItem: any = await db.query("SELECT * FROM rpg_inventory WHERE id = ? AND character_id = ?", [item.id, initiator[0].id]);
-                    if (!invItem[0] || invItem[0].quantity < item.quantity) {
+                    if (error?.message === "#INITIATOR_ITEMS_GONE") {
                         return utils.safeInteractionRespond(interaction, "❌ Initiator no longer has the offered items!");
                     }
-                }
-
-                if (initiator[0].gold < trade[0].initiator_gold) {
-                    return utils.safeInteractionRespond(interaction, "❌ Initiator no longer has enough gold!");
-                }
-
-                for (const item of initiatorItems) {
-                    const invItem: any = await db.query("SELECT * FROM rpg_inventory WHERE id = ?", [item.id]);
-                    if (invItem[0].quantity <= item.quantity) {
-                        await db.query("DELETE FROM rpg_inventory WHERE id = ?", [item.id]);
-                    } else {
-                        await db.query("UPDATE rpg_inventory SET quantity = quantity - ? WHERE id = ?", [item.quantity, item.id]);
+                    if (error?.message === "#INITIATOR_NO_GOLD") {
+                        return utils.safeInteractionRespond(interaction, "❌ Initiator no longer has enough gold!");
                     }
-
-                    const existingItem: any = await db.query(
-                        "SELECT * FROM rpg_inventory WHERE character_id = ? AND item_id = (SELECT item_id FROM rpg_items WHERE name = ?)",
-                        [character.id, item.name]
-                    );
-
-                    if (existingItem[0]) {
-                        await db.query("UPDATE rpg_inventory SET quantity = quantity + ? WHERE id = ?", [item.quantity, existingItem[0].id]);
-                    } else {
-                        await db.query("INSERT INTO rpg_inventory SET ?", [{
-                            character_id: character.id,
-                            item_id: invItem[0].item_id,
-                            quantity: item.quantity,
-                            acquired_at: Date.now(),
-                            bound: false
-                        }]);
+                    if (error?.message === "#INITIATOR_GONE") {
+                        return utils.safeInteractionRespond(interaction, "❌ Initiator no longer has a character!");
                     }
+                    console.error("Trade accept failed:", error);
+                    return utils.safeInteractionRespond(interaction, "❌ An error occurred while completing the trade.");
                 }
-
-                await db.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ?", [trade[0].initiator_gold, initiator[0].id]);
-                await db.query("UPDATE rpg_characters SET gold = gold + ? WHERE id = ?", [trade[0].initiator_gold, character.id]);
-
-                for (const item of returnItems) {
-                    const invItem: any = await db.query("SELECT * FROM rpg_inventory WHERE id = ?", [item.id]);
-                    if (invItem[0].quantity <= item.quantity) {
-                        await db.query("DELETE FROM rpg_inventory WHERE id = ?", [item.id]);
-                    } else {
-                        await db.query("UPDATE rpg_inventory SET quantity = quantity - ? WHERE id = ?", [item.quantity, item.id]);
-                    }
-
-                    const existingItem: any = await db.query(
-                        "SELECT * FROM rpg_inventory WHERE character_id = ? AND item_id = ?",
-                        [initiator[0].id, item.item_id]
-                    );
-
-                    if (existingItem[0]) {
-                        await db.query("UPDATE rpg_inventory SET quantity = quantity + ? WHERE id = ?", [item.quantity, existingItem[0].id]);
-                    } else {
-                        await db.query("INSERT INTO rpg_inventory SET ?", [{
-                            character_id: initiator[0].id,
-                            item_id: item.item_id,
-                            quantity: item.quantity,
-                            acquired_at: Date.now(),
-                            bound: false
-                        }]);
-                    }
-                }
-
-                await db.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ?", [gold, character.id]);
-                await db.query("UPDATE rpg_characters SET gold = gold + ? WHERE id = ?", [gold, initiator[0].id]);
-
-                await db.query("UPDATE rpg_trades SET status = 'completed', receiver_gold = ?, receiver_items = ?, completed_at = ? WHERE id = ?", 
-                    [gold, JSON.stringify(returnItems), Date.now(), tradeId]);
 
                 const completeEmbed = new EmbedBuilder()
                     .setColor("#2ECC71")
                     .setTitle("✅ Trade Complete!")
-                    .setDescription(`Trade with **${initiator[0].name}** has been completed!`)
+                    .setDescription(`Trade with **${initiatorName}** has been completed!`)
                     .setTimestamp();
 
                 return utils.safeInteractionRespond(interaction, { embeds: [completeEmbed] });

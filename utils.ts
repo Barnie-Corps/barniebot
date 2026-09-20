@@ -1,5 +1,7 @@
 import * as crypto from "crypto";
 import * as bcrypt from "bcryptjs";
+import * as net from "net";
+import { promises as dns } from "dns";
 import Workers from "./Workers";
 import type { WorkerHandle } from "./types/worker";
 import StaffRanksManager from "./managers/StaffRanksManager";
@@ -45,6 +47,54 @@ const USER_LANGUAGE_CACHE_TTL = 600000;
 const USER_LANGUAGE_LOCAL_PREFIX = "barniebot:local:chat:lang:";
 const USER_LANGUAGE_GLOBAL_PREFIX = "barniebot:chat:lang:";
 const pendingUserLanguages = new Map<string, Promise<string>>();
+
+const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+const isPrivateIP = (ip: string): boolean => {
+  const version = net.isIP(ip);
+  if (version === 4) {
+    const parts = ip.split(".").map(Number);
+    if (parts.length !== 4) return true;
+    const [a, b] = parts;
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    return false;
+  }
+  if (version === 6) {
+    const lower = ip.toLowerCase();
+    if (lower === "::1" || lower === "::") return true;
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+    if (lower.startsWith("fe8") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) return true;
+    if (lower.startsWith("::ffff:127.") || lower.startsWith("::ffff:10.") || lower.startsWith("::ffff:172.") || lower.startsWith("::ffff:192.168.")) return true;
+    return false;
+  }
+  return false;
+};
+const assertPublicUrl = async (rawUrl: string, redirectUrl?: string): Promise<URL> => {
+  let parsed: URL;
+  try {
+    parsed = new URL(redirectUrl || rawUrl);
+  } catch {
+    throw new Error("Invalid URL");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("Only http(s) URLs are allowed");
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
+  if (net.isIP(hostname) !== 0) {
+    if (isPrivateIP(hostname)) throw new Error("Access to private network addresses is blocked");
+    return parsed;
+  }
+  try {
+    const addresses = await dns.lookup(hostname, { all: true });
+    if (!addresses.length) throw new Error("Could not resolve host");
+    if (addresses.some((entry) => isPrivateIP(entry.address))) throw new Error("Access to private network addresses is blocked");
+  } catch (error: any) {
+    if (error?.message?.includes("Access to private network addresses is blocked")) throw error;
+    throw new Error("Could not resolve host");
+  }
+  return parsed;
+};
 
 export const getUserLanguageCached = async (userId: string): Promise<string> => {
   if (!userId) return "en";
@@ -419,6 +469,22 @@ const decryptText = (encryptedData: string): string => {
   return decrypted;
 };
 
+const parseRelatedEntities = (value: string | null): any => {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+};
+
+const escapeHtml = (value: any): string => String(value ?? "")
+  .replace(/&/g, "&amp;")
+  .replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;")
+  .replace(/'/g, "&#39;");
+
 const resolveKnowledgePath = (source: KnowledgeSource): string => {
   return resolveProjectPath(source.path);
 };
@@ -673,8 +739,8 @@ const canAccessKnowledge = async (access: KnowledgeSource["access"], requesterId
   const rank = await utils.getUserStaffRank(requesterId);
   return Boolean(rank);
 };
-const isOwner = (userId: string | undefined | null): boolean | string => {
-  if (!userId) return "no valid userId provided";
+const isOwner = (userId: string | undefined | null): boolean => {
+  if (!userId) return false;
   return data.bot.owners.includes(userId);
 };
 const formatLogValue = (value: any): string => {
@@ -1012,7 +1078,7 @@ const utils: any = {
     retrieve_owners: (): string[] => {
       return data.bot.owners;
     },
-    isOwner: (userId: string): boolean | string => {
+    isOwner: (userId: string): boolean => {
       return isOwner(userId);
     },
     fetch_user: async (args: { userId: string }): Promise<{ error: string } | { user: DiscordUser }> => {
@@ -1081,8 +1147,9 @@ const utils: any = {
       await db.query("UPDATE discord_users SET ? WHERE id = ?", [args.data, args.userId]);
       return { success: true };
     },
-    execute_query: async (args: { query: string; }): Promise<any> => {
+    execute_query: async (args: { query: string; requesterId?: string; }): Promise<any> => {
       if (!args.query) return { error: "Missing query parameter" };
+      if (!isOwner(args.requesterId)) return { error: "Requester is not authorized to run database queries" };
       try {
         const result: any = await db.query(args.query);
         return { result };
@@ -2341,15 +2408,47 @@ const utils: any = {
       if (!args?.url || !args.path) return { error: "Missing parameters" };
       const userId = args.requesterId;
       await ensureWorkspaceExists(userId);
-      const response = await fetch(args.url);
+      try {
+        await assertPublicUrl(args.url);
+      } catch (error: any) {
+        return { error: error?.message || "URL validation failed" };
+      }
+      let response: Response;
+      try {
+        response = await fetch(args.url);
+      } catch (error: any) {
+        return { error: `Download failed: ${error?.message || String(error)}` };
+      }
       if (!response.ok) return { error: `Failed to download resource: ${response.status}` };
+      try {
+        await assertPublicUrl(args.url, response.url);
+      } catch (error: any) {
+        return { error: error?.message || "URL validation failed" };
+      }
       const filePath = resolveWorkspacePath(args.path, userId);
       const stats = await safeStat(filePath);
       if (stats && !args.overwrite) return { error: "File already exists" };
       await fs.mkdir(path.dirname(filePath), { recursive: true });
-      const arrayBuffer = await response.arrayBuffer();
-      await fs.writeFile(filePath, new Uint8Array(arrayBuffer));
-      return { success: true };
+      const body = response.body;
+      if (!body) return { error: "Download failed: empty response body" };
+      const reader = body.getReader();
+      const parts: Buffer[] = [];
+      let total = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          total += value.byteLength;
+          if (total > MAX_DOWNLOAD_BYTES) {
+            return { error: `Download exceeds ${Math.floor(MAX_DOWNLOAD_BYTES / 1024 / 1024)}MB limit` };
+          }
+          parts.push(Buffer.from(value));
+        }
+      } finally {
+        await reader.cancel().catch(() => {});
+      }
+      await fs.writeFile(filePath, Buffer.concat(parts));
+      return { success: true, size: total };
     },
     search_workspace_text: async (args: { query: string; path?: string; maxResults?: number; requesterId?: string }): Promise<any> => {
       if (!args?.query) return { error: "Missing query parameter" };
@@ -3043,19 +3142,21 @@ const utils: any = {
       let messagesHtml = "";
       for (const msg of messages) {
         const timestamp = new Date(msg.timestamp).toLocaleString();
-        const initial = msg.username.charAt(0).toUpperCase();
+        const initial = escapeHtml(msg.username.charAt(0).toUpperCase());
+        const username = escapeHtml(msg.username);
+        const content = escapeHtml(msg.content).replace(/\n/g, "<br>");
         if (msg.is_staff) {
-          const rankTag = utils.getRankSuffix(msg.staff_rank);
+          const rankTag = escapeHtml(utils.getRankSuffix(msg.staff_rank));
           messagesHtml += `
                             <div class="message">
                                 <div class="avatar">${initial}</div>
                                 <div class="message-content">
                                     <div class="message-header">
-                                        <span class="username">${msg.username}</span>
+                                        <span class="username">${username}</span>
                                         <span class="staff-badge">${rankTag}</span>
                                         <span class="timestamp">${timestamp}</span>
                                     </div>
-                                    <div class="message-text">${msg.content}</div>
+                                    <div class="message-text">${content}</div>
                                 </div>
                             </div>`;
         } else {
@@ -3064,10 +3165,10 @@ const utils: any = {
                                 <div class="avatar">${initial}</div>
                                 <div class="message-content">
                                     <div class="message-header">
-                                        <span class="username">${msg.username}</span>
+                                        <span class="username">${username}</span>
                                         <span class="timestamp">${timestamp}</span>
                                     </div>
-                                    <div class="message-text">${msg.content}</div>
+                                    <div class="message-text">${content}</div>
                                 </div>
                             </div>`;
         }
@@ -3075,14 +3176,14 @@ const utils: any = {
 
       const htmlContent = htmlTemplate
         .replace(/{ticketId}/g, String(args.ticketId))
-        .replace(/{username}/g, user.tag)
-        .replace(/{userId}/g, user.id)
+        .replace(/{username}/g, escapeHtml(user.tag))
+        .replace(/{userId}/g, escapeHtml(user.id))
         .replace(/{status}/g, "Closed")
         .replace(/{statusClass}/g, "status-closed")
         .replace(/{createdAt}/g, new Date(Number(ticket.created_at)).toLocaleString())
         .replace(/{closedAt}/g, new Date(closedAt).toLocaleString())
-        .replace(/{origin}/g, ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message")
-        .replace(/{initialMessage}/g, ticket.initial_message)
+        .replace(/{origin}/g, ticket.guild_id ? `Guild: ${escapeHtml(ticket.guild_name)} (${ticket.guild_id})` : "Direct Message")
+        .replace(/{initialMessage}/g, escapeHtml(ticket.initial_message))
         .replace(/{messages}/g, messagesHtml);
 
       const textPath = path.join(process.cwd(), `transcript-${args.ticketId}.txt`);
@@ -3524,7 +3625,8 @@ const utils: any = {
         cwd: PROJECT_ROOT
       };
     },
-    list_project_files: async (args: { path?: string; recursive?: boolean; maxResults?: number } = {}): Promise<any> => {
+    list_project_files: async (args: { path?: string; recursive?: boolean; maxResults?: number; requesterId?: string } = {}): Promise<any> => {
+      if (!isOwner(args?.requesterId)) return { error: "Requester is not authorized to list project files" };
       const directoryPath = resolveProjectPath(args.path ?? ".");
       const stats = await safeStat(directoryPath);
       if (!stats) return { error: "Path not found" };
@@ -3542,8 +3644,9 @@ const utils: any = {
         }))
       };
     },
-    read_project_file_lines: async (args: { path: string; startLine?: number; endLine?: number }): Promise<any> => {
+    read_project_file_lines: async (args: { path: string; startLine?: number; endLine?: number; requesterId?: string }): Promise<any> => {
       if (!args?.path) return { error: "Missing path parameter" };
+      if (!isOwner(args.requesterId)) return { error: "Requester is not authorized to read project files" };
       const filePath = resolveProjectPath(args.path);
       const stats = await safeStat(filePath);
       if (!stats) return { error: "File not found" };
@@ -3560,8 +3663,9 @@ const utils: any = {
         content: slice.join("\n")
       };
     },
-    search_project_text: async (args: { query: string; path?: string; maxResults?: number }): Promise<any> => {
+    search_project_text: async (args: { query: string; path?: string; maxResults?: number; requesterId?: string }): Promise<any> => {
       if (!args?.query) return { error: "Missing query parameter" };
+      if (!isOwner(args.requesterId)) return { error: "Requester is not authorized to search project files" };
       const basePath = resolveProjectPath(args.path ?? ".");
       const stats = await safeStat(basePath);
       if (!stats) return { error: "Path not found" };
@@ -3590,8 +3694,9 @@ const utils: any = {
       }
       return { matches };
     },
-    project_file_info: async (args: { path: string }): Promise<any> => {
+    project_file_info: async (args: { path: string; requesterId?: string }): Promise<any> => {
       if (!args?.path) return { error: "Missing path parameter" };
+      if (!isOwner(args.requesterId)) return { error: "Requester is not authorized to view project files" };
       const target = resolveProjectPath(args.path);
       const stats = await safeStat(target);
       if (!stats) return { error: "Path not found" };
@@ -3605,7 +3710,8 @@ const utils: any = {
         }
       };
     },
-    list_log_files: async (args: { maxResults?: number } = {}): Promise<any> => {
+    list_log_files: async (args: { maxResults?: number; requesterId?: string } = {}): Promise<any> => {
+      if (!isOwner(args?.requesterId)) return { error: "Requester is not authorized to list log files" };
       const stats = await safeStat(LOGS_ROOT);
       if (!stats || !stats.isDirectory()) return { error: "Logs directory not found" };
       const limit = Math.max(1, Math.min(args.maxResults ?? 100, 500));
@@ -3632,8 +3738,9 @@ const utils: any = {
         }));
       return { files };
     },
-    read_log_file_lines: async (args: { path: string; startLine?: number; endLine?: number }): Promise<any> => {
+    read_log_file_lines: async (args: { path: string; startLine?: number; endLine?: number; requesterId?: string }): Promise<any> => {
       if (!args?.path) return { error: "Missing path parameter" };
+      if (!isOwner(args.requesterId)) return { error: "Requester is not authorized to read log files" };
       const filePath = resolveLogsPath(args.path);
       const stats = await safeStat(filePath);
       if (!stats) return { error: "Log file not found" };
@@ -3650,8 +3757,9 @@ const utils: any = {
         content: slice.join("\n")
       };
     },
-    tail_log_file: async (args: { path: string; lines?: number }): Promise<any> => {
+    tail_log_file: async (args: { path: string; lines?: number; requesterId?: string }): Promise<any> => {
       if (!args?.path) return { error: "Missing path parameter" };
+      if (!isOwner(args.requesterId)) return { error: "Requester is not authorized to read log files" };
       const filePath = resolveLogsPath(args.path);
       const stats = await safeStat(filePath);
       if (!stats) return { error: "Log file not found" };
@@ -3665,8 +3773,9 @@ const utils: any = {
         lines: slice.join("\n")
       };
     },
-    search_logs: async (args: { query: string; file?: string; maxResults?: number }): Promise<any> => {
+    search_logs: async (args: { query: string; file?: string; maxResults?: number; requesterId?: string }): Promise<any> => {
       if (!args?.query) return { error: "Missing query parameter" };
+      if (!isOwner(args.requesterId)) return { error: "Requester is not authorized to search log files" };
       const stats = await safeStat(LOGS_ROOT);
       if (!stats || !stats.isDirectory()) return { error: "Logs directory not found" };
       const maxResults = Math.max(1, Math.min(args.maxResults ?? 200, 500));
@@ -3692,7 +3801,8 @@ const utils: any = {
       }
       return { matches };
     },
-    github_list_repo_dir: async (args: { path?: string; ref?: string }): Promise<any> => {
+    github_list_repo_dir: async (args: { path?: string; ref?: string; requesterId?: string }): Promise<any> => {
+      if (!isOwner(args?.requesterId)) return { error: "Requester is not authorized to access the repository" };
       const repoPath = args.path ? args.path.replace(/^\/+/, "") : "";
       const ref = args.ref ?? "master";
       const url = `https://api.github.com/repos/Barnie-Corps/barniebot/contents/${repoPath}?ref=${encodeURIComponent(ref)}`;
@@ -3859,7 +3969,7 @@ const utils: any = {
       const now = Date.now();
       const confidence = args.confidence || 1.0;
       const encryptedContent = encryptText(args.content);
-      const relatedEntities = args.relatedEntities ? encryptText(JSON.stringify(args.relatedEntities)) : null;
+      const relatedEntities = args.relatedEntities ? JSON.stringify(args.relatedEntities) : null;
       const existing: any = await db.query(
         "SELECT id FROM ai_memory_graph WHERE user_id = ? AND memory_type = ? AND subject = ?",
         [args.userId, args.memoryType, args.subject]
@@ -3912,7 +4022,7 @@ const utils: any = {
       const decryptedMemories = memories.map((mem: any) => ({
         ...mem,
         content: decryptText(mem.content),
-        related_entities: mem.related_entities ? decryptText(mem.related_entities) : null
+        related_entities: parseRelatedEntities(mem.related_entities)
       }));
       return { memories: decryptedMemories };
     },
@@ -3927,7 +4037,7 @@ const utils: any = {
       const decryptedMemories = memories.map((mem: any) => ({
         ...mem,
         content: decryptText(mem.content),
-        related_entities: mem.related_entities ? decryptText(mem.related_entities) : null
+        related_entities: parseRelatedEntities(mem.related_entities)
       }));
       return { memories: decryptedMemories };
     },
@@ -4752,7 +4862,7 @@ const utils: any = {
     }
   },
   sendLongTextResponse: async (target: any, text: string, notice: string, filenamePrefix = "response"): Promise<any> => {
-    const filename = path.join(PROJECT_ROOT, `${filenamePrefix}-${Date.now()}.md`);
+    const filename = path.join(os.tmpdir(), `${filenamePrefix}-${Date.now()}-${crypto.randomBytes(6).toString("hex")}.md`);
     await fs.writeFile(filename, String(text || ""), "utf8");
     try {
       if (typeof target?.reply === "function" && typeof target?.editReply === "function") {

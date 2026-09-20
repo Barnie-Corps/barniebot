@@ -17,7 +17,11 @@ export default {
     const isSelf = targetUser.id === interaction.user.id;
 
     if (!isSelf && !isStaff) {
-      return utils.safeInteractionRespond(interaction, "You can only view your own warnings.");
+      let selfOnly = "You can only view your own warnings.";
+      if (lang !== "en") {
+        selfOnly = (await utils.translate(selfOnly, "en", lang).catch(() => ({ text: selfOnly }))).text;
+      }
+      return utils.safeInteractionRespond(interaction, selfOnly);
     }
 
     const now = Date.now();
@@ -33,10 +37,6 @@ export default {
 
     const warnings = await db.query(query, params) as unknown as GlobalWarning[];
 
-    if (warnings.length === 0) {
-      return utils.safeInteractionRespond(interaction, `${targetUser.username} has no ${includeExpired ? "" : "active "}warnings.`);
-    }
-
     const activeWarnings = warnings.filter((w: GlobalWarning) =>
       w.active &&
       w.expires_at > now &&
@@ -44,10 +44,41 @@ export default {
     );
     const totalPoints = activeWarnings.reduce((sum: number, w: GlobalWarning) => sum + (w.points || 1), 0);
 
+    let texts = {
+      noWarnings: `${targetUser.username} has no ${includeExpired ? "" : "active "}warnings.`,
+      title: `⚠️ Warning History - ${targetUser.username}`,
+      description: `Total Active Points: **${totalPoints}** / 5\n${warnings.length} warning(s) found`,
+      appealed: " [APPEALED]",
+      expired: " [EXPIRED]",
+      inactive: " [INACTIVE]",
+      reason: "**Reason:**",
+      points: "**Points:**",
+      category: "**Category:**",
+      issued: "**Issued:**",
+      expires: "**Expires:**",
+      appealPending: "**Appeal:** Pending review",
+      appealApproved: "**Appeal:** Approved by staff",
+      issuedBy: "**Issued by:**",
+      showingSome: `Showing 10 of ${warnings.length} warnings. Use filters to see more.`,
+      warning3Title: "⚠️ Warning",
+      warning3Value: "You have 3+ points. One more warning may result in automatic muting or blacklisting.",
+      criticalTitle: "🚨 Critical",
+      criticalValue: "You have 5+ points. Further violations will result in automatic blacklisting.",
+      tipTitle: "💡 Tip",
+      tipValue: "You can appeal warnings using `/appeal <warning_id> <reason>`"
+    };
+    if (lang !== "en") {
+      texts = await utils.autoTranslate(texts, "en", lang).catch(() => texts);
+    }
+
+    if (warnings.length === 0) {
+      return utils.safeInteractionRespond(interaction, texts.noWarnings);
+    }
+
     const embed = new EmbedBuilder()
       .setColor(totalPoints >= 5 ? "Red" : totalPoints >= 3 ? "Orange" : "Yellow")
-      .setTitle(`⚠️ Warning History - ${targetUser.username}`)
-      .setDescription(`Total Active Points: **${totalPoints}** / 5\n${warnings.length} warning(s) found`)
+      .setTitle(texts.title)
+      .setDescription(texts.description)
       .setTimestamp();
 
     const categoryEmojis: Record<string, string> = {
@@ -72,27 +103,27 @@ export default {
       const isInactive = !warning.active;
 
       let statusText = "";
-      if (isAppealed) statusText = " [APPEALED]";
-      else if (isExpired) statusText = " [EXPIRED]";
-      else if (isInactive) statusText = " [INACTIVE]";
+      if (isAppealed) statusText = texts.appealed;
+      else if (isExpired) statusText = texts.expired;
+      else if (isInactive) statusText = texts.inactive;
 
       const pointsText = warning.points === 1 ? "1 pt" : `${warning.points} pts`;
 
-      let fieldValue = `**Reason:** ${warning.reason}\n`;
-      fieldValue += `**Points:** ${pointsText} | **Category:** ${warning.category}\n`;
-      fieldValue += `**Issued:** <t:${Math.floor(warning.createdAt / 1000)}:R>\n`;
-      fieldValue += `**Expires:** <t:${Math.floor(warning.expires_at / 1000)}:R>`;
+      let fieldValue = `${texts.reason} ${warning.reason}\n`;
+      fieldValue += `${texts.points} ${pointsText} | ${texts.category} ${warning.category}\n`;
+      fieldValue += `${texts.issued} <t:${Math.floor(warning.createdAt / 1000)}:R>\n`;
+      fieldValue += `${texts.expires} <t:${Math.floor(warning.expires_at / 1000)}:R>`;
 
       if (warning.appealed && warning.appeal_status === "pending") {
-        fieldValue += `\n**Appeal:** Pending review`;
+        fieldValue += `\n${texts.appealPending}`;
       } else if (isAppealed) {
-        fieldValue += `\n**Appeal:** Approved by staff`;
+        fieldValue += `\n${texts.appealApproved}`;
       }
 
       if (isStaff) {
         try {
           const author = await interaction.client.users.fetch(warning.authorid);
-          fieldValue += `\n**Issued by:** ${author.username}`;
+          fieldValue += `\n${texts.issuedBy} ${author.username}`;
         } catch { }
       }
 
@@ -104,27 +135,27 @@ export default {
     }
 
     if (warnings.length > 10) {
-      embed.setFooter({ text: `Showing 10 of ${warnings.length} warnings. Use filters to see more.` });
+      embed.setFooter({ text: texts.showingSome });
     }
 
     if (totalPoints >= 3 && totalPoints < 5) {
       embed.addFields({
-        name: "⚠️ Warning",
-        value: "You have 3+ points. One more warning may result in automatic muting or blacklisting.",
+        name: texts.warning3Title,
+        value: texts.warning3Value,
         inline: false
       });
     } else if (totalPoints >= 5) {
       embed.addFields({
-        name: "🚨 Critical",
-        value: "You have 5+ points. Further violations will result in automatic blacklisting.",
+        name: texts.criticalTitle,
+        value: texts.criticalValue,
         inline: false
       });
     }
 
     if (isSelf && totalPoints > 0) {
       embed.addFields({
-        name: "💡 Tip",
-        value: "You can appeal warnings using `/appeal <warning_id> <reason>`",
+        name: texts.tipTitle,
+        value: texts.tipValue,
         inline: false
       });
     }

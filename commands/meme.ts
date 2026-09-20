@@ -9,6 +9,12 @@ export default {
         .setDescription("Shows a random meme"),
     category: "Fun",
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
+        let texts = {
+            viewPost: "View post"
+        };
+        if (lang !== "en") {
+            texts = await utils.autoTranslate(texts, "en", lang).catch(() => texts);
+        }
         async function getMeme() {
             let rsp = await fetch("https://meme-api.com/gimme");
             let json = await rsp.json();
@@ -30,7 +36,7 @@ export default {
                     .setURL(`https://reddit.com/r/${meme.subreddit}`),
                 new ButtonBuilder()
                     .setStyle(ButtonStyle.Link)
-                    .setLabel("View post")
+                    .setLabel(texts.viewPost)
                     .setURL(meme.postLink)
             )
         const embed = new EmbedBuilder()

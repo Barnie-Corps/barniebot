@@ -21,10 +21,10 @@ class NIMChatSessionImpl implements NIMChatSession {
     private lastToolCalls: Array<{ id: string; name: string }> = [];
     private timeoutMs: number;
     constructor(
-        private openai: OpenAi,
+        private manager: NVIDIAModelsManager,
         private model: string,
         private tools: NIMToolDefinition[] | undefined,
-        private config: { max_tokens?: number; temperature?: number; top_p?: number; chat_template_kwargs?: any },
+        private config: { max_tokens?: number; temperature?: number; top_p?: number; chat_template_kwargs?: any; max_context_messages?: number },
         systemInstruction?: string,
         timeoutMs: number = 120000
     ) {
@@ -76,7 +76,33 @@ class NIMChatSessionImpl implements NIMChatSession {
         }
         this.messages.splice(insertAt, 0, { role: "system", content: content.trim() });
     }
-    public async sendMessage(input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>): Promise<NIMChatResult> {
+    private trimContext(): void {
+        const cap = this.config.max_context_messages ?? 32;
+        if (this.messages.length <= cap) return;
+        let start = 0;
+        while (start < this.messages.length && this.messages[start].role === "system") start++;
+        while (this.messages.length > cap && start < this.messages.length) {
+            const msg = this.messages[start];
+            let removeFrom = start;
+            let removeTo = start + 1;
+            const isToolBlockStart = msg.role === "tool" || (msg.role === "assistant" && Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length > 0);
+            if (isToolBlockStart) {
+                if (msg.role === "tool") {
+                    let a = start - 1;
+                    while (a >= 0 && this.messages[a].role !== "assistant") a--;
+                    if (a >= 0 && Array.isArray((this.messages[a] as any).tool_calls) && (this.messages[a] as any).tool_calls.length > 0) {
+                        removeFrom = a;
+                    }
+                }
+                let k = removeFrom;
+                while (k < this.messages.length && this.messages[k].role === "tool") k++;
+                removeTo = k;
+            }
+            this.messages.splice(removeFrom, removeTo - removeFrom);
+            if (removeFrom <= start) start = removeFrom;
+        }
+    }
+    private pushInput(input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>): void {
         if (typeof input === "string") {
             this.messages.push({ role: "user", content: input });
         } else if (Array.isArray(input)) {
@@ -87,13 +113,23 @@ class NIMChatSessionImpl implements NIMChatSession {
                 this.messages.push(this.createToolMessage(name, result));
             }
         }
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    }
+    public async sendMessage(input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>, signal?: AbortSignal): Promise<NIMChatResult> {
+        this.pushInput(input);
+        this.trimContext();
         let lastError: any;
         for (let attempt = 0; attempt < 3; attempt++) {
-            if (attempt > 0) await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+            if (attempt > 0) {
+                await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+                if (signal?.aborted) break;
+            }
+            const client = this.manager.getNextClient();
+            const controller = new AbortController();
+            const onAbort = () => controller.abort();
+            signal?.addEventListener("abort", onAbort);
+            const timer = setTimeout(() => controller.abort(), this.timeoutMs);
             try {
-                const response = await this.openai.chat.completions.create({
+                const response = await client.openai.chat.completions.create({
                     model: this.model,
                     messages: this.messages,
                     tools: this.tools,
@@ -105,6 +141,8 @@ class NIMChatSessionImpl implements NIMChatSession {
                     ...(this.shouldIncludeChatTemplate(this.model) && this.config.chat_template_kwargs && { chat_template_kwargs: this.config.chat_template_kwargs })
                 }, { signal: controller.signal as any });
                 clearTimeout(timer);
+                signal?.removeEventListener("abort", onAbort);
+                this.manager.markClientSuccess(client);
                 const message = response.choices[0]?.message as any;
                 if (message) {
                     this.messages.push(message as ChatCompletionMessageParam);
@@ -121,18 +159,99 @@ class NIMChatSessionImpl implements NIMChatSession {
                 const text = stripThink(message?.content ?? "");
                 return { response: { text: () => text, functionCalls: () => toolCalls } };
             } catch (err: any) {
+                clearTimeout(timer);
+                signal?.removeEventListener("abort", onAbort);
+                this.manager.markClientFailure(client, err);
                 lastError = err;
+                if (signal?.aborted) break;
                 const isRetryable = err?.status === 429 || err?.status === 503 || err?.code === "ETIMEDOUT" || err?.code === "ECONNRESET" || err?.message?.includes("ResourceExhausted") || err?.message?.includes("All workers are busy");
                 if (!isRetryable) break;
             }
         }
-        clearTimeout(timer);
         throw lastError || new Error("Failed to get AI response after retries");
+    }
+    public async sendMessageStream(
+        input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>,
+        onChunk?: (delta: string) => void,
+        signal?: AbortSignal
+    ): Promise<NIMChatResult> {
+        const pushedIndex = this.messages.length;
+        this.pushInput(input);
+        this.trimContext();
+        const client = this.manager.getNextClient();
+        const controller = new AbortController();
+        const onAbort = () => controller.abort();
+        signal?.addEventListener("abort", onAbort);
+        const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+        try {
+            const stream = await client.openai.chat.completions.create({
+                model: this.model,
+                messages: this.messages,
+                tools: this.tools,
+                tool_choice: this.tools && this.tools.length > 0 ? "auto" : undefined,
+                max_tokens: this.config.max_tokens,
+                temperature: this.config.temperature,
+                top_p: this.config.top_p,
+                stream: true,
+                ...(this.shouldIncludeChatTemplate(this.model) && this.config.chat_template_kwargs && { chat_template_kwargs: this.config.chat_template_kwargs })
+            }, { signal: controller.signal as any });
+            let content = "";
+            let reasoning = "";
+            const toolAcc: Array<{ index: number; id: string; name: string; args: string }> = [];
+            for await (const chunk of stream as any) {
+                const delta = chunk?.choices?.[0]?.delta;
+                if (!delta) continue;
+                if (typeof delta.content === "string") {
+                    content += delta.content;
+                    onChunk?.(delta.content);
+                }
+                if (typeof delta.reasoning_content === "string") {
+                    reasoning += delta.reasoning_content;
+                }
+                if (Array.isArray(delta.tool_calls)) {
+                    for (const tc of delta.tool_calls) {
+                        const idx = tc.index ?? 0;
+                        if (!toolAcc[idx]) toolAcc[idx] = { index: idx, id: "", name: "", args: "" };
+                        if (tc.id) toolAcc[idx].id = tc.id;
+                        if (tc.function?.name) toolAcc[idx].name += tc.function.name;
+                        if (tc.function?.arguments) toolAcc[idx].args += tc.function.arguments;
+                    }
+                }
+            }
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
+            this.manager.markClientSuccess(client);
+            const toolCalls = toolAcc
+                .sort((a, b) => a.index - b.index)
+                .filter(t => t.name || t.args || t.id)
+                .map(t => ({
+                    id: t.id,
+                    type: "function",
+                    function: { name: t.name, arguments: t.args }
+                }));
+            const assistantMessage: any = {
+                role: "assistant",
+                content: content || null,
+                tool_calls: toolCalls.length ? toolCalls : undefined,
+                ...(reasoning ? { reasoning_content: reasoning } : {})
+            };
+            this.messages.push(assistantMessage as ChatCompletionMessageParam);
+            this.lastToolCalls = toolCalls.map(call => ({ id: call.id, name: call.function.name }));
+            const parsedCalls = toolCalls.map(call => ({ name: call.function.name, args: this.parseArgs(call.function.arguments) }));
+            const text = stripThink(content);
+            return { response: { text: () => text, functionCalls: () => parsedCalls.length ? parsedCalls : undefined } };
+        } catch (err) {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
+            this.messages.splice(pushedIndex);
+            this.manager.markClientFailure(client, err);
+            throw err;
+        }
     }
 }
 
 export default class NVIDIAModelsManager {
-    private clients: Array<{ key: string; openai: OpenAi }>;
+    private clients: Array<{ key: string; openai: OpenAi; consecutiveFailures: number; disabledUntil: number }>;
     private currentIndex: number = 0;
 
     constructor(apiKeys: string[]) {
@@ -147,37 +266,87 @@ export default class NVIDIAModelsManager {
                 baseURL: "https://integrate.api.nvidia.com/v1",
                 timeout: 120000,
                 httpAgent: agent
-            })
+            }),
+            consecutiveFailures: 0,
+            disabledUntil: 0
         }));
     }
 
-    private getNextClient(): { key: string; openai: OpenAi } {
-        const client = this.clients[this.currentIndex];
-        this.currentIndex = (this.currentIndex + 1) % this.clients.length;
-        return client;
+    getNextClient(): { key: string; openai: OpenAi } {
+        const now = Date.now();
+        let picked: any = null;
+        for (let i = 0; i < this.clients.length; i++) {
+            const candidate = this.clients[this.currentIndex % this.clients.length];
+            this.currentIndex++;
+            if (candidate.disabledUntil <= now) {
+                picked = candidate;
+                break;
+            }
+        }
+        if (!picked) {
+            const candidate = this.clients[this.currentIndex % this.clients.length];
+            this.currentIndex++;
+            picked = candidate;
+        }
+        return picked;
+    }
+    markClientSuccess = (client: { key: string; openai: OpenAi }): void => {
+        const entry = this.clients.find(c => c.openai === client.openai);
+        if (entry) {
+            entry.consecutiveFailures = 0;
+            entry.disabledUntil = 0;
+        }
     };
-    public GetConversationSafety = async (messages: ChatCompletionMessageParam[], timeoutMs: number = 2000): Promise<{ safe: boolean, reason?: string }> => {
+    markClientFailure = (client: { key: string; openai: OpenAi }, error: any): void => {
+        const entry = this.clients.find(c => c.openai === client.openai);
+        if (!entry) return;
+        const status = typeof error?.status === "number" ? error.status : 0;
+        const msg = String(error?.message || "").toLowerCase();
+
+        // 404/410 mean the model (not the key) is unavailable; rotating keys won't help.
+        if (status === 404 || status === 410) {
+            entry.consecutiveFailures = 0;
+            entry.disabledUntil = 0;
+            return;
+        }
+
+        const isTimeout = error?.code === "ETIMEDOUT" || error?.code === "ECONNRESET" || error?.code === "ABORT_ERR" || error?.name === "AbortError" || msg.includes("timeout") || msg.includes("abort");
+        const isRateLimit = status === 429 || msg.includes("rate limit") || msg.includes("too many requests") || msg.includes("resourceexhausted");
+        const isServerError = status >= 500 && status <= 599;
+        const isAuthError = status === 401;
+        if (isTimeout || isRateLimit || isServerError || isAuthError) {
+            entry.consecutiveFailures++;
+            const baseMs = isAuthError ? 600000 : 60000;
+            entry.disabledUntil = Date.now() + Math.min(isAuthError ? 1800000 : 300000, entry.consecutiveFailures * baseMs);
+        } else {
+            entry.consecutiveFailures = 0;
+            entry.disabledUntil = 0;
+        }
+    };
+    public GetConversationSafety = async (messages: ChatCompletionMessageParam[], timeoutMs: number = 40000): Promise<{ safe: boolean, reason?: string }> => {
+        const client = this.getNextClient();
         try {
-            const { openai } = this.getNextClient();
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), Math.max(500, timeoutMs));
-            const response = await openai.chat.completions.create({
+            const response = await client.openai.chat.completions.create({
                 model: "nvidia/llama-3.1-nemoguard-8b-content-safety",
                 messages,
                 stream: false
             }, { signal: controller.signal as any });
             clearTimeout(timer);
+            this.markClientSuccess(client);
             const parsedResponse = JSON.parse(response.choices[0]?.message?.content!) as { "User Safety": string, "Safety Categories": string };
 
             return { safe: parsedResponse["User Safety"] === "safe", reason: parsedResponse["User Safety"] !== "safe" ? parsedResponse["Safety Categories"] : undefined };
         } catch (error) {
+            this.markClientFailure(client, error);
             console.error("Error checking conversation safety:", error);
             return { safe: true };
         }
     };
-    public GetModelChatResponse = async (messages: ChatCompletionMessageParam[], timeoutMs: number = 2000, task: string, think: boolean): Promise<{ content: string, reasoning?: string }> => {
+    public GetModelChatResponse = async (messages: ChatCompletionMessageParam[], timeoutMs: number = 60000, task: string, think: boolean): Promise<{ content: string, reasoning?: string }> => {
+        const client = this.getNextClient();
         try {
-            const { openai } = this.getNextClient();
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), Math.max(500, timeoutMs));
             const selectedTask = this.NormalizeTask(task);
@@ -185,7 +354,7 @@ export default class NVIDIAModelsManager {
             if (!modelConfig.name) {
                 throw new Error(`No model found for task: ${task}`);
             }
-            const response = await openai.chat.completions.create({
+            const response = await client.openai.chat.completions.create({
                 model: modelConfig.name,
                 messages: messages,
                 stream: false,
@@ -193,9 +362,11 @@ export default class NVIDIAModelsManager {
                 ...this.GetCustomTaskConfig(selectedTask)
             }, { signal: controller.signal as any });
             clearTimeout(timer);
+            this.markClientSuccess(client);
             const content = stripThink(response.choices[0]?.message?.content || "");
             return { content, reasoning: modelConfig.hasReasoning && think && modelConfig.hasThinkMode ? (response.choices[0]?.message as any).reasoning_content : modelConfig.hasReasoning ? (response.choices[0]?.message as any).reasoning_content : undefined };
         } catch (error) {
+            this.markClientFailure(client, error);
             console.error("Error getting reasoning response:", error);
             return { content: "", reasoning: undefined };
         }
@@ -217,11 +388,10 @@ export default class NVIDIAModelsManager {
 
         return aliases[normalized] || normalized;
     }
-    public CreateChatSession = (options: { tools?: NIMToolDefinition[]; systemInstruction?: string; maxTokens?: number; temperature?: number; topP?: number; model?: string; timeout?: number } = {}): NIMChatSession => {
-        const { openai } = this.getNextClient();
-        const model = options.model ?? "stepfun-ai/step-3.7-flash";
+    public CreateChatSession = (options: { tools?: NIMToolDefinition[]; systemInstruction?: string; maxTokens?: number; temperature?: number; topP?: number; model?: string; timeout?: number; maxContextMessages?: number } = {}): NIMChatSession => {
+        const model = options.model ?? "openai/gpt-oss-20b";
         return new NIMChatSessionImpl(
-            openai,
+            this,
             model,
             options.tools,
             {
@@ -229,18 +399,19 @@ export default class NVIDIAModelsManager {
                 temperature: options.temperature ?? 0.7,
                 top_p: options.topP ?? 0.8,
                 chat_template_kwargs: { thinking: false },
+                max_context_messages: options.maxContextMessages ?? 32,
             },
             options.systemInstruction,
             options.timeout
         );
     }
     private GetTaskBasedModel = (task: string): { name: string, hasReasoning: boolean, hasThinkMode: boolean } => {
-        const base = { name: "nvidia/llama-3.3-nemotron-super-49b-v1", hasReasoning: false, hasThinkMode: false };
-        const monitorSmall = { name: "meta/llama-3.1-8b-instruct", hasReasoning: false, hasThinkMode: false };
+        const base = { name: "nvidia/nemotron-3-super-120b-a12b", hasReasoning: false, hasThinkMode: false };
+        const monitorSmall = { name: "openai/gpt-oss-20b", hasReasoning: false, hasThinkMode: false };
         const taskModels: { [key: string]: { name: string, hasReasoning: boolean, hasThinkMode: boolean } } = {
-            "chat": { name: "stepfun-ai/step-3.7-flash", hasReasoning: false, hasThinkMode: true },
+            "chat": { name: "openai/gpt-oss-20b", hasReasoning: false, hasThinkMode: false },
             "reasoning": {
-                name: "deepseek-ai/deepseek-v3.2",
+                name: "deepseek-ai/deepseek-v4-flash-0731",
                 hasReasoning: true,
                 hasThinkMode: false
             },
@@ -250,7 +421,7 @@ export default class NVIDIAModelsManager {
                 hasThinkMode: false
             },
             "programming": {
-                name: "nvidia/llama-3.3-nemotron-super-49b-v1",
+                name: "nvidia/nemotron-3-super-120b-a12b",
                 hasReasoning: false,
                 hasThinkMode: false
             },
