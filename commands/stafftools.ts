@@ -1,8 +1,9 @@
-﻿import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, Message, TextChannel } from "discord.js";
+import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, Message, TextChannel } from "discord.js";
 import { randomBytes } from "crypto";
 import utils from "../utils";
 import db from "../mysql/database";
 import client, { manager } from "..";
+import Log from "../Log";
 
 const resolveUsers = async (ids: Array<string | null | undefined>): Promise<Map<string, any>> => {
     const unique = Array.from(new Set(ids.filter((id): id is string => !!id)));
@@ -256,7 +257,7 @@ export default {
                         await (ticketChannel as any).send(`📌 This ticket has been assigned to ${staffUser.tag} by ${executor.tag}.`);
                     }
                 } catch (error) {
-                    console.error("Failed to notify in ticket channel:", error);
+                    Log.error("Failed to notify in ticket channel:", error);
                 }
 
                 await utils.logStaffAction(executor.id, "ASSIGN_TICKET", ticket[0].user_id, `Assigned ticket #${ticketId} to ${staffUser.tag}`, { ticket_id: ticketId, assigned_to: staffUser.id });

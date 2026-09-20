@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } from "discord.js";
 import db, { withTransaction } from "../mysql/database";
 import utils from "../utils";
+import Log from "../Log";
 import type { RPGSession, RPGCharacter } from "../types/interfaces";
 
 const CLASSES = {
@@ -706,7 +707,6 @@ export default {
                     return utils.safeInteractionRespond(interaction, "❌ " + texts.equip.only_for_class + invItem[0].required_class + "s!");
                 }
 
-                // Check if this item is already equipped in any slot
                 const alreadyEquipped: any = await db.query(
                     "SELECT * FROM rpg_equipped_items WHERE character_id = ? AND item_id = ?",
                     [character.id, invItem[0].item_id]
@@ -817,7 +817,6 @@ export default {
                 let monsterHp = monster.hp;
                 const battleLog: string[] = [];
 
-                // Get equipped items and calculate total stats with bonuses
                 const equipped: any = await db.query(
                     `SELECT e.*, i.name FROM rpg_equipped_items e 
                     JOIN rpg_items i ON e.item_id = i.id 
@@ -832,7 +831,6 @@ export default {
                 let totalLuk = character.luck;
                 let magicDamageBonus = 0;
 
-                // Apply equipment bonuses
                 for (const eq of equipped) {
                     const eqData: any = await db.query(
                         "SELECT * FROM rpg_equipment WHERE item_id = (SELECT id FROM rpg_items WHERE name = ?)",
@@ -845,7 +843,6 @@ export default {
                         totalInt += eqData[0].intelligence_bonus || 0;
                         totalLuk += eqData[0].luck_bonus || 0;
 
-                        // Check for special effects (e.g., mage staff)
                         if (eqData[0].special_effect) {
                             try {
                                 const effects = JSON.parse(eqData[0].special_effect);
@@ -859,14 +856,12 @@ export default {
                     }
                 }
 
-                // Calculate combat stats with equipment bonuses
                 const playerAtk = totalStr + Math.floor(Math.random() * 5);
                 const playerMagicAtk = totalInt + magicDamageBonus + Math.floor(Math.random() * 5);
                 const playerDef = totalDef;
                 const critChance = totalLuk / 100;
                 const critDamage = 1.5 + (totalLuk / 200); // Higher luck = higher crit damage
 
-                // Mages use intelligence for damage
                 const primaryAtk = character.class === "mage" ? playerMagicAtk : playerAtk;
 
                 while (playerHp > 0 && monsterHp > 0) {
@@ -1098,7 +1093,6 @@ export default {
                 const adv = adventures[type];
                 const luckBonus = character.luck / 100;
                 
-                // Danger check
                 const dangerRoll = Math.random();
                 if (dangerRoll < adv.danger - (character.agility / 200)) {
                     const hpLoss = Math.floor((character.max_hp || 0) * 0.2);
@@ -1120,7 +1114,6 @@ export default {
                     return utils.safeInteractionRespond(interaction, { embeds: [dangerEmbed], content: "" });
                 }
 
-                // Success - calculate rewards
                 const goldEarned = Math.floor(
                     Math.random() * (adv.baseGold[1] - adv.baseGold[0]) + adv.baseGold[0]
                 ) * (1 + luckBonus);
@@ -1138,7 +1131,6 @@ export default {
                     }
                 }
 
-                // Update character
                 const expNeeded = Math.floor(100 * Math.pow(1.5, character.level - 1));
                 const newExp = character.experience + expEarned;
                 let levelUp = false;
@@ -1154,7 +1146,6 @@ export default {
                     [Math.floor(goldEarned), newExp, newLevel, levelUp ? 5 : 0, Date.now(), character.id]
                 );
 
-                // Add items to inventory
                 for (const itemName of itemsFound) {
                     const itemData: any = await db.query(
                         "SELECT * FROM rpg_items WHERE name LIKE ?",
@@ -1257,7 +1248,6 @@ export default {
                 const jobData = jobs[job];
                 const playerStat = jobData.requiredStat === "defense" ? character.defense : jobData.requiredStat === "strength" ? character.strength : jobData.requiredStat === "agility" ? character.agility : character.intelligence;
 
-                // Stat check for bonus
                 const bonus = playerStat >= jobData.statCheck ? 1.5 : 1.0;
                 const payment = Math.floor(
                     (Math.random() * (jobData.payment[1] - jobData.payment[0]) + jobData.payment[0]) * bonus
@@ -1394,7 +1384,6 @@ export default {
                         return utils.safeInteractionRespond(interaction, "❌ Item not found in your inventory!");
                     }
 
-                    // Check if item is equipped
                     const equipped: any = await db.query(
                         "SELECT * FROM rpg_equipped_items WHERE inventory_id = ?",
                         [itemId]
@@ -1404,7 +1393,6 @@ export default {
                         return utils.safeInteractionRespond(interaction, "❌ You cannot sell equipped items! Unequip it first.");
                     }
 
-                    // Remove from inventory
                     if (invItem[0].quantity > 1) {
                         await db.query(
                             "UPDATE rpg_inventory SET quantity = quantity - 1 WHERE id = ?",
@@ -1414,7 +1402,6 @@ export default {
                         await db.query("DELETE FROM rpg_inventory WHERE id = ?", [itemId]);
                     }
 
-                    // Create listing
                     await db.query("INSERT INTO rpg_market_listings SET ?", [{
                         seller_id: character.id,
                         item_id: invItem[0].item_id,
@@ -1458,7 +1445,6 @@ export default {
                     return utils.safeInteractionRespond(interaction, { embeds: [listingsEmbed], content: "" });
                 }
 
-                // Buy action (with listing_id)
                 const listingId = interaction.options.getInteger("listing_id");
                 if (!listingId) {
                     return utils.safeInteractionRespond(interaction, "❌ Please provide a listing_id to purchase an item!");
@@ -1537,7 +1523,7 @@ export default {
                     if (error?.message === "#NOT_ENOUGH_GOLD") {
                         return utils.safeInteractionRespond(interaction, `❌ Not enough gold! You need ${listing[0].price_per_unit} gold.`);
                     }
-                    console.error("Market purchase failed:", error);
+                    Log.error("Market purchase failed:", error);
                     return utils.safeInteractionRespond(interaction, "❌ An error occurred while processing your purchase.");
                 }
 

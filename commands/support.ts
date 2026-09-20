@@ -3,6 +3,7 @@ import utils from "../utils";
 import db from "../mysql/database";
 import data from "../data";
 import client from "..";
+import Log from "../Log";
 
 export default {
     data: new SlashCommandBuilder()
@@ -92,7 +93,7 @@ export default {
                     assignedStaff = candidates[0].uid;
                 }
             } catch (error) {
-                console.error("Auto-assignment failed:", error);
+                Log.error("Auto-assignment failed:", error);
             }
 
             const createdAt = Date.now();
@@ -174,7 +175,7 @@ export default {
             try {
                 await interaction.user.send({ embeds: [userCloseEmbed], components: [userCloseButton] });
             } catch (error) {
-                console.error("Failed to send close option to user:", error);
+                Log.error("Failed to send close option to user:", error);
             }
 
             await db.query("UPDATE support_tickets SET message_id = ? WHERE id = ?", [ticketMessage.id, ticketId]);
@@ -192,7 +193,7 @@ export default {
             const responseText = isDM ? texts.created : `${texts.created}\n${texts.guild_warning}`;
             await utils.safeInteractionRespond(interaction, responseText);
         } catch (error: any) {
-            console.error("Support ticket creation error:", error);
+            Log.error("Support ticket creation error:", error);
             await utils.safeInteractionRespond(interaction, texts.error);
         }
     },

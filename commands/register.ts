@@ -237,7 +237,7 @@ export default {
                     });
                 }
 
-                const token = Buffer.from(`${email}:${Date.now()}:${Math.random()}`).toString("base64");
+                const token = crypto.randomBytes(24).toString("hex");
                 
                 await db.query(
                     "INSERT INTO registered_accounts SET ? ON DUPLICATE KEY UPDATE password = VALUES(password), verification_code = VALUES(verification_code), created_at = VALUES(created_at), token = VALUES(token), verified = FALSE, password_reset_token = VALUES(password_reset_token), password_reset_expires_at = VALUES(password_reset_expires_at)",

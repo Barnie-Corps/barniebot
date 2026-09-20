@@ -108,7 +108,7 @@ export async function initializeShopItems() {
 
         Log.info("Shop items initialized successfully", { component: "RPG", count: items.length });
     } catch (error: any) {
-        console.error("Failed to initialize shop items:", error);
+        Log.error("Failed to initialize shop items:", error);
     }
 }
 

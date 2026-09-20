@@ -2,6 +2,7 @@ import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionR
 import db, { withTransaction } from "../mysql/database";
 import client from "..";
 import utils from "../utils";
+import Log from "../Log";
 import { RPGSession, RPGCharacter } from "../types/interfaces";
 
 async function getSession(userId: string) {
@@ -578,7 +579,7 @@ export default {
                     if (error?.message === "#INITIATOR_GONE") {
                         return utils.safeInteractionRespond(interaction, "❌ Initiator no longer has a character!");
                     }
-                    console.error("Trade accept failed:", error);
+                    Log.error("Trade accept failed:", error);
                     return utils.safeInteractionRespond(interaction, "❌ An error occurred while completing the trade.");
                 }
 

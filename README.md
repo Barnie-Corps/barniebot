@@ -48,7 +48,7 @@ BarnieBot is your server stack in a single process: global chat, AI, RPG, modera
 ## 🧩 Core Features
 - **Global Chat**: Encrypted messages, per-guild language settings, optional auto-translate, staff suffix display, global custom commands (`b.rules [lang]`, `b.help`)
 - **RPG System**:
-  - Account Management: Email verification, encrypted passwords (AES-256-CBC), single-session enforcement
+  - Account Management: Email verification, bcrypt-hashed passwords, single-session enforcement
   - Character System: 5 classes with unique base stats, level progression (1-100+), stat point allocation, HP/MP management
   - Equipment: 7 slots (weapon, helmet, armor, gloves, boots, 2 accessories), stat bonuses, level/class requirements
   - Inventory: Stackable/non-stackable items, rarity tiers (common→mythic), binding system, quantity limits
@@ -73,7 +73,7 @@ BarnieBot is your server stack in a single process: global chat, AI, RPG, modera
 - **Database**: MySQL 5.7+ with auto-migration
 - **AI**: NVIDIA NIM for chat/function calling, Llama safety/monitoring, vision, and Riva ASR/TTS.
 - **Workers**: Node.js worker threads for translation and rate limiting
-- **Security**: AES-256-CBC encryption, parameterized queries, staff impersonation stripping
+- **Security**: AES-256-GCM encryption, bcrypt password hashing, parameterized queries, staff impersonation stripping
 - **Mail**: Gmail SMTP for notifications
 
 ## 🚀 Quick Start
@@ -134,17 +134,25 @@ These are lightweight, globally broadcast informational commands executed in a c
 
 `b.rules es` → sends Spanish rules to all connected guilds via the global relay.
 
-### Slash Commands (Everyone)
+### AI Commands
 | Command | Description |
 |---------|-------------|
 | `/ai ask` | Single AI question (task-specific models) |
 | `/ai chat` | Start contextual AI session (VIP only) |
 | `/ai voice` | Voice conversation in VC (VIP only) |
-| `/ai monitor` | Configure AI monitoring (Admin only) |
+| `/ai usage` | View your AI tier and remaining free usage |
+| `/ai monitor` | Configure AI monitoring (Manage Guild) |
+| `/ai monitor_whitelist` | Manage AI monitor channel/role whitelists (Manage Guild) |
+| `/ai monitor_cases` | View AI monitor cases for this guild (Manage Guild) |
+
+### RPG Commands (Everyone, requires a registered account)
+| Command | Description |
+|---------|-------------|
 | `/register new` | Create new RPG account with email verification |
 | `/register verify` | Verify account with 6-digit code |
 | `/register resend` | Resend verification code (1min cooldown) |
 | `/register info` | View account information and character |
+| `/register reset_password` | Reset your password with a staff-issued token |
 | `/login` | Login to RPG account (single-session enforcement) |
 | `/rpg create` | Create character (name, class selection) |
 | `/rpg profile` | View character profile with stats & equipment |
@@ -154,7 +162,10 @@ These are lightweight, globally broadcast informational commands executed in a c
 | `/rpg unequip` | Unequip items from specific slots |
 | `/rpg rest` | Restore HP/MP (5min cooldown) |
 | `/rpg battle` | Combat with monsters (4 difficulties) |
+| `/rpg job` | Work a job for gold and experience |
+| `/rpg gather` | Gather crafting resources |
 | `/rpg leaderboard` | Top players by level/gold/experience |
+| `/rpg casino` | Try your luck (dice, cards, slots) |
 | `/shop browse` | Browse shop by category (potions, weapons, armor, accessories) |
 | `/shop buy` | Purchase items with gold |
 | `/shop sell` | Sell inventory items (50% value) |
@@ -163,21 +174,58 @@ These are lightweight, globally broadcast informational commands executed in a c
 | `/trade view` | View pending trades (sent/received) |
 | `/trade decline` | Decline trade offer |
 | `/trade cancel` | Cancel your pending trade |
-| `/support` | Create support ticket (auto-assigns staff) |
+| `/craft recipes` | View available crafting recipes |
+| `/craft materials` | View your crafting materials |
+| `/craft create` | Craft an item from a recipe |
+| `/dungeon list` | View available dungeons |
+| `/dungeon enter` | Enter a dungeon |
+| `/dungeon continue` | Continue your dungeon run |
+| `/dungeon status` | Check your current dungeon progress |
+| `/dungeon abandon` | Abandon your current dungeon run |
+| `/dungeon history` | View your dungeon run history |
+| `/pet list` | View your pets |
+| `/pet equip` / `/pet unequip` | Equip or unequip your active pet |
+| `/pet feed` | Feed your pet to increase happiness |
+| `/pet info` | View detailed pet information |
+| `/pet rename` | Rename your pet |
+| `/guild create` | Create a new RPG guild |
+| `/guild info` | View guild information |
+| `/guild invite` / `/guild join` / `/guild leave` | Manage guild membership |
+| `/guild donate` | Donate gold to your guild |
+| `/achievements list` | View all achievements (filterable by category) |
+| `/achievements progress` | View your achievement progress |
+| `/daily` | Claim your daily rewards and maintain your streak |
+
+### Moderation & Reporting
+| Command | Description |
+|---------|-------------|
+| `/warnings` | View warning history for yourself or another user |
+| `/appeal` | Appeal a warning |
+| `/kick` | Kick a user (requires Kick Members permission) |
+
+### Server Configuration (Manage Guild / Manage Channels)
+| Command | Description |
+|---------|-------------|
 | `/globalchat set` | Configure global chat channel (Manage Channels) |
 | `/globalchat toggle` | Enable/disable global chat (Manage Channels) |
 | `/globalchat autotranslate` | Toggle auto-translation (Manage Channels) |
 | `/globalchat language` | Set guild language (Manage Channels) |
-| `/setlang` | Set personal language preference |
 | `/filter setup` | Initialize filter wizard (Manage Messages) |
-| `/filter add` | Add filtered word (Manage Messages) |
-| `/filter remove` | Remove word by ID (Manage Messages) |
-| `/filter view` | List all filtered words (Manage Messages) |
-| `/filter search` | Search filter by query (Manage Messages) |
+| `/filter add` / `/filter remove` | Add or remove a filtered word (Manage Messages) |
+| `/filter view` / `/filter search` | List or search filtered words (Manage Messages) |
 | `/filter toggle` | Enable/disable filter (Manage Messages) |
-| `/custom_responses add` | Add custom command (Manage Guild) |
-| `/custom_responses remove` | Remove custom command (Manage Guild) |
-| `/custom_responses list` | List custom commands (Manage Guild) |
+| `/automod view` | View current auto-mod settings (Manage Guild) |
+| `/automod toggle` | Enable/disable an auto-mod rule (Manage Guild) |
+| `/automod action` | Set the action taken on rule violation (Manage Guild) |
+| `/custom_responses add` / `remove` / `list` | Manage guild custom commands (Manage Guild) |
+| `/welcome channel` / `message` / `toggle` / `test` | Configure welcome/goodbye messages (Manage Guild) |
+| `/giveaway start` / `end` / `reroll` / `list` | Manage giveaways (Manage Guild) |
+| `/ticket setup` / `status` / `panel` / `disable` | Configure the guild-local ticket system (Administrator) |
+| `/ticket create` / `close` | Create or close a guild-local ticket |
+
+### Utility Commands (Everyone)
+| Command | Description |
+|---------|-------------|
 | `/ping` | Check bot latency |
 | `/botinfo` | System stats and info |
 | `/userinfo` | User profile and stats |
@@ -186,6 +234,12 @@ These are lightweight, globally broadcast informational commands executed in a c
 | `/avatar` | Get user avatar |
 | `/meme` | Random meme |
 | `/top` | Server leaderboard |
+| `/setlang` | Set personal language preference |
+| `/support` | Create a global support ticket (auto-assigns staff) |
+| `/gethtml` | Fetch the HTML and status code for a given URL |
+| `/remindme` | Set a personal reminder |
+| `/notifications` | View your unread notifications |
+| `/workers` | Worker pool health stats |
 
 ### Staff Commands
 | Command | Required Rank | Description |
@@ -202,7 +256,12 @@ These are lightweight, globally broadcast informational commands executed in a c
 | `/globalmod status` | Anyone | Check user status |
 | `/globalmod closeticket` | Staff | Close a support ticket (with transcript export) |
 | `/globalmod search_user` | Staff | Search users by username and show moderation status |
-| `/workers` | Anyone | Worker pool health stats |
+| `/globalmod announce` | Chief of Moderation+ | Broadcast an announcement to global chat |
+| `/rpgmanage create_item` / `edit_item` / `delete_item` | Administrator+ | Manage RPG item definitions |
+| `/rpgmanage list_items` | Moderator+ | List all RPG items |
+| `/rpgmanage rpg_*` (via `/stafftools`) | Moderator+/Administrator+ | RPG account and character admin tools |
+| `/data export` / `/data delete` | Administrator | Export or delete a user's stored data |
+| `/backupdb` | Owner/Admin/Lead/Manager rank | Create an on-demand MySQL database backup |
 
 ### Owner Commands (prefix: `b.`)
 **Access:** Restricted to Discord IDs in `OWNERS` environment variable.
@@ -212,7 +271,25 @@ These are lightweight, globally broadcast informational commands executed in a c
 | `b.shutdown` | none | Gracefully stop bot |
 | `b.reboot` | none | Restart bot (ProcessManager required for auto-return) |
 | `b.status` | none | Show runtime stats (uptime, memory, guilds, users) |
-| `b.announce` | `<lang> <message>` | Broadcast to global chat |
+| `b.messages` | `<user-id>` | Export user's global messages (decrypted) |
+| `b.invite` | `<guild-id>` | Generate a single-use invite for a specified guild |
+| `b.guilds` | none | Export guild list (name, member count, ID) |
+| `b.eval` | `<code>` | Execute JavaScript in the bot process (use with extreme caution) |
+| `b.sql` | `<query>` | Run a raw SQL query against the database (use with extreme caution) |
+| `b.cache` | none | Show Discord.js cache statistics (users, guilds, channels, roles) |
+| `b.active_guilds` | none | Show the most active guilds by message count this session |
+| `b.add_vip` | `<user-id> <duration> <unit>` | Grant VIP (`unit`: seconds, minutes, hours, days) |
+| `b.remove_vip` | `<user-id>` | Revoke a user's VIP |
+| `b.vip_list` | none | List all current VIP members |
+| `b.view_vip_status` | `<user-id>` | Show a user's VIP status and expiry |
+| `b.add_vip_guild` | `<guild-id> <duration> <unit>` | Grant a guild premium VIP status |
+| `b.remove_vip_guild` | `<guild-id>` | Revoke a guild's premium VIP status |
+| `b.vip_guilds` | none | List all current premium VIP guilds |
+| `b.view_guild_vip_status` | `<guild-id>` | Show a guild's premium VIP status and expiry |
+| `b.fetch_guilds_members` | none | Fetch and cache all members of every guild |
+
+**Security Warning:** `b.eval` runs arbitrary code and `b.sql` runs raw queries in the bot's process. Owner verification is enforced, but exercise extreme caution.
+
 ### Support Ticket Commands
 | Command | Description |
 |---------|-------------|
@@ -238,21 +315,12 @@ These are lightweight, globally broadcast informational commands executed in a c
 ### Ticket Lifecycle Essentials
 - User runs `/support` → channel auto-created in home guild category
 - Auto-assignment picks least-loaded available staff (fair distribution)
-- Messages relayed: user → `\`username\``: content | staff → `[RANK] name: content`
+- Messages relayed: user → `` `username`: content `` | staff → `[RANK] name: content`
 - First staff reply logs response time + announces metric in ticket channel
 - Closing requires confirmation; generates TXT & HTML transcripts, logs audit
 - Optional channel deletion via confirmed button flow
 - Priority/category mutable mid-flight for SLA & routing
 - Internal notes & audit trail improve accountability
-| `b.messages` | `<user-id>` | Export user's global messages (decrypted) |
-| `b.guilds` | none | Export guild list (name, member count, ID) |
-| `b.eval` | `<code>` | Execute JavaScript (use with extreme caution) |
-| `b.add_vip` | `<user-id> <time> <unit>` | Grant VIP (`unit`: days, hours, weeks, months) |
-| `b.remove_vip` | `<user-id>` | Revoke VIP |
-| `b.invite` | `<guild-id>` | Generate invite for specified guild |
-| `b.fetch_guilds_members` | none | Cache all guild members |
-
-**Security Warning:** `b.eval` runs arbitrary code in the bot's process. Owner verification is enforced, but exercise extreme caution.
 
 ## Staff Hierarchy
 From lowest to highest authority:
@@ -276,7 +344,7 @@ From lowest to highest authority:
 - Owner status derived from `.env` automatically syncs to database
 
 ## Security & Privacy
-**Encryption:** Global messages use AES-256-CBC before MySQL storage.
+**Encryption:** Global messages use AES-256-GCM (authenticated encryption) before MySQL storage. RPG passwords are hashed with bcrypt; legacy accounts are transparently upgraded on next login.
 
 **Moderation Records:** Warnings permanent, mutes auto-expire, blacklists toggleable via `active` flag.
 

@@ -6,6 +6,7 @@ import * as path from "path";
 import { promises as fs } from "fs";
 import * as https from "https";
 import sharp from "sharp";
+import Log from "../Log";
 import type { NIMChatMessage, NIMChatResult, NIMChatSession, NIMToolDefinition } from "../types/nvidia";
 export type { NIMToolCall, NIMChatResponse, NIMChatResult, NIMChatMessage, NIMToolDefinition, NIMChatSession } from "../types/nvidia";
 
@@ -340,7 +341,7 @@ export default class NVIDIAModelsManager {
             return { safe: parsedResponse["User Safety"] === "safe", reason: parsedResponse["User Safety"] !== "safe" ? parsedResponse["Safety Categories"] : undefined };
         } catch (error) {
             this.markClientFailure(client, error);
-            console.error("Error checking conversation safety:", error);
+            Log.error("Error checking conversation safety:", error);
             return { safe: true };
         }
     };
@@ -367,7 +368,7 @@ export default class NVIDIAModelsManager {
             return { content, reasoning: modelConfig.hasReasoning && think && modelConfig.hasThinkMode ? (response.choices[0]?.message as any).reasoning_content : modelConfig.hasReasoning ? (response.choices[0]?.message as any).reasoning_content : undefined };
         } catch (error) {
             this.markClientFailure(client, error);
-            console.error("Error getting reasoning response:", error);
+            Log.error("Error getting reasoning response:", error);
             return { content: "", reasoning: undefined };
         }
     }
@@ -601,7 +602,7 @@ message WordInfo {
 
                 client.Recognize(request, { deadline }, (error: Error | null, response: any) => {
                     if (error) {
-                        console.error("Error during speech recognition:", error);
+                        Log.error("Error during speech recognition:", error);
                         reject(new Error(`Speech recognition failed: ${error.message}`));
                         return;
                     }
@@ -619,7 +620,7 @@ message WordInfo {
             });
 
         } catch (error) {
-            console.error("Error in GetSpeechToText:", error);
+            Log.error("Error in GetSpeechToText:", error);
             throw new Error(`Failed to transcribe audio: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
@@ -769,7 +770,7 @@ enum AudioEncoding {
                 };
                 client.Synthesize(request, { deadline }, (error: Error | null, response: any) => {
                     if (error) {
-                        console.error("Error during speech synthesis:", error);
+                        Log.error("Error during speech synthesis:", error);
                         reject(new Error(`Speech synthesis failed: ${error.message}`));
                         return;
                     }
@@ -795,7 +796,7 @@ enum AudioEncoding {
             return Buffer.concat(audioParts as any);
 
         } catch (error) {
-            console.error("Error in GetTextToSpeech:", error);
+            Log.error("Error in GetTextToSpeech:", error);
             throw new Error(`Failed to synthesize speech: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
@@ -939,7 +940,7 @@ enum AudioEncoding {
                 if (AI_DEBUG) console.log("[Vision] Response status:", visionResp.status, "key:", key.slice(0, 10) + "...");
                 if (!visionResp.ok) {
                     const errorText = await visionResp.text().catch(() => "");
-                    console.error("[Vision] API error:", visionResp.status, errorText);
+                    Log.error(`[Vision] API error: ${visionResp.status} ${errorText}`);
                     continue;
                 }
                 const json: any = await visionResp.json();
@@ -948,7 +949,7 @@ enum AudioEncoding {
                 return result || "No visual details detected.";
             } catch (err) {
                 clearTimeout(timer);
-                console.error("[Vision] Exception:", err);
+                Log.error("[Vision] Exception:", err);
             }
         }
         return "";

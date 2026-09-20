@@ -108,8 +108,7 @@ export default {
       "--triggers",
       "--default-character-set=utf8mb4",
       "--protocol=TCP",
-      "-u", data.database.user,
-      "-p" + String(process.env.DB_PASSWORD)
+      "-u", data.database.user
     ];
 
     const sendResult = async (ok: boolean, details: string, fileSize?: number) => {

@@ -27,14 +27,14 @@ git clone https://github.com/Barnie-Corps/barniebot.git
 cd barniebot
 npm install
 cp .env.example .env   # then edit secrets
-npx ts-node index.ts   # dev run
+npm run dev             # dev run with auto-restart on file changes
 ```
 
 ### Notes
 - Keep the polyfill lines at the top of `index.ts` (web streams & fetch).
-- The project no longer tracks a runtime version variable; remove any lingering references when contributing.
 - Use feature branches (`feature/<name>` or `fix/<name>`). Avoid committing directly to `master`.
 - Keep commits focused—prefer multiple small commits over one giant diff.
+- Run `npx tsc --noEmit` and `npm test` before opening a PR.
 
 ## Contribution Process
 
@@ -70,7 +70,7 @@ git checkout -b feature/your-feature-name
 ## Pull Request Process
 
 1. Sync with `master` before opening.
-2. Ensure the bot boots locally without TypeScript errors.
+2. Ensure the bot boots locally without TypeScript errors (`npx tsc --noEmit`) and that `npm test` passes.
 3. Describe:
    - Motivation (problem / enhancement)
    - Implementation summary (key files, data flows)

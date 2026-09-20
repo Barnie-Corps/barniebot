@@ -18,10 +18,17 @@ globalThis.fetch = require("node-fetch");
 import * as dotenv from "dotenv";
 dotenv.config();
 if (!process.env.REBOOTING) process.env.REBOOTING = "0";
+import Log from "./Log";
+
+const REQUIRED_ENV_VARS = ["TOKEN", "DISCORD_BOT_ID", "OWNERS", "DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME", "ENCRYPTION_KEY"];
+const missingEnvVars = REQUIRED_ENV_VARS.filter((key) => !process.env[key]);
+if (missingEnvVars.length > 0) {
+    Log.error(`Missing required environment variable(s): ${missingEnvVars.join(", ")}. Copy .env.example to .env and fill them in.`);
+    process.exit(1);
+}
 import { EmbedBuilder, GatewayIntentBits, Client, ActivityType, Partials, PermissionFlagsBits, WebhookClient, TextChannel, Message, time, TimestampStyles, Collection, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import * as fs from "fs";
 import data from "./data";
-import Log from "./Log";
 import queries from "./mysql/queries";
 import db from "./mysql/database";
 import { initializeShopItems, initializeRPGData } from "./rpg_init";
@@ -1133,7 +1140,7 @@ client.on("messageCreate", async (message): Promise<any> => {
             try {
                 match = new RegExp(cr.command, "i").test(message.content);
             } catch (error) {
-                console.error("Error parsing regex:", error);
+                Log.error("Error parsing regex:", error);
             }
         } else {
             match = message.content.toLowerCase() === cr.command.toLowerCase();
@@ -1315,8 +1322,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     else await interaction.reply({ content: `${texts.error} (Failed to write log file)`, ephemeral: true });
                 } catch {}
             }
-            Log.error("Slash command execution failed", new Error(`Error executing command ${cmd.data.name}`));
-            console.error(err.stack, err);
+            Log.error(`Slash command execution failed: ${cmd.data.name}`, err);
         }
     }
     else if (interaction.isButton()) {
@@ -1765,7 +1771,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                         await interaction.reply({ embeds: [confirmEmbed], components: [confirmRow], ephemeral: true });
                     }
                 } catch (error) {
-                    console.error("Failed to show close confirmation:", error);
+                    Log.error("Failed to show close confirmation:", error);
                     if (interaction.isRepliable()) await interaction.reply({ content: "Failed to process request.", ephemeral: true });
                 }
                 break;
@@ -1827,20 +1833,22 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     let messagesHtml = "";
                     for (const msg of messages) {
                         const timestamp = new Date(msg.timestamp).toLocaleString();
-                        const initial = msg.username.charAt(0).toUpperCase();
+                        const initial = utils.escapeHtml(msg.username.charAt(0).toUpperCase());
+                        const username = utils.escapeHtml(msg.username);
+                        const content = utils.escapeHtml(msg.content).replace(/\n/g, "<br>");
 
                         if (msg.is_staff) {
-                            const rankTag = utils.getRankSuffix(msg.staff_rank);
+                            const rankTag = utils.escapeHtml(utils.getRankSuffix(msg.staff_rank));
                             messagesHtml += `
                             <div class="message">
                                 <div class="avatar">${initial}</div>
                                 <div class="message-content">
                                     <div class="message-header">
-                                        <span class="username">${msg.username}</span>
+                                        <span class="username">${username}</span>
                                         <span class="staff-badge">${rankTag}</span>
                                         <span class="timestamp">${timestamp}</span>
                                     </div>
-                                    <div class="message-text">${msg.content}</div>
+                                    <div class="message-text">${content}</div>
                                 </div>
                             </div>`;
                         } else {
@@ -1849,10 +1857,10 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                                 <div class="avatar">${initial}</div>
                                 <div class="message-content">
                                     <div class="message-header">
-                                        <span class="username">${msg.username}</span>
+                                        <span class="username">${username}</span>
                                         <span class="timestamp">${timestamp}</span>
                                     </div>
-                                    <div class="message-text">${msg.content}</div>
+                                    <div class="message-text">${content}</div>
                                 </div>
                             </div>`;
                         }
@@ -1860,14 +1868,14 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
 
                     htmlTemplate = htmlTemplate
                         .replace(/{ticketId}/g, ticketId.toString())
-                        .replace(/{username}/g, user.tag)
-                        .replace(/{userId}/g, user.id)
+                        .replace(/{username}/g, utils.escapeHtml(user.tag))
+                        .replace(/{userId}/g, utils.escapeHtml(user.id))
                         .replace(/{status}/g, "Closed")
                         .replace(/{statusClass}/g, "status-closed")
                         .replace(/{createdAt}/g, new Date(ticket.created_at).toLocaleString())
                         .replace(/{closedAt}/g, new Date().toLocaleString())
-                        .replace(/{origin}/g, ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message")
-                        .replace(/{initialMessage}/g, ticket.initial_message)
+                        .replace(/{origin}/g, ticket.guild_id ? `Guild: ${utils.escapeHtml(ticket.guild_name)} (${ticket.guild_id})` : "Direct Message")
+                        .replace(/{initialMessage}/g, utils.escapeHtml(ticket.initial_message))
                         .replace(/{messages}/g, messagesHtml);
 
                     fs.writeFileSync(`./transcript-${ticketId}.txt`, textTranscript);
@@ -1915,7 +1923,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                             await originalMessage.edit({ embeds: [updatedEmbed], components: [] });
                         }
                     } catch (error) {
-                        console.error("Failed to update ticket embed:", error);
+                        Log.error("Failed to update ticket embed:", error);
                     }
 
                     try {
@@ -1943,7 +1951,7 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
 
                         await user.send({ embeds: [closedEmbed] });
                     } catch (error) {
-                        console.error("Failed to notify user of ticket closure:", error);
+                        Log.error("Failed to notify user of ticket closure:", error);
                     }
 
                     const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel;
@@ -1976,11 +1984,11 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                     }
 
                 } catch (error) {
-                    console.error("Failed to close ticket:", error);
+                    Log.error("Failed to close ticket:", error);
                     try {
                         await interaction.editReply({ content: "Failed to close ticket." });
                     } catch (e) {
-                        console.error("Could not send error message:", e);
+                        Log.error("Could not send error message:", e);
                     }
                 }
                 break;
@@ -2050,11 +2058,11 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
                                 await (interaction.channel as TextChannel).delete();
                             }
                         } catch (error) {
-                            console.error("Failed to delete channel:", error);
+                            Log.error("Failed to delete channel:", error);
                         }
                     }, 5000);
                 } catch (error) {
-                    console.error("Failed to confirm delete:", error);
+                    Log.error("Failed to confirm delete:", error);
                     if (interaction.isRepliable()) await interaction.editReply({ content: "Failed to delete channel." });
                 }
                 break;
@@ -2370,7 +2378,7 @@ client.on("messageCreate", async (message): Promise<any> => {
                         staff_rank: null
                     }]);
                 } catch (error) {
-                    console.error("Failed to relay user message to ticket channel:", error);
+                    Log.error("Failed to relay user message to ticket channel:", error);
                 }
             }
         }

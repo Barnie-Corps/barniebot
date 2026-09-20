@@ -4,6 +4,7 @@ import utils from "../utils";
 import db from "../mysql/database";
 import client, { manager } from "..";
 import data from "../data";
+import Log from "../Log";
 import { SupportTicket, SupportMessage } from "../types/interfaces";
 import StaffRanksManager from "../managers/StaffRanksManager";
 
@@ -34,7 +35,7 @@ async function checkUserPoints(userId: string, username: string, executorId: str
 
     return { totalPoints, escalated: false };
   } catch (error) {
-    console.error("Failed to check user points:", error);
+    Log.error("Failed to check user points:", error);
     return { totalPoints: 0, escalated: false };
   }
 }
@@ -244,7 +245,7 @@ export default {
 
           await user.send({ embeds: [userEmbed] });
         } catch (error) {
-          console.error("Failed to DM user:", error);
+          Log.error("Failed to DM user:", error);
         }
 
         await utils.logStaffAction(executor.id, "WARN", user.id, `Warned ${user.tag} (${pointsText})`, {
@@ -341,20 +342,22 @@ export default {
 
           for (const msg of messages) {
             const timestamp = new Date(msg.timestamp).toLocaleString();
-            const initial = msg.username?.charAt(0).toUpperCase();
+            const initial = utils.escapeHtml(msg.username?.charAt(0).toUpperCase());
+            const username = utils.escapeHtml(msg.username);
+            const content = utils.escapeHtml(msg.content).replace(/\n/g, "<br>");
 
             if (msg.is_staff) {
-              const rankTag = utils.getRankSuffix(msg.staff_rank);
+              const rankTag = utils.escapeHtml(utils.getRankSuffix(msg.staff_rank));
               messagesHtml += `
               <div class="message">
                   <div class="avatar">${initial}</div>
                   <div class="message-content">
                       <div class="message-header">
-                          <span class="username">${msg.username}</span>
+                          <span class="username">${username}</span>
                           <span class="staff-badge">${rankTag}</span>
                           <span class="timestamp">${timestamp}</span>
                       </div>
-                      <div class="message-text">${msg.content}</div>
+                      <div class="message-text">${content}</div>
                   </div>
               </div>`;
             } else {
@@ -363,10 +366,10 @@ export default {
                   <div class="avatar">${initial}</div>
                   <div class="message-content">
                       <div class="message-header">
-                          <span class="username">${msg.username}</span>
+                          <span class="username">${username}</span>
                           <span class="timestamp">${timestamp}</span>
                       </div>
-                      <div class="message-text">${msg.content}</div>
+                      <div class="message-text">${content}</div>
                   </div>
               </div>`;
             }
@@ -374,14 +377,14 @@ export default {
 
           htmlTemplate = htmlTemplate
             .replace(/{ticketId}/g, ticketId.toString())
-            .replace(/{username}/g, user.tag)
-            .replace(/{userId}/g, user.id)
+            .replace(/{username}/g, utils.escapeHtml(user.tag))
+            .replace(/{userId}/g, utils.escapeHtml(user.id))
             .replace(/{status}/g, "Closed")
             .replace(/{statusClass}/g, "status-closed")
             .replace(/{createdAt}/g, new Date(ticket.created_at).toLocaleString())
             .replace(/{closedAt}/g, new Date().toLocaleString())
-            .replace(/{origin}/g, ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message")
-            .replace(/{initialMessage}/g, ticket.initial_message ?? "No initial message")
+            .replace(/{origin}/g, ticket.guild_id ? `Guild: ${utils.escapeHtml(ticket.guild_name)} (${ticket.guild_id})` : "Direct Message")
+            .replace(/{initialMessage}/g, utils.escapeHtml(ticket.initial_message) || "No initial message")
             .replace(/{messages}/g, messagesHtml);
 
           await fs.promises.writeFile(`./transcript-${ticketId}.txt`, textTranscript);
@@ -431,7 +434,7 @@ export default {
               await originalMessage.edit({ embeds: [updatedEmbed], components: [] });
             }
           } catch (error) {
-            console.error("Failed to update ticket embed:", error);
+            Log.error("Failed to update ticket embed:", error);
           }
 
           try {
@@ -459,7 +462,7 @@ export default {
 
             await user.send({ embeds: [closedEmbed] });
           } catch (error) {
-            console.error("Failed to notify user:", error);
+            Log.error("Failed to notify user:", error);
           }
 
           try {
@@ -482,7 +485,7 @@ export default {
               await (ticketChannel as any).send({ embeds: [closedNoticeEmbed], components: [deleteButton] });
             }
           } catch (error) {
-            console.error("Failed to send close notice:", error);
+            Log.error("Failed to send close notice:", error);
           }
 
           await fs.promises.unlink(`./transcript-${ticketId}.txt`);
@@ -490,7 +493,7 @@ export default {
 
           return utils.safeInteractionRespond(interaction, `Ticket #${ticketId} has been closed successfully.`);
         } catch (error) {
-          console.error("Failed to close ticket:", error);
+          Log.error("Failed to close ticket:", error);
           return utils.safeInteractionRespond(interaction, "Failed to close ticket. Please try again.");
         }
       }

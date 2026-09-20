@@ -7,7 +7,6 @@ export default {
         .setDescription("Shows you the bot privacy policy and data handling information."),
     category: "Info",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
-        // Create comprehensive privacy information embed
         const embed = new EmbedBuilder()
             .setTitle("🔒 BarnieBot Privacy & Data Policy")
             .setColor(0x5865F2)

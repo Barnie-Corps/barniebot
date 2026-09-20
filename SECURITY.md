@@ -13,7 +13,7 @@ BarnieBot’s security posture centers on least privilege, fast containment, and
 |--------|------------|
 | Token compromise | Environment variable storage; rotate on suspicion. |
 | Privilege escalation | Owner ID list enforced; staff rank checks block higher/equal modifications. |
-| RPG account takeover | AES-256-CBC encrypted passwords; single-session enforcement; email verification. |
+| RPG account takeover | bcrypt-hashed passwords (legacy accounts auto-migrated); single-session enforcement; email verification. |
 | Multi-accounting abuse | Session tracking per Discord UID; frozen/banned account status enforcement. |
 | Trading exploits | Tradeable/bound validation; inventory quantity checks; transaction atomicity. |
 | Item duplication | Database-driven inventory with transaction locks; no client-side manipulation. |
@@ -21,11 +21,12 @@ BarnieBot’s security posture centers on least privilege, fast containment, and
 | Transcript manipulation | Immutable message log with timestamps; HTML sanitization on export. |
 | Global chat abuse | Rate limits + worker offloaded decrements; blacklist/mute tables. |
 | Impersonation | Automatic stripping of spoofed staff suffix tags from non-staff. |
-| Sensitive message leakage | AES-256-CBC encryption of global chat content at rest. |
+| Sensitive message leakage | AES-256-GCM (authenticated) encryption of global chat content at rest. |
 | Dependency exploits | Encourage timely updates; no unreviewed runtime execution beyond restricted eval (owners only). |
 | Injection in filters/custom responses | Controlled by guild admins; user input sanitized before dispatch. |
 | SQL injection | Parameterized queries exclusively; no string concatenation of user input. |
 | Email spoofing | Gmail SMTP with app-specific passwords; verification code expiry. |
+| SSRF via user-supplied URLs (`/gethtml`, AI URL-fetch tools) | HTTP(S)-only, redirects blocked, private/loopback/link-local IPs rejected via `utils.assertPublicUrl` (DNS-resolved, not just literal host). |
 
 ## Reporting Vulnerabilities
 Please email: **barniecorps@gmail.com**
@@ -51,9 +52,9 @@ Do not disclose publicly until we acknowledge and provide a remediation timeline
 6. Encrypt global chat payloads before persistence.
 
 ## Data Protection
-- Global messages encrypted with AES-256-CBC (see `utils.encryptWithAES`).
-- RPG passwords encrypted with AES-256-CBC using bot encryption key; never stored in plaintext.
-- Session tokens generated with timestamp and random component; base64 encoded (not cryptographically secure but sufficient for non-sensitive verification).
+- Global messages encrypted with AES-256-GCM (see `utils.encryptWithAES`).
+- RPG passwords hashed with bcrypt (cost factor 12); legacy AES-encrypted or plaintext passwords are transparently upgraded to bcrypt on next successful login.
+- Verification and password-reset tokens are generated with `crypto.randomBytes`.
 - Email addresses stored only for RPG account verification; not shared with third parties.
 - Support ticket transcripts archived with staff attribution; HTML sanitized before export.
 - Moderation actions (warnings, mutes, blacklists) stored in dedicated tables with audit trail.

@@ -13,6 +13,7 @@ import utils from "../utils";
 import data from "../data";
 import ai from "../ai";
 import client from "..";
+import Log from "../Log";
 import * as fs from "fs";
 import * as path from "path";
 import { FunctionCall } from "@google/genai";
@@ -515,7 +516,7 @@ export default {
                         await placeholder.edit(cleanedResponseText || response.text).catch(() => { });
                     } catch (error) {
                         if (chatEnded) return;
-                        console.error("AI chat handling failed:", error);
+                        Log.error("AI chat handling failed:", error);
                         isWaitingForResponse = false;
                         await message.reply(texts.errors.no_response);
                     } finally {
@@ -915,7 +916,7 @@ export default {
                     const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
 
                     decoder.on("error", (error: Error) => {
-                        console.error(`[Voice AI] Decoder error:`, error);
+                        Log.error(`[Voice AI] Decoder error:`, error);
                     });
 
                     opusStream.pipe(decoder);
@@ -941,7 +942,7 @@ export default {
                                     console.log(`[Voice AI] Bot server-deafened while processing`);
                                 }
                             } catch (e) {
-                                console.warn(`[Voice AI] Failed to deafen bot while processing:`, e);
+                                Log.warn(`[Voice AI] Failed to deafen bot while processing`, { error: e instanceof Error ? e.message : String(e) });
                             }
 
                             let statusMessage = listeningMessage;
@@ -965,11 +966,9 @@ export default {
 
                                 let processedAudio = audioBuffer;
 
-                                // First resample from 48kHz to 16kHz (stereo)
                                 console.log(`[Voice AI] Resampling from 48kHz to 16kHz...`);
                                 processedAudio = Buffer.from(resampleAudio(processedAudio, 48000, 16000, 2));
 
-                                // Convert stereo to mono
                                 console.log(`[Voice AI] Converting stereo to mono...`);
                                 processedAudio = Buffer.from(stereoToMono(processedAudio));
 
@@ -994,7 +993,7 @@ export default {
                                             console.log(`[Voice AI] Bot undeafened (empty transcript)`);
                                         }
                                     } catch (e) {
-                                        console.warn(`[Voice AI] Failed to undeafen bot (empty transcript):`, e);
+                                        Log.warn(`[Voice AI] Failed to undeafen bot (empty transcript)`, { error: e instanceof Error ? e.message : String(e) });
                                     }
                                     isProcessing = false;
                                     return;
@@ -1028,7 +1027,7 @@ export default {
                                             console.log(`[Voice AI] Bot undeafened (safety fail)`);
                                         }
                                     } catch (e) {
-                                        console.warn(`[Voice AI] Failed to undeafen bot (safety fail):`, e);
+                                        Log.warn(`[Voice AI] Failed to undeafen bot (safety fail)`, { error: e instanceof Error ? e.message : String(e) });
                                     }
                                     return;
                                 }
@@ -1123,15 +1122,14 @@ export default {
                                                 console.log(`[Voice AI] Bot undeafened (playback finished)`);
                                             }
                                         } catch (e) {
-                                            console.warn(`[Voice AI] Failed to undeafen bot (after playback):`, e);
+                                            Log.warn(`[Voice AI] Failed to undeafen bot (after playback)`, { error: e instanceof Error ? e.message : String(e) });
                                         }
                                     })();
                                     console.log(`[Voice AI] Ready for next input`);
                                 });
 
                             } catch (error) {
-                                console.error("[Voice AI] Error in processAudio:", error);
-                                console.error("[Voice AI] Error stack:", (error as Error).stack);
+                                Log.error("[Voice AI] Error in processAudio:", error as Error);
                                 if (statusMessage) await safeEdit(statusMessage, texts.errors.voice_processing_error);
                                 try {
                                     const me = interaction.guild?.members.me;
@@ -1140,7 +1138,7 @@ export default {
                                         console.log(`[Voice AI] Bot undeafened (error path)`);
                                     }
                                 } catch (e) {
-                                    console.warn(`[Voice AI] Failed to undeafen bot (error path):`, e);
+                                    Log.warn(`[Voice AI] Failed to undeafen bot (error path)`, { error: e instanceof Error ? e.message : String(e) });
                                 }
                                 isProcessing = false;
                             }

@@ -5,7 +5,6 @@ import path from 'path';
 import fs from 'fs';
 import Table from 'cli-table3';
 import moment from 'moment';
-import figlet from 'figlet';
 import type { LogMeta } from "../types/logging";
 
 const LOG_DIR = path.join(__dirname, '..', 'logs');
@@ -141,14 +140,16 @@ export default class LogManager {
         this.logger.info(message, meta);
     }
 
-    public error(message: string, error: Error | null = null): void {
+    public error(message: string, error: unknown = null): void {
         const meta: LogMeta = {};
-        if (error) {
+        if (error instanceof Error) {
             meta.error = {
                 message: error.message,
                 stack: error.stack,
                 name: error.name
             };
+        } else if (error !== null && error !== undefined) {
+            meta.error = { message: String(error) };
         }
         this.logger.error(message, meta);
     }
@@ -167,43 +168,4 @@ export default class LogManager {
         }
     }
 
-    public async figlet(text: string): Promise<string> {
-        return new Promise((resolve, reject) => {
-            figlet(text, { 
-                font: 'Big',
-                horizontalLayout: 'default',
-                verticalLayout: 'default'
-            }, (err, data) => {
-                if (err) {
-                    reject(err);
-                    return;
-                }
-                resolve(data || '');
-            });
-        });
-    }
-
-    public static info(message: string, meta: LogMeta = {}): void {
-        LogManager.getInstance().info(message, meta);
-    }
-
-    public static error(message: string, error: Error | null = null): void {
-        LogManager.getInstance().error(message, error);
-    }
-
-    public static warning(message: string, meta: LogMeta = {}): void {
-        LogManager.getInstance().warn(message, meta);
-    }
-
-    public static success(message: string, meta: LogMeta = {}): void {
-        LogManager.getInstance().success(message, meta);
-    }
-
-    public static debug(message: string, meta: LogMeta = {}): void {
-        LogManager.getInstance().debug(message, meta);
-    }
-
-    public static async figlet(text: string): Promise<string> {
-        return LogManager.getInstance().figlet(text);
-    }
 }

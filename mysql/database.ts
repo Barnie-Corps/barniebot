@@ -26,15 +26,15 @@ const rawQuery = require("util").promisify(db.query).bind(db);
 };
 
 db.on('error', (err) => {
-    console.error('MySQL Pool Error:', err);
+    Log.error('MySQL pool error', err);
     if (err.code === 'PROTOCOL_CONNECTION_LOST') {
-        console.error('Database connection was closed.');
+        Log.error('Database connection was closed');
     }
     if (err.code === 'ER_CON_COUNT_ERROR') {
-        console.error('Database has too many connections.');
+        Log.error('Database has too many connections');
     }
     if (err.code === 'ECONNREFUSED') {
-        console.error('Database connection was refused.');
+        Log.error('Database connection was refused');
     }
 });
 

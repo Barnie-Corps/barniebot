@@ -340,7 +340,8 @@ const resolveLogsPath = (targetPath = ".") => {
 };
 
 const getEncryptionKey = (): Buffer => {
-  const key = process.env.ENCRYPTION_KEY || "barniebot-default-encryption-key-change-in-production";
+  const key = process.env.ENCRYPTION_KEY;
+  if (!key) throw new Error("ENCRYPTION_KEY environment variable is not set");
   return crypto.scryptSync(key, "salt", 32);
 };
 
@@ -405,11 +406,10 @@ const fetchUrlSafe = async (args: { url: string; maxChars?: number; timeoutMs?: 
   if (!args.url) return { error: "Missing url parameter" };
   let parsed: URL;
   try {
-    parsed = new URL(args.url);
-  } catch {
-    return { error: "Invalid URL" };
+    parsed = await assertPublicUrl(args.url);
+  } catch (error: any) {
+    return { error: error?.message || "Invalid URL" };
   }
-  if (!/^https?:$/.test(parsed.protocol)) return { error: "Only http/https URLs are allowed" };
   const maxBytes = 200 * 1024;
   const maxChars = Math.min(Math.max(args.maxChars ?? 50000, 1000), 50000);
   const timeoutMs = Math.min(Math.max(args.timeoutMs ?? 4000, 1000), 8000);
@@ -917,6 +917,8 @@ const transporter = nodemailer.createTransport({
 const utils: any = {
   createArrows: (length: number): string => "^".repeat(length),
   parseToolCalls,
+  escapeHtml,
+  assertPublicUrl,
   AIFunctions: {
     list_knowledge_sources: async (args: { requesterId?: string } = {}): Promise<any> => {
       const cache = await loadKnowledgeCache();
@@ -1883,7 +1885,6 @@ const utils: any = {
       }
       return { isVip: false };
     },
-    // === ROLE MANAGEMENT FUNCTIONS ===
     list_guild_roles: async (args: { requesterId?: string; guildId?: string; limit?: number }): Promise<any> => {
       if (!args?.requesterId || !args.guildId) return { error: "Missing parameters" };
       const owner = isOwner(args.requesterId) === true;
@@ -2089,7 +2090,6 @@ const utils: any = {
         }));
       return { members, count: role.members.size };
     },
-    // === MEMBER MANAGEMENT FUNCTIONS ===
     list_guild_members: async (args: { requesterId?: string; guildId?: string; limit?: number }): Promise<any> => {
       if (!args?.requesterId || !args.guildId) return { error: "Missing parameters" };
       const owner = isOwner(args.requesterId) === true;
@@ -3015,7 +3015,7 @@ const utils: any = {
         try {
           await user.send({ embeds: [userCloseEmbed], components: [userCloseButton] });
         } catch (error) {
-          console.error("Failed to send close option to user:", error);
+          Log.error("Failed to send close option to user:", error);
         }
 
         await db.query("UPDATE support_tickets SET message_id = ? WHERE id = ?", [ticketMessage.id, ticketId]);
@@ -3032,7 +3032,7 @@ const utils: any = {
 
         return { success: true, ticketId, channelId: ticketChannel.id, messageId: ticketMessage.id };
       } catch (error: any) {
-        console.error("Support ticket creation error:", error);
+        Log.error("Support ticket creation error:", error);
         return { error: error.message ?? "Failed to create support ticket" };
       }
     },
@@ -3235,7 +3235,7 @@ const utils: any = {
           }
         }
       } catch (error) {
-        console.error("Failed to update ticket embed:", error);
+        Log.error("Failed to update ticket embed:", error);
       }
 
       try {
@@ -3262,7 +3262,7 @@ const utils: any = {
           .setTimestamp();
         await user.send({ embeds: [closedEmbed] });
       } catch (error) {
-        console.error("Failed to notify user of ticket closure:", error);
+        Log.error("Failed to notify user of ticket closure:", error);
       }
 
       const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel | null;
@@ -4370,7 +4370,6 @@ const utils: any = {
       const shared = pendingTranslations.get(cacheKey) as Promise<string>;
       return { text: await shared };
     }
-    // Circuit breaker check
     if (circuitBreakerOpen) {
       if (now - circuitBreakerLastFailure > CIRCUIT_BREAKER_TIMEOUT) {
         circuitBreakerOpen = false;
@@ -4399,7 +4398,6 @@ const utils: any = {
           if (response.message?.error) throw new Error(response.message.error);
           const translatedText = String(response.message.translation ?? "");
           cacheManager.setLocal(fullCacheKey, { value: translatedText }, TRANSLATE_CACHE_TTL);
-          // Success - reset circuit breaker
           if (circuitBreakerFailures > 0) {
             circuitBreakerFailures = Math.max(0, circuitBreakerFailures - 1);
           }
@@ -4427,7 +4425,6 @@ const utils: any = {
     }
   },
   processRateLimitsWorker,
-  // --- Staff utilities ---
   getStaffRankIndex: (rank?: string | null): number => {
     return StaffRanksManager.getRankHierarchyByName(rank ?? null);
   },
@@ -4470,7 +4467,7 @@ const utils: any = {
         created_at: Date.now()
       }]);
     } catch (error) {
-      console.error("Failed to log staff action:", error);
+      Log.error("Failed to log staff action:", error);
     }
   },
   getRankSuffix: (rank?: string | null): string => {
@@ -4530,7 +4527,6 @@ const utils: any = {
     else await db.query("INSERT INTO staff SET ?", [{ uid: userId, rank: rankName, hierarchy_position: hierarchy }]);
     invalidateStaffModCache(userId);
   },
-  // Blacklist / mute helpers for global chat
   isUserBlacklisted: async (userId: string): Promise<boolean> => {
     const res: any = await db.query("SELECT * FROM global_bans WHERE id = ? AND active = TRUE", [userId]);
     return Array.isArray(res) && res.length > 0;
@@ -4596,14 +4592,11 @@ const utils: any = {
         if (typeof val !== "object" || Array.isArray(val)) continue;
         for (const [k, v] of Object.entries(val)) {
           if (typeof v === "string") {
-            // Schedule translation
             translateTasks.push((async () => {
               try {
                 const translated = await utils.translate(v, language, target);
                 assign(root, [...item.path, k], translated.text);
-              } catch (e) {
-                // Fallback: keep original if translation fails
-              }
+              } catch { }
             })());
           } else if (typeof v === "object" && !Array.isArray(v)) {
             queue.push({ path: [...item.path, k], value: v });
@@ -4642,76 +4635,6 @@ const utils: any = {
   isBcryptPasswordHash,
   recordDailyMetric,
   recordDailyDistinctMetric,
-  // getAiResponse: async (text: string, lang: string, id: string, isStart: boolean): Promise<string> => {
-  //   const modelId = "ChitChatterLdJSpZu";
-  //   let texts = {
-  //     mainMessage: "Speak in English",
-  //     mainReply: "Okay, I'll speak in English",
-  //     instruction: "REMEMBER: Do not generate a response longer than 1800 characters"
-  //   }
-  //   if (lang !== "es") {
-  //     texts = await utils.autoTranslate(texts, "es", lang);
-  //     texts.mainMessage = (function () {
-  //       const t = texts.mainMessage.trim().split(" ");
-  //       t[2] = langs.where(1, lang)?.local as string;
-  //       return t.join(" ");
-  //     })();
-  //     texts.mainReply = (function () {
-  //       const t = texts.mainReply.trim().split(" ");
-  //       t[6] = langs.where(1, lang)?.local as string;
-  //       return t.join(" ");
-  //     })();
-  //   }
-  //   const url = "https://www.blackbox.ai/api/chat";
-
-  //   const getMessage = (content: string, role: string = "user") => {
-  //     return {
-  //       content: content,
-  //       id,
-  //       role: role,
-  //       createdAt: new Date().toISOString()
-  //     };
-  //   };
-  //   const sendRequest = async (args: string) => {
-  //     const agentMode = {
-  //       mode: true,
-  //       id: modelId
-  //     };
-
-  //     const messages = [
-  //       getMessage(texts.mainMessage),
-  //       getMessage(texts.mainReply, "assistant"),
-  //       getMessage(`${args}\n${texts.instruction}`)
-  //     ];
-  //     if (!isStart) messages.splice(0, 2);
-
-  //     const responsePayload = {
-  //       messages: messages,
-  //       previewToken: null,
-  //       codeModelMode: true,
-  //       agentMode: agentMode,
-  //       trendingAgentMode: {},
-  //       isMicMode: false,
-  //       maxTokens: 1024 / 2
-  //     };
-
-  //     try {
-  //       const response = await fetch(url, {
-  //         method: 'POST',
-  //         headers: {
-  //           'Content-Type': 'application/json',
-  //           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 OPR/105.0.0.0'
-  //         },
-  //         body: JSON.stringify(responsePayload)
-  //       });
-  //       const result = (await response.text()).split("$@$")[2]
-  //       return result;
-  //     } catch (error: any) {
-  //       console.error('Error sending request:', error.stack);
-  //     }
-  //   };
-  //   return await sendRequest(text) as string;
-  // },
   isVIP: async (id: string) => {
     const foundVip: any = await db.query("SELECT * FROM vip_users WHERE id = ? ORDER BY end_date DESC LIMIT 1", [id]);
     const row = foundVip?.[0];
@@ -4785,7 +4708,7 @@ const utils: any = {
     try {
       result = await chat.sendMessage(prompt);
     } catch (error: any) {
-      console.error("Error getting AI response:", error, error.stack);
+      Log.error("Error getting AI response:", error);
       return { text: "Error: Could not get a response from the AI service. Please try again later.", call: null, toolCalls: [] };
     }
     const response = result.response;

@@ -63,7 +63,6 @@ export function wavToRawPCM(wavBuffer: Buffer): Buffer {
         throw new Error("No 'data' chunk found in WAV file");
     }
 
-    // Extract raw PCM data
     return wavBuffer.slice(dataOffset, dataOffset + dataSize);
 }
 
@@ -146,7 +145,6 @@ export function getWavInfo(wavBuffer: Buffer): {
     const sampleRate = wavBuffer.readUInt32LE(fmtOffset + 4);
     const bitsPerSample = wavBuffer.readUInt16LE(fmtOffset + 14);
 
-    // Find data chunk for duration calculation
     offset = 12;
     let dataSize = 0;
 

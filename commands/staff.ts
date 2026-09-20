@@ -8,15 +8,12 @@ import { StaffMember, GlobalWarning, GlobalBan, CountResult } from "../types/int
 function canManageRank(executorRank: string | null, targetRank: string | null, desiredRank: string | null): { allowed: boolean; error?: string } {
     const execIndex = utils.getStaffRankIndex(executorRank);
     if (execIndex < 0) return { allowed: false, error: "You are not staff." };
-    // Minimum rank to manage others: Chief of Moderation (index >= rank index of 'Chief of Moderation')
     const minIndex = utils.getStaffRankIndex("Chief of Moderation");
     if (execIndex < minIndex) return { allowed: false, error: "Insufficient rank to manage staff." };
     const targetIndex = utils.getStaffRankIndex(targetRank);
     const desiredIndex = utils.getStaffRankIndex(desiredRank);
     if (desiredRank && desiredIndex < 0) return { allowed: false, error: "Invalid desired rank." };
-    // Cannot promote to rank equal or higher than executor
     if (desiredRank && desiredIndex >= execIndex) return { allowed: false, error: "Cannot assign a rank equal or higher than your own." };
-    // Cannot demote/dismiss someone higher or equal
     if (targetRank && targetIndex >= execIndex) return { allowed: false, error: "Cannot modify someone of equal or higher rank." };
     return { allowed: true };
 }
@@ -90,7 +87,6 @@ export default {
                 const page = Math.max(1, reqPage);
                 const offset = (page - 1) * PAGE_SIZE;
 
-                // Helper to convert various epoch units to seconds
                 const toSeconds = (val: any): number => {
                     if (val == null) return 0;
                     const n = typeof val === "string" ? parseInt(val, 10) : Number(val);
@@ -118,7 +114,6 @@ export default {
                     .setTitle(`Cases for ${user.username}`)
                     .setColor("Purple");
 
-                // Description with blacklist and mute status
                 const blStatus = ban ? `${ban.active ? "Active" : "Inactive"}${typeof ban.times === "number" ? ` (times ${ban.times})` : ""}` : "None";
                 let muteStatus = "None";
                 if (mute) {
@@ -132,12 +127,11 @@ export default {
 
                 embed.setDescription(`Blacklist: ${blStatus}\nMute: ${muteStatus}`);
 
-                // Warnings fields (paged)
-                                let totalPages = 1;
-                                if (warnCount === 0) {
+                let totalPages = 1;
+                if (warnCount === 0) {
                     embed.addFields({ name: "Warnings", value: "No warnings.", inline: false });
                 } else {
-                                        totalPages = Math.max(1, Math.ceil(warnCount / PAGE_SIZE));
+                    totalPages = Math.max(1, Math.ceil(warnCount / PAGE_SIZE));
                     const list = Array.isArray(warns) ? warns : [];
                     list.forEach((w, i) => {
                         const createdSec = toSeconds(w.createdAt);
@@ -148,24 +142,23 @@ export default {
                     });
                     embed.setFooter({ text: `Warnings ${Math.min(offset + 1, warnCount)}-${Math.min(offset + list.length, warnCount)} of ${warnCount} • Page ${page}/${totalPages}` });
                 }
-                                // Build pagination buttons
-                                const prev = new ButtonBuilder()
-                                    .setCustomId(`staffcases-prev-${interaction.user.id}-${user.id}-${Math.max(1, page - 1)}`)
-                                    .setLabel("Previous")
-                                    .setStyle(ButtonStyle.Secondary)
-                                    .setDisabled(page <= 1);
-                                const next = new ButtonBuilder()
-                                    .setCustomId(`staffcases-next-${interaction.user.id}-${user.id}-${Math.min(totalPages, page + 1)}`)
-                                    .setLabel("Next")
-                                    .setStyle(ButtonStyle.Secondary)
-                                    .setDisabled(page >= totalPages);
-                                const close = new ButtonBuilder()
-                                    .setCustomId(`staffcases-close-${interaction.user.id}`)
-                                    .setLabel("Close")
-                                    .setStyle(ButtonStyle.Danger);
-                                const row = new ActionRowBuilder<ButtonBuilder>().addComponents(prev, next, close);
+                const prev = new ButtonBuilder()
+                    .setCustomId(`staffcases-prev-${interaction.user.id}-${user.id}-${Math.max(1, page - 1)}`)
+                    .setLabel("Previous")
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(page <= 1);
+                const next = new ButtonBuilder()
+                    .setCustomId(`staffcases-next-${interaction.user.id}-${user.id}-${Math.min(totalPages, page + 1)}`)
+                    .setLabel("Next")
+                    .setStyle(ButtonStyle.Secondary)
+                    .setDisabled(page >= totalPages);
+                const close = new ButtonBuilder()
+                    .setCustomId(`staffcases-close-${interaction.user.id}`)
+                    .setLabel("Close")
+                    .setStyle(ButtonStyle.Danger);
+                const row = new ActionRowBuilder<ButtonBuilder>().addComponents(prev, next, close);
 
-                                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: null, components: [row], ephemeral: true });
+                return utils.safeInteractionRespond(interaction, { embeds: [embed], content: null, components: [row], ephemeral: true });
             }
         }
     },

@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, AutocompleteInteraction } from "discord.js";
 import db, { withTransaction } from "../mysql/database";
 import utils from "../utils";
+import Log from "../Log";
 import { RPGItem, RPGInventoryItem } from "../types/interfaces";
 
 export default {
@@ -243,7 +244,7 @@ export default {
                     if (error?.message === "#NOT_ENOUGH_GOLD") {
                         return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.not_enough_gold + totalCost + texts.errors.but_only_have + character.gold + "!");
                     }
-                    console.error("Shop buy failed:", error);
+                    Log.error("Shop buy failed:", error);
                     return utils.safeInteractionRespond(interaction, "❌ An error occurred while processing your purchase.");
                 }
 
@@ -347,7 +348,7 @@ export default {
                     if (error?.message === "#ITEM_GONE") {
                         return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.item_not_found);
                     }
-                    console.error("Shop sell failed:", error);
+                    Log.error("Shop sell failed:", error);
                     return utils.safeInteractionRespond(interaction, "❌ An error occurred while selling your item.");
                 }
 

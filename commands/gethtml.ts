@@ -22,7 +22,7 @@ export default {
         const rawUrl = interaction.options.getString("url") as string;
         let parsedUrl: URL;
         try {
-            parsedUrl = new URL(rawUrl);
+            parsedUrl = await utils.assertPublicUrl(rawUrl);
         } catch {
             await utils.safeInteractionRespond(interaction, texts.invalid);
             return;
@@ -31,7 +31,7 @@ export default {
         const timeout = setTimeout(() => controller.abort(), 15000);
         let response: globalThis.Response | undefined;
         try {
-            response = await fetch(parsedUrl.toString(), { signal: controller.signal } as any);
+            response = await fetch(parsedUrl.toString(), { signal: controller.signal, redirect: "manual" } as any);
         } catch {
             clearTimeout(timeout);
             await utils.safeInteractionRespond(interaction, texts.invalid);
@@ -42,7 +42,9 @@ export default {
             await utils.safeInteractionRespond(interaction, texts.invalid);
             return;
         }
-        let html = await response.text();
+        const MAX_BYTES = 2 * 1024 * 1024;
+        const buf = Buffer.from(await response.arrayBuffer());
+        let html = buf.subarray(0, MAX_BYTES).toString("utf-8");
         const systemIp = String(process.env.SYSTEM_IP || "");
         if (systemIp.length > 1) {
             html = (html as any).replaceAll(systemIp, "[SYSTEM IP CENSORED]");
