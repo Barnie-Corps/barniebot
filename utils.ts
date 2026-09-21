@@ -14,14 +14,14 @@ import * as os from "os";
 import Log from "./Log";
 import langs from "langs";
 import data from "./data";
-import client from ".";
+import client, { manager } from ".";
 import { promises as fs } from "fs";
 import * as vm from "vm";
 import { exec as execCallback } from "child_process";
 import { promisify, inspect, TextDecoder, TextEncoder } from "util";
 import * as mathjs from "mathjs";
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, PermissionsBitField, EmbedBuilder, TextChannel, GuildScheduledEvent } from "discord.js";
-import type { DiscordUser, UserLanguage, AIMemory, KnowledgeSource, KnowledgeCache, ProjectKnowledgeDoc, ProjectKnowledgeCache, AiChatTierStatus, RPGSession, RPGCharacter } from "./types/interfaces";
+import type { DiscordUser, UserLanguage, AIMemory, KnowledgeSource, KnowledgeCache, ProjectKnowledgeDoc, ProjectKnowledgeCache, AiChatTierStatus, RPGSession, RPGCharacter, PermissionCheckResult } from "./types/interfaces";
 import cacheManager from "./managers/CacheManager";
 const TRANSLATE_WORKER_TYPE = "translate";
 const TRANSLATE_WORKER_PATH = path.join(__dirname, "workers/translate.js");
@@ -500,9 +500,7 @@ const closeSupportTicket = async (args: {
   const closedAt = Date.now();
 
   const durationMs = closedAt - Number(ticket.created_at || closedAt);
-  const hours = Math.floor(durationMs / 3600000);
-  const minutes = Math.floor((durationMs % 3600000) / 60000);
-  const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+  const durationText = utils.formatDurationText(durationMs);
 
   let textTranscript = `Support Ticket #${args.ticketId} - Transcript\n`;
   textTranscript += `User: ${user.tag} (${user.id})\n`;
@@ -1115,6 +1113,61 @@ const utils: any = {
   escapeHtml,
   assertPublicUrl,
   closeSupportTicket,
+  formatWelcomeMessage: (msg: string, userId: string, username: string, displayName: string, server: string, count: number): string => {
+    return msg
+      .replace(/\{user\}/g, `<@${userId}>`)
+      .replace(/\{username\}/g, username)
+      .replace(/\{displayname\}/g, displayName)
+      .replace(/\{server\}/g, server)
+      .replace(/\{count\}/g, String(count));
+  },
+  formatDurationText: (ms: number): string => {
+    const hours = Math.floor(ms / 3600000);
+    const minutes = Math.floor((ms % 3600000) / 60000);
+    return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+  },
+  formatBytes: (bytes: number): string => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    const idx = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+    const value = bytes / Math.pow(1024, idx);
+    return `${value.toFixed(value >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+  },
+  resolveUsers: async (ids: Array<string | null | undefined>): Promise<Map<string, any>> => {
+    const unique = Array.from(new Set(ids.filter((id): id is string => !!id)));
+    const users = new Map<string, any>();
+    const missing: string[] = [];
+    for (const id of unique) {
+      const cached = client.users.cache.get(id);
+      if (cached) users.set(id, cached);
+      else missing.push(id);
+    }
+    const resolved = await Promise.all(missing.map(id => client.users.fetch(id).catch(() => null)));
+    for (let i = 0; i < missing.length; i++) {
+      const u = resolved[i];
+      if (u) users.set(missing[i], u);
+    }
+    return users;
+  },
+  extractSnowflakeIds: (raw: string | null | undefined): string[] => {
+    if (!raw) return [];
+    const normalized = raw.trim().toLowerCase();
+    if (!normalized || normalized === "none" || normalized === "clear") return [];
+    return (raw.match(/\d{17,20}/g) || []).filter((value, index, array) => array.indexOf(value) === index);
+  },
+  parseDurationString: (str: string): number | null => {
+    if (!/^(\d+[smhd])+$/.test(str)) return null;
+    const parts = str.match(/\d+[smhd]/g);
+    if (!parts) return null;
+    const unitMs: Record<string, number> = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
+    let ms = 0;
+    for (const part of parts) {
+      const val = parseInt(part, 10);
+      const unit = part.slice(-1);
+      ms += val * unitMs[unit];
+    }
+    return ms;
+  },
   AIFunctions: {
     list_knowledge_sources: async (args: { requesterId?: string } = {}): Promise<any> => {
       const cache = await loadKnowledgeCache();
@@ -4446,33 +4499,66 @@ const utils: any = {
   getStaffRankIndex: (rank?: string | null): number => {
     return StaffRanksManager.getRankHierarchyByName(rank ?? null);
   },
-  ensureStaff: (executorRank: string | null): { ok: boolean; error?: string } => {
+  ensureStaff: (executorRank: string | null): PermissionCheckResult => {
     const idx = StaffRanksManager.getRankHierarchyByName(executorRank ?? null);
     if (idx < 0) return { ok: false, error: "You must be staff to use this command." };
     return { ok: true };
   },
-  ensureAnyStaff: (executorRank: string | null): { ok: boolean; error?: string } => {
+  ensureAnyStaff: (executorRank: string | null): PermissionCheckResult => {
     const idx = StaffRanksManager.getRankHierarchyByName(executorRank ?? null);
     if (idx < 0) return { ok: false, error: "Insufficient permissions (staff only)." };
     return { ok: true };
   },
-  ensureModPlus: (executorRank: string | null): { ok: boolean; error?: string } => {
+  ensureModPlus: (executorRank: string | null): PermissionCheckResult => {
     const idx = StaffRanksManager.getRankHierarchyByName(executorRank ?? null);
     const min = StaffRanksManager.getRankHierarchyByName("Moderator");
     if (idx < 0 || idx < min) return { ok: false, error: "Moderator rank or higher required." };
     return { ok: true };
   },
-  ensureAdminPlus: (executorRank: string | null): { ok: boolean; error?: string } => {
+  ensureAdminPlus: (executorRank: string | null): PermissionCheckResult => {
     const idx = StaffRanksManager.getRankHierarchyByName(executorRank ?? null);
     const min = StaffRanksManager.getRankHierarchyByName("Probationary Administrator");
     if (idx < 0 || idx < min) return { ok: false, error: "Probationary Administrator rank or higher required." };
     return { ok: true };
   },
-  ensureCoMPlus: (executorRank: string | null): { ok: boolean; error?: string } => {
+  ensureCoMPlus: (executorRank: string | null): PermissionCheckResult => {
     const idx = StaffRanksManager.getRankHierarchyByName(executorRank ?? null);
     const min = StaffRanksManager.getRankHierarchyByName("Chief of Moderation");
     if (idx < 0 || idx < min) return { ok: false, error: "Chief of Moderation rank or higher required." };
     return { ok: true };
+  },
+  checkWarningEscalation: async (userId: string, username: string, executorId: string): Promise<{ totalPoints: number; escalated: boolean; action?: "ban" | "mute" }> => {
+    try {
+      const result: any = await db.query(
+        "SELECT COALESCE(SUM(points), 0) AS total FROM global_warnings WHERE userid = ? AND active = TRUE AND (appeal_status IS NULL OR appeal_status != 'approved') AND expires_at > ?",
+        [userId, Date.now()]
+      );
+      const totalPoints = Number(result?.[0]?.total ?? 0);
+
+      if (totalPoints >= 5) {
+        await db.query("INSERT INTO global_bans (id, active, times) VALUES (?, TRUE, 1) ON DUPLICATE KEY UPDATE active = TRUE, times = times + 1", [userId]);
+        utils.invalidateStaffModCache(userId);
+        await manager.announce(`⚠️ **AUTO-BAN**: User \`${username}\` has been automatically blacklisted due to reaching ${totalPoints} warning points.`, "en");
+        await utils.logStaffAction(executorId, "AUTO_BAN", userId, `Auto-banned ${username} for ${totalPoints} points`, { totalPoints, threshold: 5 });
+        return { totalPoints, escalated: true, action: "ban" };
+      }
+      if (totalPoints >= 3) {
+        const until = Date.now() + 24 * 60 * 60 * 1000;
+        await db.query(
+          "INSERT INTO global_mutes SET ? ON DUPLICATE KEY UPDATE reason = VALUES(reason), authorid = VALUES(authorid), createdAt = VALUES(createdAt), until = VALUES(until)",
+          [{ id: userId, reason: "Automatic mute due to warning points", authorid: executorId, createdAt: Date.now(), until }]
+        );
+        utils.invalidateStaffModCache(userId);
+        await manager.announce(`⚠️ **AUTO-MUTE**: User \`${username}\` has been automatically muted for 24h due to reaching ${totalPoints} warning points.`, "en");
+        await utils.logStaffAction(executorId, "AUTO_MUTE", userId, `Auto-muted ${username} for 24h (${totalPoints} points)`, { totalPoints, threshold: 3, duration: "24h" });
+        return { totalPoints, escalated: true, action: "mute" };
+      }
+
+      return { totalPoints, escalated: false };
+    } catch (error) {
+      Log.error("Failed to check warning escalation:", error);
+      return { totalPoints: 0, escalated: false };
+    }
   },
   logStaffAction: async (staffId: string, actionType: string, targetId: string | null, details: string, metadata?: any): Promise<void> => {
     try {

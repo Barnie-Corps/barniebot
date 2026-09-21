@@ -1,20 +1,7 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
-import { RPGSession, RPGCharacter, RPGDailyReward } from "../types/interfaces";
-
-async function getSession(userId: string) {
-    const session = (await db.query(
-        "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
-        [userId]
-    ) as unknown as RPGSession[]);
-    return session[0] || null;
-}
-
-async function getCharacter(accountId: number) {
-    const character = (await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]) as unknown as RPGCharacter[]);
-    return character[0] || null;
-}
+import { RPGDailyReward } from "../types/interfaces";
 
 export default {
     data: new SlashCommandBuilder()
@@ -66,15 +53,12 @@ export default {
             texts = await utils.autoTranslate(texts, "en", lang);
         }
 
-        const session = await getSession(interaction.user.id);
-        if (!session) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.not_logged_in + "`/login`" + texts.errors.come_back });
-        }
-
-        const character = await getCharacter(session.account_id);
-        if (!character) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.no_character + "`/rpg create`" + texts.errors.come_back });
-        }
+        const profile = await utils.requireActiveRpgProfile(interaction, interaction.user.id, {
+            notLoggedIn: "❌ " + texts.errors.not_logged_in + "`/login`" + texts.errors.come_back,
+            noCharacter: "❌ " + texts.errors.no_character + "`/rpg create`" + texts.errors.come_back
+        });
+        if (!profile) return;
+        const { character } = profile;
 
         const dailyData = (await db.query("SELECT * FROM rpg_daily_rewards WHERE character_id = ?", [character.id]) as unknown as RPGDailyReward[]);
         const now = Date.now();

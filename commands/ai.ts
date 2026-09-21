@@ -19,7 +19,7 @@ import * as path from "path";
 import { FunctionCall } from "@google/genai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import NVIDIAModels from "../NVIDIAModels";
-import { prepareAudioForASR, stereoToMono, resampleAudio } from "../utils/audioUtils";
+import { prepareAudioForASR, stereoToMono, resampleAudio, createWavHeader } from "../utils/audioUtils";
 import { Writable, PassThrough } from "stream";
 import prism from "prism-media";
 
@@ -541,12 +541,9 @@ export default {
                 const alertsLanguageRaw = interaction.options.getString("alerts_language");
                 const whitelistChannelsRaw = interaction.options.getString("whitelist_channels");
                 const whitelistRolesRaw = interaction.options.getString("whitelist_roles");
-                const parseIdList = (raw: string | null): string[] | null | undefined => {
+                const parseIdList = (raw: string | null): string[] | undefined => {
                     if (raw === null) return undefined;
-                    const normalized = raw.trim().toLowerCase();
-                    if (!normalized || normalized === "none" || normalized === "clear") return [];
-                    const ids = (raw.match(/\d{17,20}/g) || []).filter((v, i, arr) => arr.indexOf(v) === i);
-                    return ids;
+                    return utils.extractSnowflakeIds(raw);
                 };
                 let alertsLanguage: string | null = null;
                 if (alertsLanguageRaw) {
@@ -642,7 +639,7 @@ export default {
                 const scope = interaction.options.getString("scope", true);
                 const action = interaction.options.getString("action", true);
                 const valuesRaw = interaction.options.getString("values");
-                const ids = (valuesRaw?.match(/\d{17,20}/g) || []).filter((value, index, array) => array.indexOf(value) === index);
+                const ids: string[] = utils.extractSnowflakeIds(valuesRaw);
                 const configRows = await db.query("SELECT * FROM ai_monitor_configs WHERE guild_id = ?", [interaction.guildId]) as unknown as any[];
                 const existing = configRows?.[0];
                 const getStoredList = (key: "channel_whitelist_ids" | "role_whitelist_ids") => {
@@ -1164,22 +1161,4 @@ export default {
             }
         }
     }
-}
-
-function createWavHeader(dataLength: number, sampleRate: number, channels: number, bitsPerSample: number): Buffer {
-    const header = Buffer.alloc(44);
-    header.write("RIFF", 0);
-    header.writeUInt32LE(36 + dataLength, 4);
-    header.write("WAVE", 8);
-    header.write("fmt ", 12);
-    header.writeUInt32LE(16, 16);
-    header.writeUInt16LE(1, 20);
-    header.writeUInt16LE(channels, 22);
-    header.writeUInt32LE(sampleRate, 24);
-    header.writeUInt32LE(sampleRate * channels * (bitsPerSample / 8), 28);
-    header.writeUInt16LE(channels * (bitsPerSample / 8), 32);
-    header.writeUInt16LE(bitsPerSample, 34);
-    header.write("data", 36);
-    header.writeUInt32LE(dataLength, 40);
-    return header;
 }

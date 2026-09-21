@@ -9,14 +9,6 @@ import os from "os";
 const HIGH_RANKS = ["owner", "admin", "lead", "manager"];
 const MAX_ATTACHMENT_SIZE = 8 * 1024 * 1024;
 
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  const idx = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
-  const value = bytes / Math.pow(1024, idx);
-  return `${value.toFixed(value >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
-}
-
 function findMysqldump(): string | null {
   const platform = os.platform();
 
@@ -123,7 +115,7 @@ export default {
       const files = canAttach ? [{ attachment: filePath, name: fileName }] : [];
       if (ok && (!fileSize || fileSize <= 0)) embed.addFields({ name: "Note", value: "Backup file was empty." });
       if (ok && fileSize && fileSize > MAX_ATTACHMENT_SIZE) {
-        embed.addFields({ name: "Note", value: `Backup file is ${formatBytes(fileSize)} and exceeds the attachment limit.` });
+        embed.addFields({ name: "Note", value: `Backup file is ${utils.formatBytes(fileSize)} and exceeds the attachment limit.` });
       }
       await interaction.followUp({ embeds: [embed], files });
     };
@@ -201,6 +193,6 @@ export default {
       }
     } catch { }
 
-    return sendResult(true, `Backup completed from host ${selectedHost}. File size: ${formatBytes(size)}`, size);
+    return sendResult(true, `Backup completed from host ${selectedHost}. File size: ${utils.formatBytes(size)}`, size);
   }
 };

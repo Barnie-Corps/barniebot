@@ -1,21 +1,8 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
-import { RPGSession, RPGCharacter, RPGDungeon, RPGCraftingMaterial } from "../types/interfaces";
+import { RPGDungeon, RPGCraftingMaterial } from "../types/interfaces";
 import type { CharacterMaterialRow, DungeonHistoryRow, DungeonRunRow, DungeonStatusRow } from "../types/dungeonCommand";
-
-async function getSession(userId: string) {
-    const session = (await db.query(
-        "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
-        [userId]
-    ) as unknown as RPGSession[]);
-    return session[0] || null;
-}
-
-async function getCharacter(accountId: number) {
-    const character = (await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]) as unknown as RPGCharacter[]);
-    return character[0] || null;
-}
 
 export default {
     data: new SlashCommandBuilder()
@@ -124,15 +111,12 @@ export default {
             texts = await utils.autoTranslate(texts, "en", lang);
         }
 
-        const session = await getSession(interaction.user.id);
-        if (!session) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.not_logged_in + "`/login`." });
-        }
-
-        const character = await getCharacter(session.account_id);
-        if (!character) {
-            return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.no_character + "`/rpg create`." });
-        }
+        const profile = await utils.requireActiveRpgProfile(interaction, interaction.user.id, {
+            notLoggedIn: "❌ " + texts.errors.not_logged_in + "`/login`.",
+            noCharacter: "❌ " + texts.errors.no_character + "`/rpg create`."
+        });
+        if (!profile) return;
+        const { character } = profile;
 
         const sub = interaction.options.getSubcommand();
 

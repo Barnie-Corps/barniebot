@@ -115,7 +115,7 @@ const deleteUserData = async (userId: string) => {
         await db.query(sql, params);
     }
 
-    return { accountIds: accountIds.length, characterIds: characterIds.length };
+    return { accountCount: accountIds.length, characterCount: characterIds.length };
 };
 
 export default {
@@ -159,8 +159,8 @@ export default {
                 .setTitle("🗑️ User Data Deleted")
                 .setDescription(`Removed stored data for ${user.tag}.`)
                 .addFields(
-                    { name: "Accounts", value: String(result.accountIds), inline: true },
-                    { name: "Characters", value: String(result.characterIds), inline: true }
+                    { name: "Accounts", value: String(result.accountCount), inline: true },
+                    { name: "Characters", value: String(result.characterCount), inline: true }
                 )
                 .setTimestamp()],
             ephemeral: true

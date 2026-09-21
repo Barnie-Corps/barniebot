@@ -5,23 +5,6 @@ import db from "../mysql/database";
 import client, { manager } from "..";
 import Log from "../Log";
 
-const resolveUsers = async (ids: Array<string | null | undefined>): Promise<Map<string, any>> => {
-    const unique = Array.from(new Set(ids.filter((id): id is string => !!id)));
-    const users = new Map<string, any>();
-    const missing: string[] = [];
-    for (const id of unique) {
-        const cached = client.users.cache.get(id);
-        if (cached) users.set(id, cached);
-        else missing.push(id);
-    }
-    const resolved = await Promise.all(missing.map(id => client.users.fetch(id).catch(() => null)));
-    for (let i = 0; i < missing.length; i++) {
-        const u = resolved[i];
-        if (u) users.set(missing[i], u);
-    }
-    return users;
-};
-
 export default {
     data: new SlashCommandBuilder()
         .setName("stafftools")
@@ -216,7 +199,7 @@ export default {
                     .setTimestamp();
 
                 const shown = tickets.slice(0, 10);
-                const users = await resolveUsers(shown.map((t: any) => t.user_id).concat(shown.map((t: any) => t.assigned_to)));
+                const users = await utils.resolveUsers(shown.map((t: any) => t.user_id).concat(shown.map((t: any) => t.assigned_to)));
                 for (const ticket of shown) {
                     const user = users.get(ticket.user_id) ?? null;
                     const assignedUser = ticket.assigned_to ? users.get(ticket.assigned_to) ?? null : null;
@@ -305,7 +288,7 @@ export default {
                     .setTitle(texts.workload_title)
                     .setDescription(texts.workload_description)
                     .setTimestamp();
-                const users = await resolveUsers(rows.map((r: any) => r.uid));
+                const users = await utils.resolveUsers(rows.map((r: any) => r.uid));
                 for (const row of rows) {
                     const user = users.get(row.uid) ?? null;
                     const oldest = row.oldest_open_at ? Math.floor((Date.now() - Number(row.oldest_open_at)) / 60000) : null;
@@ -391,7 +374,7 @@ export default {
                     .setDescription(`Showing ${notes.length} note(s)`)
                     .setTimestamp();
 
-                const users = await resolveUsers(notes.map((n: any) => n.staff_id));
+                const users = await utils.resolveUsers(notes.map((n: any) => n.staff_id));
                 for (const note of notes) {
                     const staffUser = users.get(note.staff_id) ?? null;
                     const timestamp = new Date(note.created_at);
@@ -426,7 +409,7 @@ export default {
                     .setTimestamp();
 
                 const shown = tickets.slice(0, 5);
-                const users = await resolveUsers(shown.map((t: any) => t.user_id).concat(shown.map((t: any) => t.assigned_to)));
+                const users = await utils.resolveUsers(shown.map((t: any) => t.user_id).concat(shown.map((t: any) => t.assigned_to)));
                 for (const ticket of shown) {
                     const user = users.get(ticket.user_id) ?? null;
                     const assignedUser = ticket.assigned_to ? users.get(ticket.assigned_to) ?? null : null;
@@ -480,7 +463,7 @@ export default {
                     .setTimestamp();
 
                 const shown = logs.slice(0, 10);
-                const users = await resolveUsers(shown.map((l: any) => l.staff_id).concat(shown.map((l: any) => l.target_id)));
+                const users = await utils.resolveUsers(shown.map((l: any) => l.staff_id).concat(shown.map((l: any) => l.target_id)));
                 for (const log of shown) {
                     const staff = users.get(log.staff_id) ?? null;
                     const target = log.target_id ? users.get(log.target_id) ?? null : null;
@@ -602,7 +585,7 @@ export default {
                     .setDescription(`${pendingAppeals.length} appeal(s) pending review\n\nUse \`/stafftools reviewappeals <warning_id> <decision>\` to process an appeal.`)
                     .setTimestamp();
 
-                const users = await resolveUsers(pendingAppeals.map((a: any) => a.userid).concat(pendingAppeals.map((a: any) => a.authorid)));
+                const users = await utils.resolveUsers(pendingAppeals.map((a: any) => a.userid).concat(pendingAppeals.map((a: any) => a.authorid)));
                 for (const appeal of pendingAppeals) {
                     const user = users.get(appeal.userid) ?? null;
                     const author = users.get(appeal.authorid) ?? null;

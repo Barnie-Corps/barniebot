@@ -1,4 +1,10 @@
 import { Collection } from "discord.js";
+
+export interface PermissionCheckResult {
+    ok: boolean;
+    error?: string;
+}
+
 export interface DataType {
     database: {
         host: string;

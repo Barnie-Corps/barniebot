@@ -2,7 +2,6 @@ import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, ActionR
 import db, { withTransaction } from "../mysql/database";
 import utils from "../utils";
 import Log from "../Log";
-import type { RPGSession, RPGCharacter } from "../types/interfaces";
 
 const CLASSES = {
     warrior: {
@@ -36,19 +35,6 @@ const CLASSES = {
         stats: { hp: 90, mp: 60, str: 10, def: 7, agi: 16, int: 9, luk: 13 }
     }
 };
-
-async function getSession(userId: string): Promise<RPGSession | null> {
-    const session = await db.query(
-        "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
-        [userId]
-    ) as unknown as RPGSession[];
-    return session[0] || null;
-}
-
-async function getCharacter(accountId: number): Promise<RPGCharacter | null> {
-    const character = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]) as unknown as RPGCharacter[];
-    return character[0] || null;
-}
 
 export default {
     data: new SlashCommandBuilder()
@@ -441,13 +427,13 @@ export default {
         const sub = interaction.options.getSubcommand();
         
         if (sub === "create") {
-            const session = await getSession(interaction.user.id);
-            if (!session) {
+            const createProfile = await utils.getActiveRpgProfile(interaction.user.id);
+            if (!createProfile.session) {
                 return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.not_logged_in + "`/login`.");
             }
+            const session = createProfile.session;
 
-            const existingChar = await getCharacter(session.account_id);
-            if (existingChar) {
+            if (createProfile.character) {
                 return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.already_have_character + "`/rpg profile`" + texts.errors.to_view);
             }
 
@@ -502,15 +488,12 @@ export default {
             return utils.safeInteractionRespond(interaction, { embeds: [createEmbed], content: "" });
         }
 
-        const session = await getSession(interaction.user.id);
-        if (!session) {
-            return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.not_logged_in + "`/login`.");
-        }
-
-        const character = await getCharacter(session.account_id);
-        if (!character) {
-            return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.no_character + "`/rpg create`" + texts.errors.to_begin);
-        }
+        const profile = await utils.requireActiveRpgProfile(interaction, interaction.user.id, {
+            notLoggedIn: "❌ " + texts.errors.not_logged_in + "`/login`.",
+            noCharacter: "❌ " + texts.errors.no_character + "`/rpg create`" + texts.errors.to_begin
+        });
+        if (!profile) return;
+        const { character } = profile;
 
         switch (sub) {
             case "profile": {

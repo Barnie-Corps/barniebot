@@ -71,7 +71,7 @@ export default {
             const durationStr = interaction.options.getString("duration", true);
             const winnerCount = interaction.options.getInteger("winners") ?? 1;
             const description = interaction.options.getString("description") ?? undefined;
-            const ms = parseDuration(durationStr);
+            const ms = utils.parseDurationString(durationStr);
             if (!ms || ms < 60000) return respond({ content: texts.invalid_time + (ms && ms < 60000 ? " " + texts.time_too_short : "") });
             if (ms > 2592000000) return respond({ content: texts.time_too_long });
             const endsAt = Date.now() + ms;
@@ -182,15 +182,3 @@ async function endGiveaway(giveaway: any, texts: any) {
     }
 }
 
-function parseDuration(str: string): number | null {
-    if (!/^\d+[smhd]$/.test(str)) return null;
-    const val = parseInt(str);
-    const unit = str.slice(-1);
-    switch (unit) {
-        case "s": return val * 1000;
-        case "m": return val * 60000;
-        case "h": return val * 3600000;
-        case "d": return val * 86400000;
-        default: return null;
-    }
-}

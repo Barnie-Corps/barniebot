@@ -3,13 +3,6 @@ import db from "../mysql/database";
 import utils from "../utils";
 import { createLocalTicket, getLocalTicketByChannel, getLocalTicketConfig, canManageLocalTicket } from "../localTickets";
 
-const parseRoleIds = (raw: string | null): string[] => {
-    if (!raw) return [];
-    const normalized = raw.trim().toLowerCase();
-    if (!normalized || normalized === "none" || normalized === "clear") return [];
-    return (raw.match(/\d{17,20}/g) || []).filter((value, index, array) => array.indexOf(value) === index);
-};
-
 export default {
     data: new SlashCommandBuilder()
         .setName("ticket")
@@ -115,7 +108,7 @@ export default {
             case "setup": {
                 const category = interaction.options.getChannel("category", true);
                 const transcriptsChannel = interaction.options.getChannel("transcripts_channel");
-                const supportRoles = parseRoleIds(interaction.options.getString("support_roles"));
+                const supportRoles: string[] = utils.extractSnowflakeIds(interaction.options.getString("support_roles"));
                 if (supportRoles.some(roleId => !interaction.guild!.roles.cache.has(roleId))) {
                     return await utils.safeInteractionRespond(interaction, texts.invalid_roles);
                 }

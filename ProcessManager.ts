@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { emitKeypressEvents } from "readline";
 import figlet from "figlet";
-import type { ProcessManagerOptions } from "./types/processManager";
+import type { ProcessManagerOptions, PMState, RestartDecision } from "./types/processManager";
 
 const color = (code: number) => (s: string) => `\u001b[${code}m${s}\u001b[0m`;
 const green = color(32);
@@ -14,8 +14,6 @@ const dim = color(2);
 
 try { process.stdout.on("error", () => {}); } catch {}
 try { process.stderr.on("error", () => {}); } catch {}
-
-type PMState = "starting" | "running" | "restarting" | "shuttingDown" | "stopped";
 
 const RESTART_WINDOW_MS = 3600000;
 const OUTPUT_BUFFER_LIMIT = 64 * 1024;
@@ -43,12 +41,6 @@ export function classifyCrash(code: number | null, signal: NodeJS.Signals | null
 export function isFatalPattern(pattern: string): boolean {
     const p = pattern.toLowerCase();
     return p.includes("fatal") || p.includes("cannot enqueue") || p.includes("segmentation fault");
-}
-
-export interface RestartDecision {
-    restart: boolean;
-    resetCount: boolean;
-    reason: string;
 }
 
 export function decideRestart(args: {

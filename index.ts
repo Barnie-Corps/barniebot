@@ -986,12 +986,7 @@ client.on("guildMemberAdd", async (member): Promise<any> => {
         const channel = member.guild.channels.cache.get(config.channel_id) as TextChannel;
         if (!channel) return;
         const msg = config.welcome_message || "Welcome {user}!";
-        const formatted = msg
-            .replace(/\{user\}/g, `<@${member.user.id}>`)
-            .replace(/\{username\}/g, member.user.username)
-            .replace(/\{displayname\}/g, member.displayName)
-            .replace(/\{server\}/g, member.guild.name)
-            .replace(/\{count\}/g, String(member.guild.memberCount));
+        const formatted = utils.formatWelcomeMessage(msg, member.user.id, member.user.username, member.displayName, member.guild.name, member.guild.memberCount);
         await channel.send(formatted);
     } catch (error: any) {
         Log.warn("Welcome message failed", { component: "Welcome", error: error?.message || String(error) });
@@ -1015,12 +1010,7 @@ client.on("guildMemberRemove", async (member): Promise<any> => {
         const msg = config.goodbye_message || "Goodbye {user}!";
         const username = "user" in member ? (member.user?.username || "User") : "User";
         const displayName = "displayName" in member ? (member.displayName || username) : username;
-        const formatted = msg
-            .replace(/\{user\}/g, `<@${member.id}>`)
-            .replace(/\{username\}/g, username)
-            .replace(/\{displayname\}/g, displayName)
-            .replace(/\{server\}/g, member.guild.name)
-            .replace(/\{count\}/g, String(member.guild.memberCount));
+        const formatted = utils.formatWelcomeMessage(msg, member.id, username, displayName, member.guild.name, member.guild.memberCount);
         await channel.send(formatted);
     } catch (error: any) {
         Log.warn("Goodbye message failed", { component: "Welcome", error: error?.message || String(error) });

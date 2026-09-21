@@ -1,21 +1,8 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
-import { RPGSession, RPGCharacter, RPGGuild, RPGGuildMember } from "../types/interfaces";
+import { RPGGuild, RPGGuildMember } from "../types/interfaces";
 import type { GuildCountRow, GuildInsertResult, GuildMemberRow, GuildWithCounts } from "../types/guildCommand";
-
-async function getSession(userId: string) {
-    const session = (await db.query(
-        "SELECT s.*, a.username FROM rpg_sessions s JOIN registered_accounts a ON s.account_id = a.id WHERE s.uid = ? AND s.active = TRUE",
-        [userId]
-    ) as unknown as RPGSession[]);
-    return session[0] || null;
-}
-
-async function getCharacter(accountId: number) {
-    const character = (await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [accountId]) as unknown as RPGCharacter[]);
-    return character[0] || null;
-}
 
 export default {
     data: new SlashCommandBuilder()
@@ -62,19 +49,19 @@ export default {
             .setDescription("List all guilds")),
     category: "RPG",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
-        const session = await getSession(interaction.user.id);
-        if (!session) {
-            let text = "❌ You need to log in first! Use `/login` to access your account.";
-            if (lang !== "en") text = (await utils.translate(text, "en", lang).catch(() => ({ text }))).text;
-            return utils.safeInteractionRespond(interaction, { content: text });
+        let notLoggedInText = "❌ You need to log in first! Use `/login` to access your account.";
+        let noCharacterText = "❌ You need to create a character first! Use `/rpg create` to begin your adventure.";
+        if (lang !== "en") {
+            notLoggedInText = (await utils.translate(notLoggedInText, "en", lang).catch(() => ({ text: notLoggedInText }))).text;
+            noCharacterText = (await utils.translate(noCharacterText, "en", lang).catch(() => ({ text: noCharacterText }))).text;
         }
 
-        const character = await getCharacter(session.account_id);
-        if (!character) {
-            let text = "❌ You need to create a character first! Use `/rpg create` to begin your adventure.";
-            if (lang !== "en") text = (await utils.translate(text, "en", lang).catch(() => ({ text }))).text;
-            return utils.safeInteractionRespond(interaction, { content: text });
-        }
+        const profile = await utils.requireActiveRpgProfile(interaction, interaction.user.id, {
+            notLoggedIn: notLoggedInText,
+            noCharacter: noCharacterText
+        });
+        if (!profile) return;
+        const { character } = profile;
 
         const sub = interaction.options.getSubcommand();
 

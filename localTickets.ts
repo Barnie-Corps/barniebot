@@ -66,9 +66,7 @@ const buildTranscriptFiles = async (ticket: LocalTicket, channel: TextChannel, c
     const user = await client.users.fetch(ticket.creator_id).catch(() => null);
     const closedAt = Date.now();
     const durationMs = closedAt - Number(ticket.created_at || closedAt);
-    const hours = Math.floor(durationMs / 3600000);
-    const minutes = Math.floor((durationMs % 3600000) / 60000);
-    const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+    const durationText = utils.formatDurationText(durationMs);
     let textTranscript = `Local Ticket #${ticket.id} - Transcript\n`;
     textTranscript += `Guild ID: ${ticket.guild_id}\n`;
     textTranscript += `User: ${user ? `${user.tag} (${user.id})` : ticket.creator_id}\n`;

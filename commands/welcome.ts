@@ -105,7 +105,7 @@ export default {
             }
             const member = interaction.member as any;
             const msg = type === "welcome" ? config.welcome_message : config.goodbye_message;
-            const formatted = formatMessage(msg, member.user?.id || "User", member.user?.username || "User", member.displayName || "User", interaction.guild?.name || "Server", interaction.guild?.memberCount || 0);
+            const formatted = utils.formatWelcomeMessage(msg, member.user?.id || "User", member.user?.username || "User", member.displayName || "User", interaction.guild?.name || "Server", interaction.guild?.memberCount || 0);
             await channel.send(formatted);
             return utils.safeInteractionRespond(interaction, { content: `${texts.test_sent} <#${config.channel_id}>`, ephemeral: true });
         }
@@ -125,13 +125,3 @@ async function upsertConfig(guildId: string, updates: Record<string, any>) {
     }
 }
 
-function formatMessage(msg: string, userId: string, username: string, displayName: string, server: string, count: number): string {
-    return msg
-        .replace(/\{user\}/g, `<@${userId}>`)
-        .replace(/\{username\}/g, username)
-        .replace(/\{displayname\}/g, displayName)
-        .replace(/\{server\}/g, server)
-        .replace(/\{count\}/g, String(count));
-}
-
-export { formatMessage, upsertConfig };

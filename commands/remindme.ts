@@ -24,7 +24,7 @@ export default {
         }
         const timeStr = interaction.options.getString("time", true);
         const message = interaction.options.getString("message", true);
-        const ms = parseTimeString(timeStr);
+        const ms = utils.parseDurationString(timeStr);
         if (!ms || ms < 0) {
             return utils.safeInteractionRespond(interaction, { content: texts.invalid_time, ephemeral: true });
         }
@@ -54,23 +54,3 @@ export default {
     },
     ephemeral: true
 };
-
-function parseTimeString(str: string): number | null {
-    const total = str.match(/^(\d+[smhd])+$/);
-    if (!total) return null;
-    let ms = 0;
-    const parts = str.match(/\d+[smhd]/g);
-    if (!parts) return null;
-    for (const part of parts) {
-        const val = parseInt(part);
-        const unit = part.slice(-1);
-        switch (unit) {
-            case "s": ms += val * 1000; break;
-            case "m": ms += val * 60000; break;
-            case "h": ms += val * 3600000; break;
-            case "d": ms += val * 86400000; break;
-            default: return null;
-        }
-    }
-    return ms;
-}

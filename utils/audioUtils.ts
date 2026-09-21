@@ -104,6 +104,24 @@ export function validateAudioBuffer(buffer: Buffer): {
     };
 }
 
+export function createWavHeader(dataLength: number, sampleRate: number, channels: number, bitsPerSample: number): Buffer {
+    const header = Buffer.alloc(44);
+    header.write("RIFF", 0);
+    header.writeUInt32LE(36 + dataLength, 4);
+    header.write("WAVE", 8);
+    header.write("fmt ", 12);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20);
+    header.writeUInt16LE(channels, 22);
+    header.writeUInt32LE(sampleRate, 24);
+    header.writeUInt32LE(sampleRate * channels * (bitsPerSample / 8), 28);
+    header.writeUInt16LE(channels * (bitsPerSample / 8), 32);
+    header.writeUInt16LE(bitsPerSample, 34);
+    header.write("data", 36);
+    header.writeUInt32LE(dataLength, 40);
+    return header;
+}
+
 export function isWavFile(buffer: Buffer): boolean {
     if (buffer.length < 12) return false;
     

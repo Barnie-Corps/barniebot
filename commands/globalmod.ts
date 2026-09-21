@@ -6,51 +6,6 @@ import data from "../data";
 import Log from "../Log";
 import StaffRanksManager from "../managers/StaffRanksManager";
 
-async function checkUserPoints(userId: string, username: string, executorId: string, executorUsername: string): Promise<{ totalPoints: number; escalated: boolean; action?: string }> {
-  try {
-    const result = (await db.query(
-      "SELECT COALESCE(SUM(points), 0) AS total FROM global_warnings WHERE userid = ? AND active = TRUE AND (appeal_status IS NULL OR appeal_status != 'approved') AND expires_at > ?",
-      [userId, Date.now()]
-    ) as unknown as any[]);
-
-    const totalPoints = Number(result?.[0]?.total ?? 0);
-
-    if (totalPoints >= 5) {
-      await db.query("INSERT INTO global_bans (id, active, times) VALUES (?, TRUE, 1) ON DUPLICATE KEY UPDATE active = TRUE, times = times + 1", [userId]);
-      utils.invalidateStaffModCache(userId);
-      await manager.announce(`⚠️ **AUTO-BAN**: User \`${username}\` has been automatically blacklisted due to reaching ${totalPoints} warning points.`, "en");
-      await utils.logStaffAction(executorId, "AUTO_BAN", userId, `Auto-banned ${username} for ${totalPoints} points`, { totalPoints, threshold: 5 });
-      return { totalPoints, escalated: true, action: "ban" };
-    } else if (totalPoints >= 3) {
-      const until = Date.now() + 24 * 60 * 60 * 1000;
-      await db.query("INSERT INTO global_mutes SET ? ON DUPLICATE KEY UPDATE reason = VALUES(reason), authorid = VALUES(authorid), createdAt = VALUES(createdAt), until = VALUES(until)",
-        [{ id: userId, reason: "Automatic mute due to warning points", authorid: executorId, createdAt: Date.now(), until }]);
-      utils.invalidateStaffModCache(userId);
-      await manager.announce(`⚠️ **AUTO-MUTE**: User \`${username}\` has been automatically muted for 24h due to reaching ${totalPoints} warning points.`, "en");
-      await utils.logStaffAction(executorId, "AUTO_MUTE", userId, `Auto-muted ${username} for 24h (${totalPoints} points)`, { totalPoints, threshold: 3, duration: "24h" });
-      return { totalPoints, escalated: true, action: "mute" };
-    }
-
-    return { totalPoints, escalated: false };
-  } catch (error) {
-    Log.error("Failed to check user points:", error);
-    return { totalPoints: 0, escalated: false };
-  }
-}
-
-function ensureCoMPlus(executorRank: string | null): { ok: boolean; error?: string } {
-  return utils.ensureCoMPlus(executorRank);
-}
-function ensureModPlus(executorRank: string | null): { ok: boolean; error?: string } {
-  return utils.ensureModPlus(executorRank);
-}
-function ensureAnyStaff(executorRank: string | null): { ok: boolean; error?: string } {
-  return utils.ensureStaff(executorRank);
-}
-function ensureProbAdminPlus(executorRank: string | null): { ok: boolean; error?: string } {
-  return utils.ensureAdminPlus(executorRank);
-}
-
 let membersSearched = false;
 
 export default {
@@ -109,7 +64,7 @@ export default {
       case "blacklist": {
         const user = interaction.options.getUser("user", true);
         const reason = interaction.options.getString("reason") ?? "no reason";
-        const perm = ensureCoMPlus(executorRank);
+        const perm = utils.ensureCoMPlus(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         await db.query("INSERT INTO global_bans (id, active, times) VALUES (?, TRUE, 1) ON DUPLICATE KEY UPDATE active = TRUE, times = times + 1", [user.id]);
         utils.invalidateStaffModCache(user.id);
@@ -119,7 +74,7 @@ export default {
       }
       case "unblacklist": {
         const user = interaction.options.getUser("user", true);
-        const perm = ensureCoMPlus(executorRank);
+        const perm = utils.ensureCoMPlus(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         await db.query("UPDATE global_bans SET active = FALSE WHERE id = ?", [user.id]);
         utils.invalidateStaffModCache(user.id);
@@ -134,7 +89,7 @@ export default {
         const category = interaction.options.getString("category") ?? "general";
         const expiryDays = interaction.options.getInteger("expiry_days") ?? 30;
 
-        const perm = ensureAnyStaff(executorRank);
+        const perm = utils.ensureStaff(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
         const expiresAt = Date.now() + (expiryDays * 24 * 60 * 60 * 1000);
@@ -153,7 +108,7 @@ export default {
 
         const warningId = insertResult?.insertId || 0;
 
-        const pointCheck = await checkUserPoints(user.id, user.username, executor.id, executor.username);
+        const pointCheck = await utils.checkWarningEscalation(user.id, user.username, executor.id);
 
         const categoryEmojis: Record<string, string> = {
           spam: "📧",
@@ -263,7 +218,7 @@ export default {
         const user = interaction.options.getUser("user", true);
         const minutes = interaction.options.getInteger("minutes", true);
         const reason = interaction.options.getString("reason") ?? "no reason";
-        const perm = ensureModPlus(executorRank);
+        const perm = utils.ensureModPlus(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         const until = minutes > 0 ? Date.now() + minutes * 60_000 : 0;
         await db.query("INSERT INTO global_mutes SET ? ON DUPLICATE KEY UPDATE reason = VALUES(reason), authorid = VALUES(authorid), createdAt = VALUES(createdAt), until = VALUES(until)", [{ id: user.id, reason, authorid: executor.id, createdAt: Date.now(), until }]);
@@ -274,7 +229,7 @@ export default {
       }
       case "unmute": {
         const user = interaction.options.getUser("user", true);
-        const perm = ensureModPlus(executorRank);
+        const perm = utils.ensureModPlus(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         await db.query("DELETE FROM global_mutes WHERE id = ?", [user.id]);
         utils.invalidateStaffModCache(user.id);
@@ -293,7 +248,7 @@ export default {
       }
       case "closeticket": {
         const ticketId = interaction.options.getInteger("ticket_id", true);
-        const perm = ensureAnyStaff(executorRank);
+        const perm = utils.ensureStaff(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
 
         try {
@@ -309,7 +264,7 @@ export default {
       }
       case "search_user": {
         const username = interaction.options.getString("username", true);
-        const perm = ensureAnyStaff(executorRank);
+        const perm = utils.ensureStaff(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         await utils.safeInteractionRespond(interaction, "Searching, please wait...");
         if (!membersSearched) {
@@ -441,7 +396,7 @@ export default {
       }
       case "announce": {
         const language = interaction.options.getString("language", true);
-        const perm = ensureCoMPlus(executorRank);
+        const perm = utils.ensureCoMPlus(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         const prompt = new EmbedBuilder()
           .setColor("Purple")
