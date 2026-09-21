@@ -245,25 +245,32 @@ export default class AiMonitorManager {
         lastActionAt?: number | null;
     }) {
         try {
-            const rows = await db.query("SELECT * FROM ai_monitor_entity_stats WHERE guild_id = ? AND entity_key = ? LIMIT 1", [guildId, entityKey]) as unknown as any[];
-            const existing = rows?.[0];
-            const next = {
-                guild_id: guildId,
-                entity_key: entityKey,
-                entity_type: entityType,
-                risk_score: this.clamp(Number(existing?.risk_score ?? 0) + Number(changes.riskDelta ?? 0), -10, 100),
-                flag_count: Math.max(0, Number(existing?.flag_count ?? 0) + Number(changes.flagDelta ?? 0)),
-                action_count: Math.max(0, Number(existing?.action_count ?? 0) + Number(changes.actionDelta ?? 0)),
-                false_positive_count: Math.max(0, Number(existing?.false_positive_count ?? 0) + Number(changes.falsePositiveDelta ?? 0)),
-                last_flag_at: changes.lastFlagAt ?? existing?.last_flag_at ?? null,
-                last_action_at: changes.lastActionAt ?? existing?.last_action_at ?? null,
-                updated_at: Date.now()
-            };
-            if (existing) {
-                await db.query("UPDATE ai_monitor_entity_stats SET ? WHERE guild_id = ? AND entity_key = ?", [next, guildId, entityKey]);
-            } else {
-                await db.query("INSERT INTO ai_monitor_entity_stats SET ?", [next]);
-            }
+            const initialRiskScore = this.clamp(Number(changes.riskDelta ?? 0), -10, 100);
+            await db.query(
+                `INSERT INTO ai_monitor_entity_stats
+                    (guild_id, entity_key, entity_type, risk_score, flag_count, action_count, false_positive_count, last_flag_at, last_action_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE
+                    risk_score = GREATEST(-10, LEAST(100, risk_score + VALUES(risk_score))),
+                    flag_count = GREATEST(0, flag_count + VALUES(flag_count)),
+                    action_count = GREATEST(0, action_count + VALUES(action_count)),
+                    false_positive_count = GREATEST(0, false_positive_count + VALUES(false_positive_count)),
+                    last_flag_at = COALESCE(VALUES(last_flag_at), last_flag_at),
+                    last_action_at = COALESCE(VALUES(last_action_at), last_action_at),
+                    updated_at = VALUES(updated_at)`,
+                [
+                    guildId,
+                    entityKey,
+                    entityType,
+                    initialRiskScore,
+                    Math.max(0, Number(changes.flagDelta ?? 0)),
+                    Math.max(0, Number(changes.actionDelta ?? 0)),
+                    Math.max(0, Number(changes.falsePositiveDelta ?? 0)),
+                    changes.lastFlagAt ?? null,
+                    changes.lastActionAt ?? null,
+                    Date.now()
+                ]
+            );
         } catch (error: any) {
             Log.warn("AI monitor entity stats update failed", { component: "AiMonitor", guildId, entityKey, entityType, error: error?.message || String(error) });
         }
@@ -783,17 +790,27 @@ export default class AiMonitorManager {
             eventType,
             data
         });
-        if (this.useLocalModel && !this.localModelReady) {
-            Log.warn("Local model not ready, falling back to cloud model", { component: "AiMonitor" });
+        let content: string;
+        let usedLocal = false;
+        if (this.useLocalModel && this.localModelReady) {
+            try {
+                content = await ai.getSingleOllamaResponse(this.localModel, [{ role: "user", content: prompt }], 8000);
+                usedLocal = true;
+            } catch (error: any) {
+                this.localModelReady = false;
+                Log.warn("Local model triage failed, falling back to cloud model", { component: "AiMonitor", error: error?.message || String(error) });
+                content = (await NVIDIAModels.GetModelChatResponse([{ role: "system", content: prompt }], 8000, "monitor_small", false)).content;
+            }
+        } else {
+            if (this.useLocalModel && !this.localModelReady) {
+                Log.warn("Local model not ready, falling back to cloud model", { component: "AiMonitor" });
+            }
+            content = (await NVIDIAModels.GetModelChatResponse([{ role: "system", content: prompt }], 8000, "monitor_small", false)).content;
         }
-        else if (AI_DEBUG) {
-            Log.debug("Using local model for triage", { component: "AiMonitor" });
-        }
-        const response = this.useLocalModel && this.localModelReady ? await ai.getSingleOllamaResponse(this.localModel, [{ role: "user", content: prompt }], 8000) : await NVIDIAModels.GetModelChatResponse([{ role: "system", content: prompt }], 8000, "monitor_small", false);
         if (AI_DEBUG) {
-            Log.debug("Triage response", { component: "AiMonitor", response: this.useLocalModel && this.localModelReady ? response : (response as any).content, local: this.useLocalModel && this.localModelReady });
+            Log.debug("Triage response", { component: "AiMonitor", response: content, local: usedLocal });
         }
-        return this.parseJson<TriageResult>(this.useLocalModel ? response : (response as any).content, {
+        return this.parseJson<TriageResult>(content, {
             suspicious: false,
             risk: "low",
             summary: "not suspicious",
