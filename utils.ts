@@ -485,6 +485,201 @@ const escapeHtml = (value: any): string => String(value ?? "")
   .replace(/"/g, "&quot;")
   .replace(/'/g, "&#39;");
 
+const closeSupportTicket = async (args: {
+  ticketId: number;
+  closedById: string;
+  closedByLabel: string;
+}): Promise<{ error: string } | { success: true; ticket: any; messageCount: number; durationText: string }> => {
+  const ticketData: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [args.ticketId]);
+  if (!ticketData || !ticketData[0]) return { error: "Ticket not found" };
+  const ticket = ticketData[0];
+  if (ticket.status === "closed") return { error: "Ticket is already closed" };
+
+  const messages: any = await db.query("SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY timestamp ASC", [args.ticketId]);
+  const user = await client.users.fetch(ticket.user_id);
+  const closedAt = Date.now();
+
+  const durationMs = closedAt - Number(ticket.created_at || closedAt);
+  const hours = Math.floor(durationMs / 3600000);
+  const minutes = Math.floor((durationMs % 3600000) / 60000);
+  const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+
+  let textTranscript = `Support Ticket #${args.ticketId} - Transcript\n`;
+  textTranscript += `User: ${user.tag} (${user.id})\n`;
+  textTranscript += `Created: ${new Date(Number(ticket.created_at)).toISOString()}\n`;
+  textTranscript += `Closed: ${new Date(closedAt).toISOString()}\n`;
+  textTranscript += `Duration: ${durationText}\n`;
+  textTranscript += `Closed by: ${args.closedByLabel}\n`;
+  textTranscript += `Origin: ${ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message"}\n`;
+  textTranscript += `Initial Message: ${ticket.initial_message}\n`;
+  textTranscript += `\n${"=".repeat(50)}\n\n`;
+
+  for (const msg of messages) {
+    const timestamp = new Date(msg.timestamp).toISOString();
+    if (msg.is_staff) {
+      const rankTag = utils.getRankSuffix(msg.staff_rank);
+      textTranscript += `[${timestamp}] [${rankTag}] ${msg.username}: ${msg.content}\n`;
+    } else {
+      textTranscript += `[${timestamp}] ${msg.username}: ${msg.content}\n`;
+    }
+  }
+
+  const htmlTemplate = await fs.readFile(path.join(process.cwd(), "transcript_placeholder.html"), "utf-8");
+  let messagesHtml = "";
+  for (const msg of messages) {
+    const timestamp = new Date(msg.timestamp).toLocaleString();
+    const initial = escapeHtml(msg.username?.charAt(0).toUpperCase());
+    const username = escapeHtml(msg.username);
+    const content = escapeHtml(msg.content).replace(/\n/g, "<br>");
+    if (msg.is_staff) {
+      const rankTag = escapeHtml(utils.getRankSuffix(msg.staff_rank));
+      messagesHtml += `
+                            <div class="message">
+                                <div class="avatar">${initial}</div>
+                                <div class="message-content">
+                                    <div class="message-header">
+                                        <span class="username">${username}</span>
+                                        <span class="staff-badge">${rankTag}</span>
+                                        <span class="timestamp">${timestamp}</span>
+                                    </div>
+                                    <div class="message-text">${content}</div>
+                                </div>
+                            </div>`;
+    } else {
+      messagesHtml += `
+                            <div class="message">
+                                <div class="avatar">${initial}</div>
+                                <div class="message-content">
+                                    <div class="message-header">
+                                        <span class="username">${username}</span>
+                                        <span class="timestamp">${timestamp}</span>
+                                    </div>
+                                    <div class="message-text">${content}</div>
+                                </div>
+                            </div>`;
+    }
+  }
+
+  const htmlContent = htmlTemplate
+    .replace(/{ticketId}/g, String(args.ticketId))
+    .replace(/{username}/g, escapeHtml(user.tag))
+    .replace(/{userId}/g, escapeHtml(user.id))
+    .replace(/{status}/g, "Closed")
+    .replace(/{statusClass}/g, "status-closed")
+    .replace(/{createdAt}/g, new Date(Number(ticket.created_at)).toLocaleString())
+    .replace(/{closedAt}/g, new Date(closedAt).toLocaleString())
+    .replace(/{origin}/g, ticket.guild_id ? `Guild: ${escapeHtml(ticket.guild_name)} (${ticket.guild_id})` : "Direct Message")
+    .replace(/{initialMessage}/g, escapeHtml(ticket.initial_message) || "No initial message")
+    .replace(/{messages}/g, messagesHtml);
+
+  const textPath = path.join(process.cwd(), `transcript-${args.ticketId}.txt`);
+  const htmlPath = path.join(process.cwd(), `transcript-${args.ticketId}.html`);
+  await fs.writeFile(textPath, textTranscript);
+  await fs.writeFile(htmlPath, htmlContent);
+
+  const transcriptsChannel = await client.channels.fetch(data.bot.transcripts_channel) as TextChannel | null;
+  if (transcriptsChannel) {
+    const transcriptEmbed = new EmbedBuilder()
+      .setColor("Purple")
+      .setTitle(`🎫 Ticket #${args.ticketId} - Closed`)
+      .setDescription(`Ticket closed by ${args.closedByLabel}`)
+      .addFields(
+        { name: "User", value: `${user.tag} (${user.id})`, inline: true },
+        { name: "Messages", value: messages.length.toString(), inline: true },
+        { name: "Duration", value: durationText, inline: true }
+      )
+      .setTimestamp();
+
+    await transcriptsChannel.send({
+      embeds: [transcriptEmbed],
+      files: [
+        { attachment: textPath, name: `transcript-${args.ticketId}.txt` },
+        { attachment: htmlPath, name: `transcript-${args.ticketId}.html` }
+      ]
+    });
+  }
+
+  await db.query("UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ?", [closedAt, args.closedById, args.ticketId]);
+
+  try {
+    const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel | null;
+    if (ticketChannel && ticket.message_id) {
+      const originalMessage = await ticketChannel.messages.fetch(ticket.message_id);
+      if (originalMessage?.embeds?.[0]) {
+        const updatedEmbed = EmbedBuilder.from(originalMessage.embeds[0])
+          .setColor("Red")
+          .setTitle(`🔒 Ticket #${args.ticketId} - CLOSED`)
+          .setFields(
+            originalMessage.embeds[0].fields.map(field => {
+              if (field.name.toLowerCase().includes("status")) {
+                return { name: field.name, value: "Closed", inline: field.inline };
+              }
+              return field;
+            })
+          );
+        await originalMessage.edit({ embeds: [updatedEmbed], components: [] });
+      }
+    }
+  } catch (error) {
+    Log.error("Failed to update ticket embed:", error);
+  }
+
+  try {
+    let closeTexts = {
+      title: "🔒 Support Ticket Closed",
+      description: `Your support ticket #${args.ticketId} has been closed by ${args.closedByLabel}.`,
+      duration: "Duration",
+      messages: "Messages",
+      footer: "Thank you for contacting support!"
+    };
+    const ticketOwnerLang = await utils.getUserLanguage(ticket.user_id);
+    if (ticketOwnerLang !== "en") {
+      try { closeTexts = await utils.autoTranslate(closeTexts, "en", ticketOwnerLang); } catch { }
+    }
+    const closedEmbed = new EmbedBuilder()
+      .setColor("Red")
+      .setTitle(closeTexts.title)
+      .setDescription(closeTexts.description)
+      .addFields(
+        { name: closeTexts.duration, value: durationText, inline: true },
+        { name: closeTexts.messages, value: messages.length.toString(), inline: true }
+      )
+      .setFooter({ text: closeTexts.footer })
+      .setTimestamp();
+    await user.send({ embeds: [closedEmbed] });
+  } catch (error) {
+    Log.error("Failed to notify user of ticket closure:", error);
+  }
+
+  try {
+    const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel | null;
+    if (ticketChannel) {
+      const closedNoticeEmbed = new EmbedBuilder()
+        .setColor("Red")
+        .setTitle("🔒 Ticket Closed")
+        .setDescription(`This ticket has been closed by ${args.closedByLabel}.\n\nTranscripts have been saved and sent to <#${data.bot.transcripts_channel}>.\n\nYou can delete this channel using the button below.`)
+        .setTimestamp();
+
+      const deleteButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`delete_channel-${args.ticketId}`)
+          .setLabel("Delete Channel")
+          .setStyle(ButtonStyle.Danger)
+          .setEmoji("🗑️")
+      );
+
+      await ticketChannel.send({ embeds: [closedNoticeEmbed], components: [deleteButton] });
+    }
+  } catch (error) {
+    Log.error("Failed to send ticket closed notice:", error);
+  }
+
+  await fs.unlink(textPath).catch(() => { });
+  await fs.unlink(htmlPath).catch(() => { });
+
+  return { success: true, ticket, messageCount: messages.length, durationText };
+};
+
 const resolveKnowledgePath = (source: KnowledgeSource): string => {
   return resolveProjectPath(source.path);
 };
@@ -919,6 +1114,7 @@ const utils: any = {
   parseToolCalls,
   escapeHtml,
   assertPublicUrl,
+  closeSupportTicket,
   AIFunctions: {
     list_knowledge_sources: async (args: { requesterId?: string } = {}): Promise<any> => {
       const cache = await loadKnowledgeCache();
@@ -3107,186 +3303,8 @@ const utils: any = {
       if (ticket.user_id !== args.requesterId && !await utils.isStaff(args.requesterId)) {
         return { error: "Requester is not authorized to close this ticket" };
       }
-      if (ticket.status === "closed") return { error: "Ticket is already closed" };
-
-      const messages: any = await db.query("SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY timestamp ASC", [args.ticketId]);
-      const user = await client.users.fetch(ticket.user_id);
-      const closedAt = Date.now();
-
-      const durationMs = closedAt - Number(ticket.created_at || closedAt);
-      const hours = Math.floor(durationMs / 3600000);
-      const minutes = Math.floor((durationMs % 3600000) / 60000);
-      const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
-
-      let textTranscript = `Support Ticket #${args.ticketId} - Transcript\n`;
-      textTranscript += `User: ${user.tag} (${user.id})\n`;
-      textTranscript += `Created: ${new Date(Number(ticket.created_at)).toISOString()}\n`;
-      textTranscript += `Closed: ${new Date(closedAt).toISOString()}\n`;
-      textTranscript += `Duration: ${durationText}\n`;
-      textTranscript += `Closed by: ${args.requesterId}\n`;
-      textTranscript += `Origin: ${ticket.guild_id ? `Guild: ${ticket.guild_name} (${ticket.guild_id})` : "Direct Message"}\n`;
-      textTranscript += `Initial Message: ${ticket.initial_message}\n`;
-      textTranscript += `\n${"=".repeat(50)}\n\n`;
-
-      for (const msg of messages) {
-        const timestamp = new Date(msg.timestamp).toISOString();
-        if (msg.is_staff) {
-          const rankTag = utils.getRankSuffix(msg.staff_rank);
-          textTranscript += `[${timestamp}] [${rankTag}] ${msg.username}: ${msg.content}\n`;
-        } else {
-          textTranscript += `[${timestamp}] ${msg.username}: ${msg.content}\n`;
-        }
-      }
-
-      const htmlTemplate = await fs.readFile(path.join(process.cwd(), "transcript_placeholder.html"), "utf-8");
-      let messagesHtml = "";
-      for (const msg of messages) {
-        const timestamp = new Date(msg.timestamp).toLocaleString();
-        const initial = escapeHtml(msg.username.charAt(0).toUpperCase());
-        const username = escapeHtml(msg.username);
-        const content = escapeHtml(msg.content).replace(/\n/g, "<br>");
-        if (msg.is_staff) {
-          const rankTag = escapeHtml(utils.getRankSuffix(msg.staff_rank));
-          messagesHtml += `
-                            <div class="message">
-                                <div class="avatar">${initial}</div>
-                                <div class="message-content">
-                                    <div class="message-header">
-                                        <span class="username">${username}</span>
-                                        <span class="staff-badge">${rankTag}</span>
-                                        <span class="timestamp">${timestamp}</span>
-                                    </div>
-                                    <div class="message-text">${content}</div>
-                                </div>
-                            </div>`;
-        } else {
-          messagesHtml += `
-                            <div class="message">
-                                <div class="avatar">${initial}</div>
-                                <div class="message-content">
-                                    <div class="message-header">
-                                        <span class="username">${username}</span>
-                                        <span class="timestamp">${timestamp}</span>
-                                    </div>
-                                    <div class="message-text">${content}</div>
-                                </div>
-                            </div>`;
-        }
-      }
-
-      const htmlContent = htmlTemplate
-        .replace(/{ticketId}/g, String(args.ticketId))
-        .replace(/{username}/g, escapeHtml(user.tag))
-        .replace(/{userId}/g, escapeHtml(user.id))
-        .replace(/{status}/g, "Closed")
-        .replace(/{statusClass}/g, "status-closed")
-        .replace(/{createdAt}/g, new Date(Number(ticket.created_at)).toLocaleString())
-        .replace(/{closedAt}/g, new Date(closedAt).toLocaleString())
-        .replace(/{origin}/g, ticket.guild_id ? `Guild: ${escapeHtml(ticket.guild_name)} (${ticket.guild_id})` : "Direct Message")
-        .replace(/{initialMessage}/g, escapeHtml(ticket.initial_message))
-        .replace(/{messages}/g, messagesHtml);
-
-      const textPath = path.join(process.cwd(), `transcript-${args.ticketId}.txt`);
-      const htmlPath = path.join(process.cwd(), `transcript-${args.ticketId}.html`);
-      await fs.writeFile(textPath, textTranscript);
-      await fs.writeFile(htmlPath, htmlContent);
-
-      const transcriptsChannel = await client.channels.fetch(data.bot.transcripts_channel) as TextChannel | null;
-      if (transcriptsChannel) {
-        const transcriptEmbed = new EmbedBuilder()
-          .setColor("Purple")
-          .setTitle(`🎫 Ticket #${args.ticketId} - Closed`)
-          .setDescription(`Ticket closed by ${args.requesterId}`)
-          .addFields(
-            { name: "User", value: `${user.tag} (${user.id})`, inline: true },
-            { name: "Messages", value: messages.length.toString(), inline: true },
-            { name: "Duration", value: durationText, inline: true }
-          )
-          .setTimestamp();
-
-        await transcriptsChannel.send({
-          embeds: [transcriptEmbed],
-          files: [
-            { attachment: textPath, name: `transcript-${args.ticketId}.txt` },
-            { attachment: htmlPath, name: `transcript-${args.ticketId}.html` }
-          ]
-        });
-      }
-
-      await db.query("UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ?", [closedAt, args.requesterId, args.ticketId]);
-
-      try {
-        const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel | null;
-        if (ticketChannel && ticket.message_id) {
-          const originalMessage = await ticketChannel.messages.fetch(ticket.message_id);
-          if (originalMessage?.embeds?.[0]) {
-            const updatedEmbed = EmbedBuilder.from(originalMessage.embeds[0])
-              .setColor("Red")
-              .setTitle(`🔒 Ticket #${args.ticketId} - CLOSED`)
-              .setFields(
-                originalMessage.embeds[0].fields.map(field => {
-                  if (field.name.toLowerCase().includes("status")) {
-                    return { name: field.name, value: "Closed", inline: field.inline };
-                  }
-                  return field;
-                })
-              );
-            await originalMessage.edit({ embeds: [updatedEmbed], components: [] });
-          }
-        }
-      } catch (error) {
-        Log.error("Failed to update ticket embed:", error);
-      }
-
-      try {
-        let closeTexts = {
-          title: "🔒 Support Ticket Closed",
-          description: `Your support ticket #${args.ticketId} has been closed.`,
-          duration: "Duration",
-          messages: "Messages",
-          footer: "Thank you for contacting support!"
-        };
-        const ticketOwnerLang = await utils.getUserLanguage(ticket.user_id);
-        if (ticketOwnerLang !== "en") {
-          try { closeTexts = await utils.autoTranslate(closeTexts, "en", ticketOwnerLang); } catch {}
-        }
-        const closedEmbed = new EmbedBuilder()
-          .setColor("Red")
-          .setTitle(closeTexts.title)
-          .setDescription(closeTexts.description)
-          .addFields(
-            { name: closeTexts.duration, value: durationText, inline: true },
-            { name: closeTexts.messages, value: messages.length.toString(), inline: true }
-          )
-          .setFooter({ text: closeTexts.footer })
-          .setTimestamp();
-        await user.send({ embeds: [closedEmbed] });
-      } catch (error) {
-        Log.error("Failed to notify user of ticket closure:", error);
-      }
-
-      const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel | null;
-      if (ticketChannel) {
-        const closedNoticeEmbed = new EmbedBuilder()
-          .setColor("Red")
-          .setTitle("🔒 Ticket Closed")
-          .setDescription(`This ticket has been closed.\n\nTranscripts have been saved and sent to <#${data.bot.transcripts_channel}>.\n\nYou can delete this channel using the button below.`)
-          .setTimestamp();
-
-        const deleteButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`delete_channel-${args.ticketId}`)
-            .setLabel("Delete Channel")
-            .setStyle(ButtonStyle.Danger)
-            .setEmoji("🗑️")
-        );
-
-        await ticketChannel.send({ embeds: [closedNoticeEmbed], components: [deleteButton] });
-      }
-
-      await fs.unlink(textPath).catch(() => { });
-      await fs.unlink(htmlPath).catch(() => { });
-
+      const result = await closeSupportTicket({ ticketId: args.ticketId, closedById: args.requesterId, closedByLabel: args.requesterId });
+      if ("error" in result) return result;
       return { success: true };
     },
     add_ticket_message: async (args: { ticketId: number; userId: string; username: string; content: string; isStaff?: boolean }): Promise<any> => {
