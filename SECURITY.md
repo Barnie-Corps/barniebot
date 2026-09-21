@@ -81,7 +81,7 @@ Do not disclose publicly until we acknowledge and provide a remediation timeline
 - Transcript tampering or unauthorized access to closed tickets.
 - Leakage of decrypted global messages.
 - Injection into SQL queries (should be prevented by parameterization).
-- RCE via owner eval path (should be owner-only; sandbox improvement suggestions welcome).
+- RCE via owner eval path (should be owner-only; sandbox improvement suggestions welcome). This includes the AI tool functions `execute_js_code` (Node `vm` module) and `execute_command` (shell), both gated to owners only — note that Node's `vm` module is explicitly documented by Node.js as not a security boundary, so these tools carry the same trust assumption as `b.eval`: an owner account (or an owner's AI conversation, via indirect prompt injection) compromise is equivalent to full RCE. Consider `isolated-vm` or a subprocess/container boundary if this needs to be hardened further.
 - Worker-based DoS (e.g., translation queue flooding).
 - Email verification bypass or code prediction.
 - Staff audit log manipulation or deletion.

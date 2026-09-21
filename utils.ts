@@ -316,24 +316,27 @@ function processRateLimitsWorker(users: Array<{ uid: string; time_left: number }
     limits: { keep: activeLimits, expired: expiredLimits }
   };
 }
+const isWithinRoot = (resolved: string, root: string): boolean => {
+  return resolved === root || resolved.startsWith(root + path.sep);
+};
 const resolveWorkspacePath = (targetPath = ".", userId?: string) => {
   const userWorkspace = userId ? path.join(AI_WORKSPACE_ROOT, userId) : AI_WORKSPACE_ROOT;
   const resolved = path.resolve(userWorkspace, targetPath);
-  if (!resolved.startsWith(userWorkspace)) {
+  if (!isWithinRoot(resolved, userWorkspace)) {
     throw new Error("Path escapes ai_workspace");
   }
   return resolved;
 };
 const resolveProjectPath = (targetPath = ".") => {
   const resolved = path.resolve(PROJECT_ROOT, targetPath);
-  if (!resolved.startsWith(PROJECT_ROOT)) {
+  if (!isWithinRoot(resolved, PROJECT_ROOT)) {
     throw new Error("Path escapes project root");
   }
   return resolved;
 };
 const resolveLogsPath = (targetPath = ".") => {
   const resolved = path.resolve(LOGS_ROOT, targetPath);
-  if (!resolved.startsWith(LOGS_ROOT)) {
+  if (!isWithinRoot(resolved, LOGS_ROOT)) {
     throw new Error("Path escapes logs directory");
   }
   return resolved;
@@ -1272,8 +1275,7 @@ const utils: any = {
       if (!["GET", "POST", "PUT", "PATCH"].includes(method)) return { error: "Unsupported method. Use GET, POST, PUT, or PATCH." };
       if (!args.url) return { error: "Missing url parameter" };
       let parsed: URL;
-      try { parsed = new URL(args.url); } catch { return { error: "Invalid URL" }; }
-      if (!/^https?:$/.test(parsed.protocol)) return { error: "Only http/https URLs are allowed" };
+      try { parsed = await assertPublicUrl(args.url); } catch (error: any) { return { error: error?.message || "Invalid URL" }; }
       if (args.query && typeof args.query === "object") {
         for (const [k, v] of Object.entries(args.query)) parsed.searchParams.set(k, String(v));
       }
@@ -1294,7 +1296,12 @@ const utils: any = {
             if (redirects >= maxRedirects) return { error: "Too many redirects", status: response.status };
             const location = response.headers.get("location");
             if (!location) return { error: "Redirect without Location header", status: response.status };
-            try { lastUrl = new URL(location, lastUrl).toString(); } catch { return { error: "Invalid redirect URL", status: response.status }; }
+            try {
+              const redirectUrl = await assertPublicUrl(new URL(location, lastUrl).toString());
+              lastUrl = redirectUrl.toString();
+            } catch (error: any) {
+              return { error: error?.message || "Redirect target is not allowed", status: response.status };
+            }
             redirects++;
             continue;
           }

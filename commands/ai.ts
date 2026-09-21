@@ -367,7 +367,8 @@ export default {
                     remove_user_from_convo
                 });
                 const collector = (interaction.channel as any).createMessageCollector({
-                    filter: (m: { author: { id: string } }) => m.author.id === convoOwnerId || (addedUserId !== null && m.author.id === addedUserId)
+                    filter: (m: { author: { id: string } }) => m.author.id === convoOwnerId || (addedUserId !== null && m.author.id === addedUserId),
+                    idle: 15 * 60 * 1000
                 });
                 let isWaitingForResponse = false;
                 let chatEnded = false;
@@ -523,9 +524,13 @@ export default {
                         isWaitingForResponse = false;
                     }
                 });
-                collector?.on("end", () => {
+                collector?.on("end", (_collected: unknown, reason: string) => {
+                    chatEnded = true;
                     ai.clearLocalFunctionHandlers(convoOwnerId);
                     ai.clearChat(interaction.user.id);
+                    if (reason === "idle") {
+                        reply(texts.common.stopped_ai).catch(() => { });
+                    }
                 });
                 break;
             }

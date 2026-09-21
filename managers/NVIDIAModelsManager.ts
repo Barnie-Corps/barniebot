@@ -4,6 +4,7 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import * as path from "path";
 import { promises as fs } from "fs";
+import * as fsSync from "fs";
 import * as https from "https";
 import sharp from "sharp";
 import Log from "../Log";
@@ -116,8 +117,9 @@ class NIMChatSessionImpl implements NIMChatSession {
         }
     }
     public async sendMessage(input: string | Array<{ functionResponse: { name: string; response: { result: any } } }>, signal?: AbortSignal): Promise<NIMChatResult> {
-        this.pushInput(input);
         this.trimContext();
+        const pushedIndex = this.messages.length;
+        this.pushInput(input);
         let lastError: any;
         for (let attempt = 0; attempt < 3; attempt++) {
             if (attempt > 0) {
@@ -169,6 +171,7 @@ class NIMChatSessionImpl implements NIMChatSession {
                 if (!isRetryable) break;
             }
         }
+        this.messages.splice(pushedIndex);
         throw lastError || new Error("Failed to get AI response after retries");
     }
     public async sendMessageStream(
@@ -176,9 +179,9 @@ class NIMChatSessionImpl implements NIMChatSession {
         onChunk?: (delta: string) => void,
         signal?: AbortSignal
     ): Promise<NIMChatResult> {
+        this.trimContext();
         const pushedIndex = this.messages.length;
         this.pushInput(input);
-        this.trimContext();
         const client = this.manager.getNextClient();
         const controller = new AbortController();
         const onAbort = () => controller.abort();
@@ -469,11 +472,10 @@ export default class NVIDIAModelsManager {
     public GetSpeechToText = async (audioBuffer: Buffer, timeoutMs: number = 15000, functionId?: string): Promise<string> => {
         try {
             const protoPath = path.join(__dirname, "..", "protos", "riva_asr.proto");
-            const fs = require("fs");
             const protoDir = path.join(__dirname, "..", "protos");
 
-            if (!fs.existsSync(protoDir)) {
-                fs.mkdirSync(protoDir, { recursive: true });
+            if (!fsSync.existsSync(protoDir)) {
+                fsSync.mkdirSync(protoDir, { recursive: true });
             }
 
             const protoContent = `
@@ -556,8 +558,8 @@ message WordInfo {
 }
 `;
 
-            if (!fs.existsSync(protoPath)) {
-                fs.writeFileSync(protoPath, protoContent);
+            if (!fsSync.existsSync(protoPath)) {
+                fsSync.writeFileSync(protoPath, protoContent);
             }
 
             const packageDefinition = protoLoader.loadSync(protoPath, {
@@ -671,11 +673,10 @@ message WordInfo {
             pushCurrent();
 
             const protoPath = path.join(__dirname, "..", "protos", "riva_tts.proto");
-            const fs = require("fs");
             const protoDir = path.join(__dirname, "..", "protos");
 
-            if (!fs.existsSync(protoDir)) {
-                fs.mkdirSync(protoDir, { recursive: true });
+            if (!fsSync.existsSync(protoDir)) {
+                fsSync.mkdirSync(protoDir, { recursive: true });
             }
 
             const protoContent = `
@@ -724,8 +725,8 @@ enum AudioEncoding {
 }
 `;
 
-            if (!fs.existsSync(protoPath)) {
-                fs.writeFileSync(protoPath, protoContent);
+            if (!fsSync.existsSync(protoPath)) {
+                fsSync.writeFileSync(protoPath, protoContent);
             }
 
             const packageDefinition = protoLoader.loadSync(protoPath, {

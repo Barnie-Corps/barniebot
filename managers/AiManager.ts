@@ -1,4 +1,3 @@
-import EventEmitter from "events";
 import utils from "../utils";
 import type { NIMChatResult, NIMChatSession, NIMToolCall } from "../types/nvidia";
 import Log from "../Log";
@@ -12,7 +11,7 @@ import { Ollama } from "ollama";
 
 const AI_DEBUG = process.env.AI_DEBUG === "1";
 
-class AiManager extends EventEmitter {
+class AiManager {
     private promptRateLimits: Map<string, number[]> = new Map();
     private chats: Map<string, NIMChatSession> = new Map();
     private voiceChats: Map<string, NIMChatSession> = new Map();
@@ -24,8 +23,7 @@ class AiManager extends EventEmitter {
     private ollamaChatModel: string;
     private ollamaModerationModel: string;
     private ollamaVisionModel: string;
-    constructor(private ratelimit: number, private max: number, private timeout: number, private enableOllama: boolean, private ollamaSettings?: { host: string, port: number, baseUrl: string }, sessionIdleTimeoutMs?: number) {
-        super();
+    constructor(private max: number, private timeout: number, private enableOllama: boolean, private ollamaSettings?: { host: string, port: number, baseUrl: string }, sessionIdleTimeoutMs?: number) {
         Log.info("AiManager initialized", { component: "AiManager" });
         this.sessionIdleTimeoutMs = sessionIdleTimeoutMs ?? 2 * 60 * 60 * 1000;
         setInterval(() => this.clearTimeouts(), 1000);
@@ -101,13 +99,13 @@ class AiManager extends EventEmitter {
             }
             return response;
         } catch (error: any) {
-            console.error("Error getting AI stream response:", error);
+            Log.error("Error getting AI stream response", error);
             if (signal?.aborted) throw error;
             try {
                 const result = await chat.sendMessage(text, signal);
                 return this.buildResponseResult(result);
             } catch (error2: any) {
-                console.error("Error getting AI fallback response:", error2);
+                Log.error("Error getting AI fallback response", error2);
                 return { text: "Error: Could not get a response from the AI service. Please try again later.", call: null, toolCalls: [] };
             }
         }
@@ -161,6 +159,9 @@ class AiManager extends EventEmitter {
                 }
                 return lastResult;
             }
+            const fallbackReply = rsp.response.text();
+            if (message) await message.edit(fallbackReply.length ? fallbackReply : "[empty response]");
+            return fallbackReply;
         }
         let preparedArgs: any = args;
         if (["current_guild_info", "on_guild"].includes(name)) {
@@ -310,6 +311,11 @@ class AiManager extends EventEmitter {
                     return lastResult;
                 }
                 status = "unknown_function";
+                const fallbackReply = rsp.response.text();
+                if (message && !deferEdit) {
+                    await message.edit(fallbackReply.length ? fallbackReply : ".");
+                }
+                return fallbackReply;
             }
             let rawResult: any;
             if (localHandler) {
@@ -450,7 +456,10 @@ class AiManager extends EventEmitter {
             status = reply.trim() ? "ok" : "empty_reply";
             return reply;
         } finally {
-            const _durationMs = Date.now() - startedAt;
+            const durationMs = Date.now() - startedAt;
+            if (durationMs >= 3000) {
+                Log.warn("Slow AI function execution", { component: "AiManager", name, status, durationMs });
+            }
         }
     }
     private async getChat(id: string, text: string): Promise<NIMChatSession> {

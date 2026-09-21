@@ -1,6 +1,6 @@
 import AiManager from "./managers/AiManager";
 const ai = new AiManager(
-    10, 10, 120000,
+    10, 120000,
     process.env.OLLAMA_ENABLED === "true",
     {
         host: process.env.OLLAMA_HOST || "localhost",
