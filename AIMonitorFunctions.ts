@@ -1,5 +1,5 @@
 import utils from "./utils";
-import type { FunctionDeclaration, OpenAIToolDefinition, SchemaType } from "./AIFunctions";
+import { SchemaType, type FunctionDeclaration, type OpenAIToolDefinition } from "./types/aiFunctions";
 import type { AIMonitorToolName } from "./types/aiMonitorTools";
 
 const functionDeclarations: Record<AIMonitorToolName, FunctionDeclaration> = {
