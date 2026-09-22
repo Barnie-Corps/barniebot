@@ -96,7 +96,7 @@ const client = new Client({
     intents: [GatewayIntentBits.MessageContent, GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.GuildMessageTyping, GatewayIntentBits.GuildEmojisAndStickers, GatewayIntentBits.DirectMessages, GatewayIntentBits.DirectMessageTyping, GatewayIntentBits.DirectMessageReactions, GatewayIntentBits.GuildVoiceStates],
     partials: [Partials.Channel, Partials.GuildMember, Partials.Message, Partials.User]
 });
-const aiMonitor = new AiMonitorManager(client, true, "phi3:latest");
+const aiMonitor = new AiMonitorManager(client, true, "qwen2.5:3b");
 (async function () {
     const commandsDir = fs.readdirSync("./commands").filter(f => f.endsWith(".ts"));
     for (const cmdFile of commandsDir) {

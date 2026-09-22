@@ -31,7 +31,7 @@ class AiManager {
         const port = ollamaSettings?.port || 11434;
         this.ollamaClient = new Ollama({ host: `${host}:${port}` });
         this.ollamaChatModel = process.env.OLLAMA_CHAT_MODEL || "qwen2.5:0.5b";
-        this.ollamaModerationModel = process.env.OLLAMA_MODERATION_MODEL || "phi3:latest";
+        this.ollamaModerationModel = process.env.OLLAMA_MODERATION_MODEL || "qwen2.5:3b";
         this.ollamaVisionModel = process.env.OLLAMA_VISION_MODEL || "llava:latest";
     }
     private clearTimeouts(): void {
@@ -559,7 +559,7 @@ class AiManager {
             return [];
         }
     }
-    public getSingleOllamaResponse(model: string, messages: Array<any>, timeoutMs?: number): Promise<string> {
+    public getSingleOllamaResponse(model: string, messages: Array<any>, timeoutMs?: number, format?: "json"): Promise<string> {
         if (!this.enableOllama) {
             return Promise.reject(new Error("Ollama integration is disabled"));
         }
@@ -570,7 +570,8 @@ class AiManager {
                 const response = await this.ollamaClient.chat({
                     model,
                     messages,
-                    stream: false
+                    stream: false,
+                    ...(format ? { format } : {})
                 });
                 clearTimeout(timeout);
                 if (typeof response.message?.content === "string") {

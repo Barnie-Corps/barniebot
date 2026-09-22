@@ -36,7 +36,7 @@ export default class AiMonitorManager {
     private localModelReady: boolean = true;
     constructor(private client: Client, private useLocal?: boolean, private wlocalModel?: string) {
         this.useLocalModel = Boolean(useLocal);
-        this.localModel = typeof wlocalModel === "string" && wlocalModel.trim() ? wlocalModel.trim() : "llama3:latest";
+        this.localModel = typeof wlocalModel === "string" && wlocalModel.trim() ? wlocalModel.trim() : "qwen2.5:3b";
         if (this.useLocalModel) this.intializeLocalModel().catch(error => {
             Log.warn("Failed to initialize local AI model", { component: "AiMonitor", error: error.message });
             this.localModelReady = false;
@@ -794,7 +794,7 @@ export default class AiMonitorManager {
         let usedLocal = false;
         if (this.useLocalModel && this.localModelReady) {
             try {
-                content = await ai.getSingleOllamaResponse(this.localModel, [{ role: "user", content: prompt }], 8000);
+                content = await ai.getSingleOllamaResponse(this.localModel, [{ role: "user", content: prompt }], 8000, "json");
                 usedLocal = true;
             } catch (error: any) {
                 this.localModelReady = false;
