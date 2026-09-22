@@ -37,7 +37,6 @@ export default {
         const now = Date.now();
         const remindAt = now + ms;
         await db.query("INSERT INTO reminders SET ?", [{
-            id: undefined,
             user_id: interaction.user.id,
             channel_id: interaction.channelId,
             message,

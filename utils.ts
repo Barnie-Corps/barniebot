@@ -1129,6 +1129,81 @@ const utils: any = {
     const minutes = Math.floor((ms % 3600000) / 60000);
     return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
   },
+  resolveGiveaway: async (giveawayId: number, language?: string): Promise<{ ok: boolean; error?: string; winners?: string[] }> => {
+    const claimed: any = await db.query("UPDATE giveaways SET ended = TRUE WHERE id = ? AND ended = FALSE", [giveawayId]);
+    if (!claimed || claimed.affectedRows !== 1) return { ok: false, error: "Giveaway not found or already ended" };
+    const rows: any = await db.query("SELECT * FROM giveaways WHERE id = ?", [giveawayId]);
+    const giveaway = rows?.[0];
+    if (!giveaway) return { ok: false, error: "Giveaway not found" };
+    const entries: any = await db.query("SELECT user_id FROM giveaway_entries WHERE giveaway_id = ?", [giveawayId]);
+    const userIds = entries.map((e: any) => e.user_id);
+    const winners: string[] = [];
+    const pool = [...userIds];
+    for (let i = 0; i < giveaway.winner_count && pool.length > 0; i++) {
+      const idx = Math.floor(Math.random() * pool.length);
+      winners.push(pool[idx]);
+      pool.splice(idx, 1);
+    }
+    await db.query("UPDATE giveaways SET winner_ids = ? WHERE id = ?", [JSON.stringify(winners), giveawayId]);
+
+    try {
+      const channel = await client.channels.fetch(giveaway.channel_id).catch(() => null) as TextChannel | null;
+      if (channel) {
+        let texts = { endedAnnouncement: "🎊 Giveaway Ended!", won: "won", winnerLabel: "Winner(s)", noEntries: "No entries, couldn't pick a winner.", hosterLabel: "Hosted by" };
+        const lang = (language || "en").toLowerCase();
+        if (lang !== "en") {
+          try { texts = await utils.autoTranslate(texts, "en", lang); } catch { }
+        }
+        const embed = new EmbedBuilder()
+          .setColor("Green")
+          .setTitle(`🎊 ${giveaway.prize}`)
+          .setDescription(giveaway.description || "")
+          .addFields(
+            { name: texts.winnerLabel, value: winners.length > 0 ? winners.map((w: string) => `<@${w}>`).join(", ") : texts.noEntries, inline: true },
+            { name: texts.hosterLabel, value: `<@${giveaway.created_by}>`, inline: true }
+          )
+          .setTimestamp();
+        await channel.send({ content: winners.length > 0 ? `🎉 ${texts.endedAnnouncement} ${winners.map((w: string) => `<@${w}>`).join(", ")} ${texts.won} **${giveaway.prize}**!` : undefined, embeds: [embed] });
+        const msg = await channel.messages.fetch(giveaway.message_id).catch(() => null);
+        if (msg) await msg.edit({ components: [] });
+      }
+    } catch (error: any) {
+      Log.warn("Failed to announce giveaway end", { component: "Giveaway", giveawayId, error: error?.message || String(error) });
+    }
+    return { ok: true, winners };
+  },
+  rerollGiveawayWinner: async (giveawayId: number, guildId?: string, language?: string): Promise<{ ok: boolean; error?: string; newWinner?: string }> => {
+    const rows: any = guildId
+      ? await db.query("SELECT * FROM giveaways WHERE id = ? AND guild_id = ?", [giveawayId, guildId])
+      : await db.query("SELECT * FROM giveaways WHERE id = ?", [giveawayId]);
+    const giveaway = rows?.[0];
+    if (!giveaway) return { ok: false, error: "Giveaway not found" };
+    if (!giveaway.ended) return { ok: false, error: "Giveaway is still running" };
+    const entries: any = await db.query("SELECT user_id FROM giveaway_entries WHERE giveaway_id = ?", [giveawayId]);
+    const userIds = entries.map((e: any) => e.user_id);
+    let excluded: string[] = giveaway.winner_ids || [];
+    if (typeof excluded === "string") {
+      try { excluded = JSON.parse(excluded); } catch { excluded = []; }
+    }
+    const eligible = userIds.filter((uid: string) => !excluded.includes(uid));
+    if (eligible.length === 0) return { ok: false, error: "No eligible entries to reroll" };
+    const newWinner = eligible[Math.floor(Math.random() * eligible.length)];
+    await db.query("UPDATE giveaways SET winner_ids = JSON_ARRAY_APPEND(IFNULL(winner_ids, '[]'), '$', ?) WHERE id = ?", [newWinner, giveawayId]);
+    try {
+      const channel = await client.channels.fetch(giveaway.channel_id).catch(() => null) as TextChannel | null;
+      if (channel) {
+        let texts = { rerolled: "Winner rerolled!", newWinner: "New winner" };
+        const lang = (language || "en").toLowerCase();
+        if (lang !== "en") {
+          try { texts = await utils.autoTranslate(texts, "en", lang); } catch { }
+        }
+        await channel.send(`🎉 **${texts.rerolled}** ${texts.newWinner}: <@${newWinner}>! ${giveaway.prize}`);
+      }
+    } catch (error: any) {
+      Log.warn("Failed to announce giveaway reroll", { component: "Giveaway", giveawayId, error: error?.message || String(error) });
+    }
+    return { ok: true, newWinner };
+  },
   formatBytes: (bytes: number): string => {
     if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
     const units = ["B", "KB", "MB", "GB"];
@@ -4394,6 +4469,112 @@ const utils: any = {
       } catch (error: any) {
         return { error: error.message ?? `Failed to ${action} message` };
       }
+    },
+    manage_giveaway: async (args: {
+      requesterId?: string;
+      guildId?: string;
+      channelId?: string;
+      action: string;
+      giveawayId?: number;
+      prize?: string;
+      description?: string;
+      durationMs?: number;
+      winnerCount?: number;
+    }): Promise<any> => {
+      if (!args?.requesterId || !args.guildId || !args.action) return { error: "Missing parameters" };
+      const action = args.action.toLowerCase();
+      if (!["start", "end", "reroll", "list"].includes(action)) return { error: "Invalid action. Use: start, end, reroll, list" };
+      const owner = isOwner(args.requesterId) === true;
+      const adminStaff = await isAdminStaffUser(args.requesterId);
+      const guildInfo = await getGuildAndMember(args.guildId, args.requesterId);
+      if (guildInfo.error) return { error: guildInfo.error };
+      const guild = guildInfo.guild as any;
+      const member = guildInfo.member as any;
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageGuild);
+      if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
+      try {
+        if (action === "list") {
+          const rows: any = await db.query("SELECT * FROM giveaways WHERE guild_id = ? AND ended = FALSE ORDER BY ends_at ASC", [args.guildId]);
+          return {
+            giveaways: rows.map((g: any) => ({ id: g.id, prize: g.prize, description: g.description, endsAt: g.ends_at, winnerCount: g.winner_count, channelId: g.channel_id }))
+          };
+        }
+        if (action === "start") {
+          if (!args.prize || !args.durationMs) return { error: "prize and durationMs are required for start action" };
+          if (args.durationMs < 60000) return { error: "Minimum duration is 1 minute" };
+          if (args.durationMs > 2592000000) return { error: "Maximum duration is 30 days" };
+          const channelId = args.channelId;
+          if (!channelId) return { error: "channelId is required for start action" };
+          const channel = guild.channels.cache.get(channelId) as any;
+          if (!channel || !channel.isTextBased?.()) return { error: "Channel not found or not text-based" };
+          const winnerCount = Math.max(1, Math.min(args.winnerCount ?? 1, 25));
+          const endsAt = Date.now() + args.durationMs;
+          const result: any = await db.query("INSERT INTO giveaways SET ?", [{
+            guild_id: args.guildId,
+            channel_id: channelId,
+            prize: args.prize,
+            description: args.description || null,
+            winner_count: winnerCount,
+            ends_at: endsAt,
+            created_by: args.requesterId,
+            created_at: Date.now()
+          }]);
+          const giveawayId = result.insertId;
+          const embed = new EmbedBuilder()
+            .setColor("Gold")
+            .setTitle(`🎉 ${args.prize}`)
+            .setDescription(args.description || "")
+            .addFields(
+              { name: "Prize", value: args.prize, inline: true },
+              { name: "Winner(s)", value: String(winnerCount), inline: true },
+              { name: "Ends", value: `<t:${Math.floor(endsAt / 1000)}:R>`, inline: true },
+              { name: "Hosted by", value: `<@${args.requesterId}>`, inline: true }
+            )
+            .setFooter({ text: `ID: ${giveawayId}` })
+            .setTimestamp();
+          const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId(`giveaway_enter_${giveawayId}`).setLabel("🎉 Enter Giveaway").setStyle(ButtonStyle.Success).setEmoji("🎉")
+          );
+          const msg = await channel.send({ embeds: [embed], components: [row] });
+          await db.query("UPDATE giveaways SET message_id = ? WHERE id = ?", [msg.id, giveawayId]);
+          return { success: true, giveawayId, endsAt };
+        }
+        if (action === "end") {
+          if (!args.giveawayId) return { error: "giveawayId is required for end action" };
+          const rows: any = await db.query("SELECT * FROM giveaways WHERE id = ? AND guild_id = ?", [args.giveawayId, args.guildId]);
+          if (!rows[0]) return { error: "Giveaway not found" };
+          if (rows[0].ended) return { error: "Giveaway already ended" };
+          const requesterLang = await utils.getUserLanguage(args.requesterId).catch(() => "en");
+          const result = await utils.resolveGiveaway(args.giveawayId, requesterLang);
+          if (!result.ok) return { error: result.error || "Failed to end giveaway" };
+          return { success: true, winners: result.winners };
+        }
+        if (action === "reroll") {
+          if (!args.giveawayId) return { error: "giveawayId is required for reroll action" };
+          const requesterLang = await utils.getUserLanguage(args.requesterId).catch(() => "en");
+          const result = await utils.rerollGiveawayWinner(args.giveawayId, args.guildId, requesterLang);
+          if (!result.ok) return { error: result.error || "Failed to reroll giveaway" };
+          return { success: true, newWinner: result.newWinner };
+        }
+      } catch (error: any) {
+        return { error: error.message ?? "Failed to manage giveaway" };
+      }
+    },
+    create_reminder: async (args: { requesterId?: string; channelId?: string; message?: string; durationMs?: number }): Promise<any> => {
+      if (!args?.requesterId || !args.message || !args.durationMs) return { error: "Missing parameters" };
+      if (args.durationMs < 30000) return { error: "Minimum reminder time is 30 seconds" };
+      if (args.durationMs > 2592000000) return { error: "Maximum reminder time is 30 days" };
+      const now = Date.now();
+      const remindAt = now + args.durationMs;
+      await db.query("INSERT INTO reminders SET ?", [{
+        user_id: args.requesterId,
+        channel_id: args.channelId ?? null,
+        message: args.message,
+        remind_at: remindAt,
+        created_at: now,
+        status: "pending"
+      }]);
+      return { success: true, remindAt };
     },
     check_local_model: async (): Promise<any> => {
       const aiManager = (await import("./ai")).default;

@@ -41,20 +41,15 @@ export default {
             ends: "Ends",
             winners: "Winner(s)",
             enter: "🎉 Enter Giveaway",
-            entered: "You entered the giveaway!",
-            already_entered: "You're already entered!",
-            no_perms: "You don't have permission to manage giveaways.",
             not_found: "Giveaway not found.",
             ended: "Giveaway ended.",
             already_ended: "This giveaway has already ended.",
             not_ended: "This giveaway is still running.",
             no_entries: "No entries, couldn't pick a winner.",
-            winner: "Winner",
             rerolled: "Winner rerolled!",
             new_winner: "New winner",
             active_giveaways: "Active Giveaways",
             none_active: "No active giveaways in this server.",
-            ended_announcement: "🎊 Giveaway Ended!",
             hoster: "Hosted by"
         };
         if (lang !== "en") {
@@ -113,7 +108,8 @@ export default {
             const rows = await db.query("SELECT * FROM giveaways WHERE id = ? AND guild_id = ?", [id, guildId]) as unknown as any[];
             if (!rows[0]) return respond({ content: texts.not_found });
             if (rows[0].ended) return respond({ content: texts.already_ended });
-            await endGiveaway(rows[0], texts);
+            const result = await utils.resolveGiveaway(Number(id), lang);
+            if (!result.ok) return respond({ content: texts.already_ended });
             return respond({ content: texts.ended });
         }
         if (sub === "reroll") {
@@ -121,22 +117,9 @@ export default {
             const rows = await db.query("SELECT * FROM giveaways WHERE id = ? AND guild_id = ?", [id, guildId]) as unknown as any[];
             if (!rows[0]) return respond({ content: texts.not_found });
             if (!rows[0].ended) return respond({ content: texts.not_ended });
-            const giveaway = rows[0];
-            const entries = await db.query("SELECT user_id FROM giveaway_entries WHERE giveaway_id = ?", [id]) as unknown as any[];
-            const userIds = entries.map((e: any) => e.user_id);
-            let excluded: string[] = giveaway.winner_ids || [];
-            if (typeof excluded === "string") {
-                try { excluded = JSON.parse(excluded); } catch { excluded = []; }
-            }
-            const eligible = userIds.filter((uid: string) => !excluded.includes(uid));
-            if (eligible.length === 0) return respond({ content: texts.no_entries });
-            const newWinner = eligible[Math.floor(Math.random() * eligible.length)];
-            await db.query("UPDATE giveaways SET winner_ids = JSON_ARRAY_APPEND(IFNULL(winner_ids, '[]'), '$', ?) WHERE id = ?", [newWinner, id]);
-            const channel = await interaction.client.channels.fetch(giveaway.channel_id).catch(() => null) as TextChannel | null;
-            if (channel) {
-                await channel.send(`🎉 **${texts.rerolled}** ${texts.new_winner}: <@${newWinner}>! ${giveaway.prize}`);
-            }
-            return respond({ content: `${texts.new_winner}: <@${newWinner}>` });
+            const result = await utils.rerollGiveawayWinner(Number(id), guildId, lang);
+            if (!result.ok) return respond({ content: result.error === "No eligible entries to reroll" ? texts.no_entries : texts.not_found });
+            return respond({ content: `${texts.new_winner}: <@${result.newWinner}>` });
         }
         if (sub === "list") {
             const rows = await db.query("SELECT * FROM giveaways WHERE guild_id = ? AND ended = FALSE ORDER BY ends_at ASC", [guildId]) as unknown as any[];
@@ -152,33 +135,4 @@ export default {
     },
     ephemeral: true
 };
-
-async function endGiveaway(giveaway: any, texts: any) {
-    const entries = await db.query("SELECT user_id FROM giveaway_entries WHERE giveaway_id = ?", [giveaway.id]) as unknown as any[];
-    const userIds = entries.map((e: any) => e.user_id);
-    const winners: string[] = [];
-    const pool = [...userIds];
-    for (let i = 0; i < giveaway.winner_count && pool.length > 0; i++) {
-        const idx = Math.floor(Math.random() * pool.length);
-        winners.push(pool[idx]);
-        pool.splice(idx, 1);
-    }
-    await db.query("UPDATE giveaways SET ended = TRUE, winner_ids = ? WHERE id = ?", [JSON.stringify(winners), giveaway.id]);
-    const channel = await (global as any).client?.channels.fetch(giveaway.channel_id).catch(() => null) as TextChannel | null;
-    if (!channel) return;
-    const embed = new EmbedBuilder()
-        .setColor("Green")
-        .setTitle(`🎊 ${giveaway.prize}`)
-        .setDescription(giveaway.description || "")
-        .addFields(
-            { name: texts.winner, value: winners.length > 0 ? winners.map((w: string) => `<@${w}>`).join(", ") : texts.no_entries, inline: true },
-            { name: texts.hoster, value: `<@${giveaway.created_by}>`, inline: true }
-        )
-        .setTimestamp();
-    await channel.send({ content: winners.length > 0 ? `🎉 ${texts.ended_announcement}! ${winners.map((w: string) => `<@${w}>`).join(", ")} won **${giveaway.prize}**!` : undefined, embeds: [embed] });
-    const msg = await channel.messages.fetch(giveaway.message_id).catch(() => null);
-    if (msg) {
-        await msg.edit({ components: [] });
-    }
-}
 

@@ -176,11 +176,16 @@ client.on("clientReady", async (): Promise<any> => {
 
     WarningCleanup.startWarningCleanupScheduler();
 
+    let remindersProcessing = false;
     setInterval(async () => {
+        if (remindersProcessing) return;
+        remindersProcessing = true;
         try {
             const due = await db.query("SELECT * FROM reminders WHERE status = 'pending' AND remind_at <= ?", [Date.now()]) as unknown as any[];
             for (const r of due) {
                 try {
+                    const claimed: any = await db.query("UPDATE reminders SET status = 'sending' WHERE id = ? AND status = 'pending'", [r.id]);
+                    if (!claimed || claimed.affectedRows !== 1) continue;
                     const user = await client.users.fetch(r.user_id);
                     let reminderContent = `⏰ **Reminder:** ${r.message}`;
                     const userLang = await utils.getUserLanguage(r.user_id);
@@ -195,54 +200,30 @@ client.on("clientReady", async (): Promise<any> => {
             }
         } catch (e) {
             Log.warn("Reminder check failed", { component: "Reminders", error: (e as any)?.message || String(e) });
+        } finally {
+            remindersProcessing = false;
         }
     }, 30000);
 
+    let giveawaysProcessing = false;
     setInterval(async () => {
+        if (giveawaysProcessing) return;
+        giveawaysProcessing = true;
         try {
             const ended = await db.query("SELECT * FROM giveaways WHERE ended = FALSE AND ends_at <= ?", [Date.now()]) as unknown as any[];
             for (const g of ended) {
-                const entries = await db.query("SELECT user_id FROM giveaway_entries WHERE giveaway_id = ?", [g.id]) as unknown as any[];
-                const userIds = entries.map((e: any) => e.user_id);
-                const winners: string[] = [];
-                const pool = [...userIds];
-                for (let i = 0; i < g.winner_count && pool.length > 0; i++) {
-                    const idx = Math.floor(Math.random() * pool.length);
-                    winners.push(pool[idx]);
-                    pool.splice(idx, 1);
-                }
-                await db.query("UPDATE giveaways SET ended = TRUE, winner_ids = ? WHERE id = ?", [JSON.stringify(winners), g.id]);
-                const channel = await client.channels.fetch(g.channel_id).catch(() => null) as TextChannel | null;
-                if (channel) {
-                    const embed = new EmbedBuilder()
-                        .setColor("Green")
-                        .setTitle(`🎊 ${g.prize}`)
-                        .setDescription(g.description || "")
-                        .addFields(
-                            { name: "Winner(s)", value: winners.length > 0 ? winners.map((w: string) => `<@${w}>`).join(", ") : "No entries", inline: true }
-                        )
-                        .setTimestamp();
-                    let giveawayEndedText = "Giveaway Ended!";
-                    let wonText = "won";
-                    const guildChat = await utils.getGlobalChatConfigCached(channel.guildId).catch(() => null);
+                try {
+                    const guildChat = await utils.getGlobalChatConfigCached(g.guild_id).catch(() => null);
                     const guildLang = typeof guildChat?.language === "string" && guildChat.language ? guildChat.language : "en";
-                    if (guildLang !== "en") {
-                        try {
-                            const [endedRes, wonRes] = await Promise.all([
-                                utils.translate("Giveaway Ended!", "en", guildLang),
-                                utils.translate("won", "en", guildLang)
-                            ]);
-                            giveawayEndedText = endedRes.text || giveawayEndedText;
-                            wonText = wonRes.text || wonText;
-                        } catch {}
-                    }
-                    await channel.send({ content: winners.length > 0 ? `🎉 ${giveawayEndedText} ${winners.map((w: string) => `<@${w}>`).join(", ")} ${wonText} **${g.prize}**!` : undefined, embeds: [embed] });
-                    const msg = await channel.messages.fetch(g.message_id).catch(() => null);
-                    if (msg) await msg.edit({ components: [] });
+                    await utils.resolveGiveaway(g.id, guildLang);
+                } catch (giveawayError: any) {
+                    Log.warn("Giveaway resolution failed", { component: "Giveaway", giveawayId: g.id, error: giveawayError?.message || String(giveawayError) });
                 }
             }
         } catch (e) {
             Log.warn("Giveaway check failed", { component: "Giveaway", error: (e as any)?.message || String(e) });
+        } finally {
+            giveawaysProcessing = false;
         }
     }, 30000);
 
@@ -1149,22 +1130,31 @@ client.on("interactionCreate", async (interaction): Promise<any> => {
 
     if (interaction.isButton() && interaction.customId.startsWith("giveaway_enter_")) {
         const giveawayId = interaction.customId.replace("giveaway_enter_", "");
+        let giveawayTexts = {
+            no_longer_active: "This giveaway is no longer active.",
+            already_entered: "You're already entered!",
+            entered: "You entered the giveaway!",
+            error: "An error occurred."
+        };
+        if (Lang !== "en") {
+            try { giveawayTexts = await utils.autoTranslate(giveawayTexts, "en", Lang); } catch { }
+        }
         try {
             const rows = await db.query("SELECT * FROM giveaways WHERE id = ? AND ended = FALSE", [giveawayId]) as unknown as any[];
             if (!rows[0]) {
-                return interaction.reply({ content: "This giveaway is no longer active.", ephemeral: true });
+                return interaction.reply({ content: giveawayTexts.no_longer_active, ephemeral: true });
             }
             const existing = await db.query("SELECT * FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?", [giveawayId, interaction.user.id]) as unknown as any[];
             if (existing[0]) {
-                return interaction.reply({ content: "You're already entered!", ephemeral: true });
+                return interaction.reply({ content: giveawayTexts.already_entered, ephemeral: true });
             }
             await db.query("INSERT INTO giveaway_entries SET ?", [{
                 giveaway_id: giveawayId, user_id: interaction.user.id, entered_at: Date.now()
             }]);
-            await interaction.reply({ content: "You entered the giveaway!", ephemeral: true });
+            await interaction.reply({ content: giveawayTexts.entered, ephemeral: true });
         } catch (error: any) {
             Log.warn("Giveaway button handler failed", { component: "Giveaway", error: error?.message || String(error) });
-            await interaction.reply({ content: "An error occurred.", ephemeral: true }).catch(() => {});
+            await interaction.reply({ content: giveawayTexts.error, ephemeral: true }).catch(() => {});
         }
         return;
     }

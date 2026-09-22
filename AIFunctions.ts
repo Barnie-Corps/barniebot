@@ -1947,6 +1947,35 @@ const functionDeclarations = {
             required: ["channelId", "messageId", "action"]
         }
     },
+    manage_giveaway: {
+        name: "manage_giveaway",
+        description: "Start, end, reroll, or list giveaways in the current guild. Requires Manage Guild permission (or staff/owner). Use 'start' to create a giveaway in a channel, 'end' to end one early and pick winners, 'reroll' to pick a new winner for an already-ended giveaway (excluding previous winners), and 'list' to see active giveaways.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                action: { type: SchemaType.STRING, description: "One of: start, end, reroll, list." },
+                channelId: { type: SchemaType.STRING, description: "Channel to post the giveaway in (for 'start'). Defaults to the current channel if omitted." },
+                giveawayId: { type: SchemaType.NUMBER, description: "The giveaway's numeric ID (for 'end' and 'reroll')." },
+                prize: { type: SchemaType.STRING, description: "What is being given away (for 'start')." },
+                description: { type: SchemaType.STRING, description: "Optional extra description shown on the giveaway embed (for 'start')." },
+                durationMs: { type: SchemaType.NUMBER, description: "How long the giveaway should run, in milliseconds (for 'start'). Minimum 60000 (1 minute), maximum 2592000000 (30 days)." },
+                winnerCount: { type: SchemaType.NUMBER, description: "Number of winners to pick, 1-25 (for 'start'). Defaults to 1." }
+            },
+            required: ["action"]
+        }
+    },
+    create_reminder: {
+        name: "create_reminder",
+        description: "Set a personal reminder for the requesting user. They will be DMed the reminder message when it's due. Only ever set a reminder for the user currently talking to you, using their own requester ID -- never for another user.",
+        parameters: {
+            type: SchemaType.OBJECT,
+            properties: {
+                message: { type: SchemaType.STRING, description: "What to remind the user about." },
+                durationMs: { type: SchemaType.NUMBER, description: "How long from now to send the reminder, in milliseconds. Minimum 30000 (30 seconds), maximum 2592000000 (30 days)." }
+            },
+            required: ["message", "durationMs"]
+        }
+    },
     check_local_model: {
         name: "check_local_model",
         description: "Check if Ollama is running and get status of local AI models. Returns health, available models, and configured models.",
