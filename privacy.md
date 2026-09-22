@@ -1,6 +1,6 @@
 # BarnieBot Privacy Policy
 
-Last Updated: February 12, 2026
+Last Updated: September 21, 2026
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -76,7 +76,7 @@ Collected automatically when you interact with the Bot:
   - Timestamp (UNIX epoch, when command was executed)
   - `is_last` flag (marks most recent command)
 - Purpose: Usage analytics, abuse detection, feature popularity metrics
-- Retention: Up to 90 days rolling window
+- Retention: Indefinite; no automatic purge currently runs (see [Data Retention](#data-retention))
 
 **Message Count Statistics**:
 - Table: `message_count`
@@ -103,12 +103,12 @@ Collected automatically when you interact with the Bot:
 - Data collected:
   - Message ID (unique identifier)
   - User ID (message author)
-  - Encrypted message content (AES-256-CBC encryption)
+  - Encrypted message content (AES-256-GCM authenticated encryption)
   - Original language code
   - Timestamp (message send time)
   - Guild ID (origin server)
   - Channel ID (origin channel)
-- Encryption: All message content encrypted at rest using AES-256-CBC with unique initialization vector per message
+- Encryption: All message content encrypted at rest using AES-256-GCM with a unique random initialization vector and authentication tag per message
 - Encryption key: 32-byte key stored in environment variable, never transmitted
 - Purpose: Abuse investigation, moderation enforcement, pattern detection, cross-server relay
 - Access: Owner commands can decrypt for specific users during investigations
@@ -130,7 +130,7 @@ Collected automatically when you interact with the Bot:
     - Creation timestamp
 - Purpose: Server-specific content moderation, word replacement, automated filtering
 - Access: Guild administrators with Manage Messages permission
-- Retention: Deleted automatically 90 days after bot leaves guild
+- Retention: Deleted immediately when the bot leaves the guild
 
 **VIP Subscription Records**:
 - Table: `vip_users`
@@ -140,7 +140,7 @@ Collected automatically when you interact with the Bot:
   - Subscription end date (UNIX epoch milliseconds)
 - Purpose: Extended AI feature access, session duration enforcement
 - Grant method: Owner command (`b.add_vip`)
-- Expiration: Automatic on end date, row remains for 1-year audit period
+- Expiration: The record is deleted the next time it's checked after the end date passes (e.g., your next command); there is no separate audit-retention window afterward
 - Renewal: Extends end date rather than creating new record
 
 **Staff Hierarchy**:
@@ -202,7 +202,7 @@ Collected automatically when you interact with the Bot:
   - Active status (computed from current time vs until)
 - Purpose: Temporary or permanent global chat silencing
 - Expiration: Automatic for timed mutes, manual unmute for indefinite
-- Retention: Removed post-expiry, history kept for 1 year
+- Retention: The record is deleted immediately once the mute ends (either automatically at its expiry or on manual unmute) — no separate history is kept afterward
 
 **Staff Audit Log**:
 - Table: `staff_audit_log`
@@ -310,7 +310,7 @@ Collected automatically when you interact with the Bot:
   - Messages used (counter)
   - Updated at timestamp
   - Purpose: Free tier quota enforcement, usage analytics
-  - Retention: Rolling 30-day window
+  - Retention: Indefinite; one row is kept per user per calendar day and there is currently no automatic purge of old days
   - Quota: Free tier limited to daily message count, VIP/Staff unlimited
 
 **Security Measures for AI Data**:
@@ -359,11 +359,11 @@ The RPG system is one of the most data-intensive features, requiring account cre
   - Storage: Plain text in database
   - Usage: One-time verification, password recovery
   - Not shared: Never sold or provided to third parties
-- Password (AES-256-CBC encrypted)
-  - Encryption method: Advanced Encryption Standard with 256-bit key in CBC mode
-  - Storage: Encrypted ciphertext with unique IV per password
-  - Access: Never decrypted for display; only for login verification
-  - Staff access: Admin+ can force password changes but cannot view current passwords
+- Password (bcrypt-hashed, one-way)
+  - Hashing method: bcrypt with a cost factor of 12; the plaintext password is never stored or recoverable
+  - Legacy accounts: Accounts created before the bcrypt migration may still be stored using the old reversible AES-256-CBC encryption scheme; these are automatically re-hashed with bcrypt the next time the account logs in successfully
+  - Access: Never decrypted or displayed; only compared against on login
+  - Staff access: Admin+ can force a password reset but cannot view or recover the current password
 - Verification status (boolean)
 - Verification code (6-digit numeric, temporary)
 - Code expiration timestamp
@@ -452,7 +452,7 @@ The RPG system is one of the most data-intensive features, requiring account cre
 - Victory flag (boolean)
 - Timestamp
 - Purpose: Battle history, drop tracking, progression analytics
-- Retention: 30 days rolling, aggregated for statistics
+- Retention: Indefinite; no automatic purge or aggregation job currently runs
 
 **Trading System** (`rpg_trades`):
 - Trade ID
@@ -464,7 +464,7 @@ The RPG system is one of the most data-intensive features, requiring account cre
 - Created at timestamp
 - Completed at timestamp (if applicable)
 - Purpose: Player-to-player economy, transaction history, dispute resolution
-- Retention: 90 days after completion
+- Retention: Indefinite; no automatic purge currently runs
 
 **Quest System**:
 - `rpg_quests`: Quest definitions (ID, name, description, rewards, requirements)
@@ -484,15 +484,15 @@ The RPG system is one of the most data-intensive features, requiring account cre
 - Success flag (boolean)
 - IP address (NOT stored - we don't track IPs)
 - Purpose: Login audit trail, security monitoring
-- Retention: Last 30 attempts per account
+- Retention: Indefinite; every attempt is kept, there is no rolling window or cap
 
 **RPG Data Retention Summary**:
 - Account data: Indefinite while account exists
 - Character data: Deleted when account deleted
-- Session history: 90 days rolling
-- Login attempts: 30 days rolling
-- Combat logs: 30 days rolling, aggregated stats retained
-- Trade history: 90 days after completion
+- Session history: Indefinite; no automatic purge currently runs
+- Login attempts: Indefinite; no automatic purge currently runs
+- Combat logs: Indefinite; no automatic purge currently runs
+- Trade history: Indefinite; no automatic purge currently runs
 - Inventory: Deleted with account
 - Email addresses: Retained with account for recovery
 
@@ -699,14 +699,10 @@ When ticket closed, two formats generated:
 - Purpose: AI-generated content, downloads, scripts, personal file storage
 - Backward compatibility: Falls back to `ai_workspace/` if no userId
 
-**AI Function Calls** (logged for diagnostics):
-- Function name (e.g., "get_server_info", "get_user", "manage_guild")
-- Function arguments (parameters passed)
-- User ID (who invoked)
-- Timestamp
-- Purpose: Debug function execution, audit privileged operations
-- Note: Full conversation NOT logged, only function metadata
-- Retention: 7 days
+**AI Function (Tool) Calls**:
+- There is no separate, dedicated audit log of AI tool/function calls
+- If you're using the AI in the default ephemeral mode, which function was called and with what arguments exists only in process memory for that turn and is not persisted anywhere
+- If you're in a persistent chat session (see "Session Data" above), the tool calls and their results made during that session ARE saved as part of the encrypted message history, and are deleted the same way that session's messages are
 
 **AI monitor** (per guild):
 - Configured with `/ai monitor` command
@@ -716,7 +712,7 @@ When ticket closed, two formats generated:
 - If flagged as potential violation, case is derivated to a larger model for further analysis and potential action or investigation
 - Purpose: Proactive detection of harmful content, automated moderation assistance, pattern recognition, phishing detection, spam detection, harassment detection
 - Only data collected is the case information, which states: risk, message id, user id, guild id, channel id, and timestamp. No message content is stored in the database for this feature.
-- Retention: Cases retained indefin
+- Retention: Cases retained indefinitely
 
 **Voice Conversation** (ephemeral):
 - Speech-to-text processing: Audio sent to NVIDIA Riva ASR, text returned
@@ -728,11 +724,11 @@ When ticket closed, two formats generated:
 #### Global Chat Network
 **Message Processing**:
 - All messages sent to configured global chat channels processed
-- Encryption: AES-256-CBC before database insertion
+- Encryption: AES-256-GCM (authenticated encryption) before database insertion
 - Encryption process:
-  1. Generate random 16-byte initialization vector (IV)
-  2. Encrypt message content with AES-256-CBC using bot encryption key + IV
-  3. Prepend IV to ciphertext (IV:ciphertext format)
+  1. Generate a random 12-byte initialization vector (IV)
+  2. Encrypt message content with AES-256-GCM using the bot encryption key + IV, producing an authentication tag
+  3. Store as `IV:AuthTag:ciphertext` (hex-encoded)
   4. Store in database
 - Decryption: Only via owner command `b.messages <user_id>` for investigations
 
@@ -831,6 +827,40 @@ When ticket closed, two formats generated:
 - Access: Users with Manage Guild permission
 - Commands: `/custom_responses add`, `/custom_responses remove`, `/custom_responses list`
 
+#### Reminders
+**Reminder Creation**:
+- Table: `reminders`
+- Data collected:
+  - User ID (who the reminder is for)
+  - Channel ID (where it was created, if applicable; may be absent for DM-originated reminders)
+  - Message (free-text content you provide, stored as plain text)
+  - Remind-at time (when the reminder should fire)
+  - Created-at timestamp
+  - Status (`pending`, `sending`, `sent`, or `failed`)
+- Creation: `/remindme` command, or the AI chatbot's `create_reminder` tool during a conversation
+- Delivery: A background job checks for due reminders roughly every 30 seconds and delivers them via direct message
+- Purpose: Let you schedule a message to be sent back to you at a later time
+- Retention: Reminder rows are not automatically deleted after delivery; they remain in the database with their final status (`sent`/`failed`) for record-keeping. See [Data Retention](#data-retention) for deletion requests.
+
+#### Giveaways
+**Giveaway Creation and Entry**:
+- Tables: `giveaways`, `giveaway_entries`
+- Data collected (`giveaways`):
+  - Guild ID, channel ID, and announcement message ID
+  - Prize and description text (as entered by the creator)
+  - Winner count and end time
+  - Creator's user ID
+  - Ended flag and, once concluded, the winning entrant(s)' user IDs
+- Data collected (`giveaway_entries`):
+  - Giveaway ID
+  - Entrant's user ID
+  - Time entered
+- Creation: `/giveaway start`, requires the Manage Guild permission; also available to the AI chatbot via the `manage_giveaway` tool (same permission check applies to the requesting member)
+- Entry: Clicking the "Enter Giveaway" button on the giveaway announcement records your user ID in `giveaway_entries`
+- Ending/rerolling: `/giveaway end` and `/giveaway reroll`, or automatically when the end time is reached (checked on the same ~30-second interval as reminders)
+- Purpose: Run community giveaways and fairly select winners
+- Retention: Giveaway and entry rows are not automatically deleted after the giveaway ends; they remain for record-keeping (e.g., prize disputes). See [Data Retention](#data-retention) for deletion requests.
+
 #### Worker Pools
 **Translation Workers**:
 - Count: Environment variable `TRANSLATE_WORKERS` or CPU count (default 5-10)
@@ -864,7 +894,7 @@ When ticket closed, two formats generated:
 - Delivery: Shown to users on next command execution
 - Purpose: Important announcements, maintenance notices, policy updates
 - Creation: Admin+ only via `/stafftools notify`
-- Retention: Until marked as read by user or 30 days
+- Retention: Indefinite; there is currently no automatic purge based on age or read status (marking a notification read only records that you've seen it, it doesn't delete it)
 
 #### Process Management
 **Startup Tracking**:
@@ -893,7 +923,7 @@ We do **not** collect:
 - Geolocation data
 - Email addresses beyond RPG verification
 - **AI Chat Sessions**: Conversation history ephemeral; cleared on session end or bot restart. Function call execution metadata (arguments, user IDs) may be logged for diagnostics, but not full transcripts.
-- **Global Chat**: Messages encrypted (AES-256-CBC) before storage. Owner commands like `b.messages` can export decrypted logs for a specific user (moderation/abuse investigation only). Spoofed staff suffixes automatically stripped from non-staff before broadcast.
+- **Global Chat**: Messages encrypted (AES-256-GCM) before storage. Owner commands like `b.messages` can export decrypted logs for a specific user (moderation/abuse investigation only). Spoofed staff suffixes automatically stripped from non-staff before broadcast.
 - **Staff System**: Multi-tier audit system:
   - Ranks and status stored with availability indicators
   - All moderation actions logged with full attribution and metadata
@@ -1067,7 +1097,7 @@ We retain different types of data for varying periods based on legal requirement
 **Global Chat Messages**:
 - Retention: Indefinite
 - Reason: Required for long-term abuse investigation, pattern detection across extended time periods, and historical moderation context
-- Format: Encrypted (AES-256-CBC)
+- Format: Encrypted (AES-256-GCM)
 - Access: Only via owner command `b.messages <user_id>` for investigations
 - Note: Critical for tracing harassment campaigns, spam networks, and coordinated abuse that may span months or years
 
@@ -1121,86 +1151,77 @@ We retain different types of data for varying periods based on legal requirement
 
 ### Time-Limited Retention
 
-**Command Execution Logs**:
-- Retention: 90 days rolling
-- Purpose: Recent usage analytics, abuse detection
-- Automatic purge: Records older than 90 days deleted automatically
+We do not currently run scheduled, time-based purge jobs for most operational data below — the bot has no daily/weekly/monthly cleanup cron. Instead, most of these records are retained indefinitely by default and are only removed when a specific triggering event occurs (e.g., a guild removes the bot, a mute is lifted, a VIP status is checked) or when you request deletion (see [User-Initiated Deletion](#user-initiated-deletion)). The one exception is the hourly warning-expiry job described below, which deactivates (not deletes) expired warnings.
+
+**Command Execution Logs** (`executed_commands` table):
+- Retention: Indefinite; no automatic purge currently runs
 - Includes: Command name, user ID, timestamp
-- Note: Aggregate statistics may be retained indefinitely
+- Purpose: Usage analytics, abuse detection
+- Deletion: Only via your own data-deletion request (`/data delete` or equivalent)
 
-**Message Count Statistics**:
-- Retention: While user active, then 90 days after last message
-- Resets: Never (cumulative)
+**Message Count Statistics** (`message_count` table):
+- Retention: Indefinite; cumulative count, never resets automatically
 - Purpose: Leaderboards, engagement tracking
-- Deletion: Upon user request or account inactivity
+- Deletion: Only via your own data-deletion request
 
-**RPG Session History**:
-- Retention: 90 days rolling
-- Includes: Login timestamps, Discord user IDs, session durations
-- Purpose: Recent activity tracking, anomaly detection
-- Automatic purge: Sessions older than 90 days removed
+**RPG Session History** (`rpg_sessions` table):
+- Retention: Indefinite; no automatic purge currently runs
+- Includes: Login timestamps, account/user IDs, last-activity timestamp, active flag
+- Purpose: Recent activity tracking
+- Deletion: Removed if you delete your RPG account (see [User-Initiated Deletion](#user-initiated-deletion))
 
-**RPG Login Attempts**:
-- Retention: 30 days rolling
-- Includes: Last 30 attempts per account
-- Purpose: Security monitoring, brute force detection
-- Automatic purge: Attempts older than 30 days removed
-- Note: Success/failure status tracked
+**RPG Login Attempts** (`logins` table):
+- Retention: Indefinite; every login attempt is kept, there is no rolling window or record cap
+- Includes: Account ID, timestamp, success/failure status
+- Purpose: Security monitoring
+- Deletion: Removed if you delete your RPG account
 
-**RPG Combat Logs**:
-- Retention: 30 days rolling for detailed logs
-- Aggregated statistics: Retained indefinitely
-- Includes: Monster encounters, damage dealt/received, rewards, outcomes
+**RPG Combat Logs** (`rpg_combat_logs` table):
+- Retention: Indefinite; no automatic purge or aggregation job currently runs
+- Includes: Monster/PvP encounters, damage dealt/received, HP remaining, outcome, timestamp
 - Purpose: Game balance analysis, progression tracking
-- Automatic purge: Individual logs older than 30 days deleted, aggregates preserved
 
-**RPG Trade History**:
-- Retention: 90 days after trade completion
-- Includes: All trade details (participants, items exchanged, gold amounts, timestamps)
+**RPG Trade History** (`rpg_trades` table):
+- Retention: Indefinite for completed trades; no automatic purge currently runs
+- Includes: Trade participants, items exchanged, gold amounts, timestamps, status
 - Purpose: Dispute resolution, economy monitoring, exploit detection
-- Automatic purge: Completed trades older than 90 days removed
 - Pending trades: Retained until completed, accepted, declined, or cancelled
 
-**Mute Records (Expired)**:
-- Retention: 1 year after expiration
-- Purpose: Appeal reference, pattern detection
-- Auto-removal: After 1-year retention period
-- Active mutes: Retained indefinitely until unmuted
+**Mute Records**:
+- Active mutes: Retained until the mute is lifted (manually or automatically when its expiry time is reached)
+- Once lifted: The mute record is deleted immediately — there is no retained history of past mutes after removal
+- Purpose: Enforce mute duration while active
 
-**VIP Subscription Records**:
-- Retention: Duration of subscription + 1 year audit window
-- Includes: Start date, end date, user ID
-- Purpose: Billing verification, renewal processing, audit compliance
-- Post-expiration: Kept for 1 year then deleted
-- Reason: Supports dispute resolution and subscription history queries
+**VIP Subscription Records** (`vip_users`, `vip_guilds` tables):
+- Retention: For the duration of the subscription
+- Includes: Start date, end date, user or guild ID
+- Purpose: Track active VIP perks
+- Post-expiration: Deleted the next time the expired record is checked (e.g., your next command, or a staff `/vip` lookup) — there is no separate post-expiration audit window; once deleted, the subscription history is gone
 
-**AI Function Call Logs**:
-- Retention: 7 days
-- Includes: Function name, arguments, user ID, timestamp
-- Purpose: Debugging, audit of privileged operations
-- Note: Full conversation history NOT logged
-- Automatic purge: Logs older than 7 days deleted
+**Filter Configurations** (`filter_configs`, `filter_words` tables):
+- Retention: While the bot is in the guild
+- Automatic deletion: Immediately when the bot leaves the guild (not after a grace period)
+- Purpose: Content moderation configuration
+- User control: Guild admins can delete anytime while the bot is present
 
-**Filter Configurations & Custom Responses**:
-- Retention: While guild uses bot, then 90 days after bot removal
-- Includes: Filtered words, custom commands, filter settings
-- Automatic deletion: 90 days after bot leaves guild
-- Purpose: Allow time for bot re-addition without losing configuration
-- User control: Guild admins can delete anytime
+**Custom Responses, Welcome Messages, AutoMod & Local Ticket Configurations**:
+- Retention: Indefinite, including after the bot leaves the guild — these are not automatically cleared like filter configurations are
+- Purpose: Preserve configuration if the bot is re-added later
+- User control: Guild admins can delete anytime via the relevant configuration command
 
-**Global Notifications**:
-- Retention: Until marked as read by user OR 30 days, whichever comes first
+**Global Notifications** (`global_notifications`, `user_notification_reads` tables):
+- Retention: Indefinite; there is currently no automatic purge based on age or read status
 - Purpose: Ensure important announcements reach users
-- Automatic purge: Read notifications deleted immediately, unread after 30 days
+- Read tracking: Marking a notification as read only records that you've seen it — it does not delete the notification
 
 ### Immediate Deletion
 
-**AI Chat Sessions**:
-- Retention: None (ephemeral)
-- Storage: In-memory only during active session
-- Cleared: On session end, bot restart, or inactivity timeout
+**AI Chat Sessions (default/ephemeral mode)**:
+- Retention: None
+- Storage: In-process memory only during the active conversation
+- Cleared: On conversation end or bot restart
 - Purpose: Real-time conversation context only
-- Note: User memories persist separately (see above)
+- Note: If you explicitly create a named chat session via the AI's session commands, that conversation is instead persisted to the database (encrypted) so it can be resumed later — see "AI Features > Session Data" above for what that stores and how to delete it. The two modes are separate: using the AI without creating a named session stays ephemeral.
 
 **Voice Conversation Audio**:
 - Retention: None
@@ -1209,16 +1230,16 @@ We retain different types of data for varying periods based on legal requirement
 - Purpose: Real-time voice interaction only
 
 **Verification Codes (RPG Registration)**:
-- Retention: 10 minutes or until used
+- Retention: Until used or regenerated — there is currently no time-based expiry
 - Purpose: One-time email verification
-- Automatic expiry: Invalid after 10 minutes or successful verification
-- Storage: Temporary in database, overwritten on regeneration
+- Storage: Stored in the `registered_accounts` row; a new registration attempt overwrites the previous code
+- Note: Unlike password reset tokens, verification codes do not currently have an automatic time expiry; only successful use or requesting a new code invalidates the old one
 
-**Password Reset Tokens** (if implemented):
-- Retention: 1 hour or until used
-- Purpose: Secure password reset flow
-- Automatic expiry: Invalid after use or 1 hour
-- Single-use: Consumed on first valid use
+**Password Reset Tokens**:
+- Retention: 24 hours or until used, whichever comes first
+- Purpose: Secure password reset flow (self-service and staff-forced resets)
+- Automatic expiry: The token is checked against its expiry timestamp on every use; expired or already-used tokens are rejected
+- Single-use: Cleared (set to null) once a password reset completes
 
 ### Deletion Exceptions
 We may decline deletion requests or extend retention periods in the following circumstances:
@@ -1274,30 +1295,26 @@ We may decline deletion requests or extend retention periods in the following ci
 - Cannot delete: Notes retained for case management, but personally identifying details may be redacted
 
 ### Automated Data Purging
-**Daily Cleanup Jobs**:
-- Expired verification codes removed
-- Expired VIP subscriptions flagged (row kept for audit)
-- Old combat logs aggregated and detailed logs deleted
-- Command execution logs beyond 90 days purged
+We do not currently run daily, weekly, or monthly scheduled cleanup jobs. The only recurring background job that touches retention is:
 
-**Weekly Cleanup Jobs**:
-- Inactive RPG sessions (no activity for 7+ days) marked inactive
-- Unread notifications beyond 30 days deleted
-- Filter configurations for removed guilds (if 90 days passed) deleted
+**Warning Expiry (hourly)**:
+- Every hour, warnings whose `expires_at` time has passed are marked inactive (`active = FALSE`)
+- This deactivates the warning for point/enforcement purposes but does not delete the row — full warning history is retained permanently (see [Warning Records](#indefinite-retention))
 
-**Monthly Cleanup Jobs**:
-- Aggregate statistics recomputed
-- Dead webhook references cleaned up
-- Expired rate limit cache entries purged from database backups
+Beyond that, data changes happen only in response to specific events, not on a schedule:
+- Filter configurations are deleted immediately when the bot leaves a guild
+- VIP subscription rows are deleted the next time an expired one is encountered (a command execution or staff lookup), not on a timer
+- Mute records are deleted immediately when a mute is lifted
+- Everything else described in [Time-Limited Retention](#time-limited-retention) is retained indefinitely until you request its deletion
 
 ### Backup Retention
 **Database Backups**:
-- Frequency: Daily
-- Retention: Last 30 days of backups kept
+- Frequency: On-demand only, manually triggered by a senior staff member; there is no automated or scheduled backup process
+- Retention: The 10 most recent backup files are kept on the bot's host; older backups are automatically deleted when a new one is created
 - Purpose: Disaster recovery, data corruption protection
-- Security: Encrypted with same AES-256 key as production
-- Storage: Offsite secure location (details not disclosed for security)
-- Restoration: Only in case of catastrophic failure or data corruption
+- Security: Backup files are a raw, unencrypted SQL export; encrypted columns (see "Encryption" above) remain encrypted within the file exactly as stored in the live database, but the file itself has no additional encryption layer
+- Storage: Local to the bot's hosting environment, in a directory excluded from version control
+- Restoration: Manual, performed by the operator from a backup file as needed
 
 **Transcript Archives**:
 - Frequency: Real-time (generated on ticket close)
@@ -1345,34 +1362,35 @@ We implement multiple layers of security controls to protect your data from unau
   - Decryption: Only on retrieval for authorized user access
   - Key rotation: Not performed (would invalidate all historical data)
 
-- **Global Chat Messages**: AES-256-CBC encryption
-  - Algorithm: Advanced Encryption Standard with 256-bit key in Cipher Block Chaining mode
-  - Key storage: 32-byte encryption key stored in environment variable, never transmitted or logged
-  - Initialization Vector: Unique random 16-byte IV generated per message
-  - Format: `IV:ciphertext` stored in database
+- **Global Chat Messages**: AES-256-GCM encryption (authenticated encryption)
+  - Algorithm: Advanced Encryption Standard with a 256-bit key in Galois/Counter Mode
+  - Key storage: 32-byte encryption key stored in an environment variable, never transmitted or logged
+  - Authentication: Built-in authentication tag prevents undetected tampering with stored messages
+  - Initialization Vector: Unique random 12-byte IV generated per message
+  - Format: `IV:AuthTag:ciphertext` stored in database (hex-encoded)
   - Decryption: Only via owner command for moderation investigations
   - Key rotation: Encryption key never rotated (would invalidate all historical messages)
-  
-- **RPG Account Passwords**: AES-256-CBC encryption
-  - Same encryption algorithm as global messages
-  - Unique IV per password
-  - Never decrypted for display; only for login verification
-  - Password changes: Old encrypted password replaced, not decrypted
-  - Staff access: Admin+ can force password reset but cannot view current passwords
-  
+
+- **RPG Account Passwords**: bcrypt hashing (one-way, not reversible encryption)
+  - Algorithm: bcrypt with a cost factor of 12
+  - Never decrypted or displayed; a login attempt is verified by comparing against the stored hash, and the plaintext password is discarded immediately after
+  - Legacy accounts: Passwords created before the bcrypt migration may still be stored with the older, reversible AES-256-CBC scheme; these are transparently re-hashed with bcrypt on the account's next successful login
+  - Password changes: Old hash replaced, never decrypted
+  - Staff access: Admin+ can force a password reset but cannot view or recover the current password
+
 - **Database Encryption**:
-  - Connection: TLS 1.2+ encryption for all database connections
-  - Storage: Encrypted fields stored as binary blobs or hex strings
-  - Backup encryption: Database backups encrypted with same AES-256 key
-  - Key management: Encryption keys stored separately from database
+  - Connection: The bot does not itself configure a mandatory encrypted transport for its database connection; whether the connection is encrypted in transit depends on the MySQL server's own configuration
+  - Storage: Encrypted fields (see above) are stored as hex-encoded text; the database itself is not encrypted at rest as a whole
+  - Backups: On-demand database backups (see "Backup Retention" below) are **not** separately encrypted; any AES-256-GCM-encrypted columns remain encrypted within the backup file exactly as they are in the live database, but the backup file itself has no additional encryption layer
+  - Key management: Encryption keys are stored separately from the database, in the bot's environment configuration
 
 **Data in Transit**:
-- **Discord API**: All communications use HTTPS with TLS 1.2+
-- **Google Translate API**: HTTPS with TLS 1.2+
-- **NVIDIA Riva APIs**: gRPC with TLS encryption
+- **Discord API**: All communications use HTTPS/WSS with TLS 1.2+
+- **Google Translate**: HTTPS, via the unofficial `google-translate-api-x` library (see "Third-Party Services" below)
+- **NVIDIA NIM / Riva APIs**: HTTPS/gRPC with TLS encryption
 - **Gmail SMTP**: TLS encryption (STARTTLS)
 - **Webhook Delivery**: HTTPS with Discord's TLS implementation
-- **Internal Services**: No unencrypted connections allowed
+- **Database Connection**: Not separately configured for encrypted transport by the bot; depends on the MySQL server's own configuration
 
 ### Access Control
 
@@ -1468,11 +1486,9 @@ We implement multiple layers of security controls to protect your data from unau
 - **Deadlock Detection**: Database automatically detects and resolves deadlocks
 
 **Backup Integrity**:
-- **Daily Backups**: Automated daily database dumps
-- **Checksum Verification**: Backup files checksummed for corruption detection
-- **Encryption**: Backups encrypted with same AES-256 key as production
-- **Retention**: 30-day rolling backup window
-- **Testing**: Regular restore tests to verify backup integrity
+- **On-Demand Backups**: Database dumps are created manually by senior staff when needed, not on an automated schedule
+- **Retention**: The 10 most recent backup files are kept; older ones are deleted automatically
+- **Encryption**: Backup files themselves are not separately encrypted (see "Backup Retention" above)
 
 ### Application Security
 
@@ -1512,7 +1528,7 @@ We implement multiple layers of security controls to protect your data from unau
 
 **Account Verification (RPG)**:
 - Email verification required before account fully functional
-- 6-digit codes with 10-minute expiration
+- 6-digit codes, valid until used or a new one is requested (no time-based expiration currently enforced)
 - Single-session enforcement prevents account sharing
 - Password required for login (no "remember me" tokens)
 
@@ -1523,13 +1539,12 @@ We implement multiple layers of security controls to protect your data from unau
 - **Error Logs**: Application errors saved to `logs/` directory with timestamps
 - **Console Logs**: Structured logging with component labels and severity levels
 - **Log Levels**: Info, Warning, Error categorization
-- **Log Retention**: Log files rotated daily, kept for 90 days
+- **Log Retention**: Application and error logs rotate daily and are kept for 14 days (via `winston-daily-rotate-file`), then automatically deleted
 
 **Anomaly Detection**:
-- **Login Patterns**: Unusual login attempts logged (though not IP-based)
-- **Rate Limit Triggers**: Frequent rate limit hits logged
-- **Command Patterns**: Unusual command usage patterns logged
-- **Trade Monitoring**: Suspicious trades (large gold amounts) flagged for review
+- There is no dedicated rule-based anomaly detector for login attempts, command usage patterns, or trade amounts — these are not automatically flagged
+- The AI Monitor (see "AI Features" above) analyzes message content and guild events (not logins or trades) for potentially harmful behavior, when enabled by a guild
+- General application errors and warnings are captured by the structured logger described above
 
 **Incident Response Process**:
 1. **Detection**: Automated alerts for critical errors, manual monitoring
@@ -1563,8 +1578,7 @@ We implement multiple layers of security controls to protect your data from unau
 **Operational Practices**:
 - **Regular Updates**: Bot code and dependencies updated regularly
 - **Security Patches**: Critical security updates applied promptly
-- **Backup Testing**: Regular restore tests ensure backups functional
-- **Disaster Recovery**: Documented procedures for catastrophic failures
+- **Backups**: On-demand only, manually triggered by senior staff — see [Backup Retention](#backup-retention). There is currently no automated backup schedule and no routine restore testing.
 - **Change Management**: Controlled deployment process, testing before production
 
 ### Limitations & User Responsibilities
@@ -1652,9 +1666,9 @@ BarnieBot integrates with several external services to provide its features. Whe
 - No user identifiers sent to translation API
 
 **Data Flow**:
-- Text sent via HTTPS to Google Translate API
+- Text sent via HTTPS to Google Translate's web interface
 - Translation returned immediately
-- Cached for 10 minutes to reduce API calls
+- Cached for 5 minutes to reduce API calls
 - No long-term storage on Google's side (as far as we know)
 
 **Important**: We use an unofficial library (`google-translate-api-x`) that accesses Google Translate's web interface, not an official paid API. This means:
@@ -2223,7 +2237,7 @@ We may update this policy when:
 ### Effective Date
 The "Last Updated" date at the top of this policy indicates when the current version became effective.
 
-**Current Version Effective**: February 12, 2026
+**Current Version Effective**: September 21, 2026
 
 **Previous Versions**: We do not maintain a public archive of previous policy versions. Contact barniecorps@gmail.com if you need a previous version for legal or compliance purposes.
 
@@ -2238,6 +2252,7 @@ The "Last Updated" date at the top of this policy indicates when the current ver
 **Grace Period**: For material changes, we may provide a 30-day grace period before enforcement, announced with the change.
 
 ### Version History Summary
+- **September 21, 2026**: Accuracy pass — corrected encryption algorithm/hashing descriptions (RPG passwords use bcrypt, not AES), corrected backup process (on-demand only, not automated/encrypted/offsite), corrected data retention claims to reflect that most operational data has no automated purge job, added Reminders and Giveaways data-collection disclosure, corrected several retention periods (log files, password reset tokens, verification codes) to match actual code behavior
 - **February 12, 2026**: AI monitor privacy added
 - **February 6, 2026**: Gemini removal
 - **November 26, 2025**: Major expansion with comprehensive detail on all data practices, security measures, user rights, and third-party services
@@ -2334,8 +2349,8 @@ By using BarnieBot, you acknowledge that you have read, understood, and agree to
 
 **Thank you for trusting BarnieBot with your data. We are committed to protecting your privacy and being transparent about our data practices.**
 
-**Last Updated**: February 12, 2026
-**Version**: 2.1
+**Last Updated**: September 21, 2026
+**Version**: 2.2
 
 © 2026 BarnieCorps. All rights reserved.
 
