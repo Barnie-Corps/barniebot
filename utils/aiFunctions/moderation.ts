@@ -1,4 +1,3 @@
-// AI-callable tool implementations: Global warnings, appeals, and global ban/mute status.
 import utils from "../../utils";
 import db from "../../mysql/database";
 

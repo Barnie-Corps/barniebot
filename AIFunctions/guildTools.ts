@@ -1,4 +1,3 @@
-// AI tool declarations: Slowmode, message search, invites, webhooks, threads, scheduled events, emojis/stickers, pins, giveaways, reminders, and local-model status.
 import { SchemaType, type FunctionDeclaration } from "../types/aiFunctions";
 
 const guildToolsDeclarations = {

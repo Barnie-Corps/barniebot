@@ -1,4 +1,3 @@
-// AI tool declarations: Bot statistics, command introspection, staff permissions, and project/log file introspection.
 import { SchemaType, type FunctionDeclaration } from "../types/aiFunctions";
 
 const diagnosticsDeclarations = {

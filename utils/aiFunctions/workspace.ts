@@ -1,4 +1,3 @@
-// AI-callable tool implementations: Sandboxed per-user AI workspace: file I/O, search, and code/command execution (owner-gated).
 import { AI_WORKSPACE_ROOT, ALLOWED_SANDBOX_MODULES, MAX_ATTACHMENT_SIZE, MAX_DOWNLOAD_BYTES, MAX_FILE_SIZE_FOR_SEARCH, MAX_WORKSPACE_SCAN_RESULTS, assertPublicUrl, collectSearchMatches, ensureWorkspaceExists, execPromise, formatLogValue, isOwner, readDirectoryRecursive, resolveWorkspacePath, safeStat, truncate } from "../../utils";
 import data from "../../data";
 import path from "path";

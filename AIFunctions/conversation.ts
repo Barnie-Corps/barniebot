@@ -1,4 +1,3 @@
-// AI tool declarations: Conversation flow control tools (not backed by utils.AIFunctions; handled directly by AiManager/commands/ai.ts).
 import { SchemaType, type FunctionDeclaration } from "../types/aiFunctions";
 
 const conversationDeclarations = {

@@ -1,4 +1,3 @@
-// AI tool declarations: Sandboxed per-user AI workspace: file I/O, search, and code/command execution (owner-gated).
 import { SchemaType, type FunctionDeclaration } from "../types/aiFunctions";
 
 const workspaceDeclarations = {

@@ -1,4 +1,3 @@
-// AI-callable tool implementations: Support ticket and bug report management, staff notes, and staff status.
 import utils, { closeSupportTicket } from "../../utils";
 import db from "../../mysql/database";
 import client from "../..";

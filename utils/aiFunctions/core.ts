@@ -1,4 +1,3 @@
-// AI-callable tool implementations: User data, ownership checks, account lookups, and knowledge search.
 import { assertPublicUrl, buildSnippetFromTerms, canAccessKnowledge, chunkText, decryptText, encryptText, fetchUrlSafe, isOwner, loadKnowledgeCache, loadProjectKnowledgeCache, scoreHybridChunk, tokenizeSearchText } from "../../utils";
 import db from "../../mysql/database";
 import client from "../..";

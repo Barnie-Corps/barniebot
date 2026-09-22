@@ -1,4 +1,3 @@
-// AI tool declarations: Guild feature configuration lookups: filters, custom responses, global chat, AI monitor.
 import { SchemaType, type FunctionDeclaration } from "../types/aiFunctions";
 
 const guildConfigDeclarations = {

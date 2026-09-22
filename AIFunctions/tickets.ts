@@ -1,4 +1,3 @@
-// AI tool declarations: Support ticket and bug report management, staff notes, and staff status.
 import { SchemaType, type FunctionDeclaration } from "../types/aiFunctions";
 
 const ticketsDeclarations = {

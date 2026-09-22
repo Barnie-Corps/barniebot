@@ -1,4 +1,3 @@
-// AI tool declarations: Global warnings, appeals, and global ban/mute status.
 import { SchemaType, type FunctionDeclaration } from "../types/aiFunctions";
 
 const moderationDeclarations = {

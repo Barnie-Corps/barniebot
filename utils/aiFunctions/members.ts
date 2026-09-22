@@ -1,4 +1,3 @@
-// AI-callable tool implementations: Member and role management: lookup, roles, kicks, bans, timeouts, nicknames, voice moves.
 import { getGuildAndMember, hasGuildPermission, isAdminStaffUser, isOwner } from "../../utils";
 import db from "../../mysql/database";
 import client from "../..";

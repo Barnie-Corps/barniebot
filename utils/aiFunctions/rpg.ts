@@ -1,4 +1,3 @@
-// AI-callable tool implementations: Read-only RPG character/account lookups.
 import db from "../../mysql/database";
 
 const rpgFunctions = {

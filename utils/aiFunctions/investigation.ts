@@ -1,4 +1,3 @@
-// AI-callable tool implementations: AI Monitor investigation tools: message/user/guild context, case history, audit log, risk profiles.
 import { getGuildAndMember, hasGuildPermission, isAdminStaffUser, isOwner, isSystemRequester } from "../../utils";
 import db from "../../mysql/database";
 import client from "../..";

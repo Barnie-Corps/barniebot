@@ -1,4 +1,3 @@
-// AI-callable tool implementations: Guild feature configuration lookups: filters, custom responses, global chat, AI monitor.
 import db from "../../mysql/database";
 import client from "../..";
 

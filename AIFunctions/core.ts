@@ -1,4 +1,3 @@
-// AI tool declarations: User data, ownership checks, account lookups, and knowledge search.
 import { SchemaType, type FunctionDeclaration } from "../types/aiFunctions";
 
 const coreDeclarations = {

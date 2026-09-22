@@ -1,4 +1,3 @@
-// AI-callable tool implementations: Bot statistics, command introspection, staff permissions, and project/log file introspection.
 import utils, { LOGS_ROOT, MAX_FILE_SIZE_FOR_SEARCH, MAX_LOG_READ_LINES, MAX_PROJECT_SCAN_RESULTS, PROJECT_ROOT, TRANSLATE_WORKER_POOL_SIZE, TRANSLATION_CACHE_PREFIX, collectProjectSearchMatches, isOwner, pendingTranslations, readDirectoryRecursive, resolveLogsPath, resolveProjectPath, safeStat } from "../../utils";
 import db from "../../mysql/database";
 import client from "../..";

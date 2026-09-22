@@ -1,4 +1,3 @@
-// AI tool declarations: Read-only RPG character/account lookups.
 import { SchemaType, type FunctionDeclaration } from "../types/aiFunctions";
 
 const rpgDeclarations = {

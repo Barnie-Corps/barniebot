@@ -1,4 +1,3 @@
-// AI tool declarations: AI chat sessions and the long-term memory graph.
 import { SchemaType, type FunctionDeclaration } from "../types/aiFunctions";
 
 const memoryDeclarations = {

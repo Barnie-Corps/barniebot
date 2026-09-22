@@ -1,4 +1,3 @@
-// AI-callable tool implementations: Channel discovery, creation, editing, and messaging.
 import utils, { getGuildAndMember, hasGuildPermission, isAdminStaffUser, isOwner } from "../../utils";
 import client from "../..";
 import { PermissionFlagsBits, PermissionsBitField, EmbedBuilder, ChannelType } from "discord.js";

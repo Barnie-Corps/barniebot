@@ -1,4 +1,3 @@
-// AI-callable tool implementations: AI chat sessions and the long-term memory graph.
 import { decryptText, encryptText, parseRelatedEntities } from "../../utils";
 import db from "../../mysql/database";
 import NVIDIAModels from "../../NVIDIAModels";

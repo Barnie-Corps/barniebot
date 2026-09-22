@@ -1,4 +1,3 @@
-// AI tool declarations: Channel discovery, creation, editing, and messaging.
 import { SchemaType, type FunctionDeclaration } from "../types/aiFunctions";
 
 const channelsDeclarations = {

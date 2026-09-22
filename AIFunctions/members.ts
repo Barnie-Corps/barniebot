@@ -1,4 +1,3 @@
-// AI tool declarations: Member and role management: lookup, roles, kicks, bans, timeouts, nicknames, voice moves.
 import { SchemaType, type FunctionDeclaration } from "../types/aiFunctions";
 
 const membersDeclarations = {

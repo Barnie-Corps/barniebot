@@ -1,4 +1,3 @@
-// AI-callable tool implementations: Slowmode, message search, invites, webhooks, threads, scheduled events, emojis/stickers, pins, giveaways, reminders, and local-model status.
 import utils, { getGuildAndMember, hasGuildPermission, isAdminStaffUser, isOwner } from "../../utils";
 import db from "../../mysql/database";
 import client from "../..";
