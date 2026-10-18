@@ -180,7 +180,7 @@
     "safe-buffer": "^5.2.1",
     "saslprep": "^1.0.3",
     "semver": "^7.3.5",
-    "sharp": "^0.35.3",
+    "sharp": "^0.35.5",
     "shebang-command": "^2.0.0",
     "shebang-regex": "^3.0.0",
     "sift": "^13.5.2",
