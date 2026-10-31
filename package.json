@@ -154,7 +154,7 @@
     "on-finished": "^2.3.0",
     "on-headers": "^1.0.2",
     "once": "^1.4.0",
-    "openai": "^4.104.0",
+    "openai": "^7.47.0",
     "optional-require": "^1.0.3",
     "optionator": "^0.9.1",
     "opusscript": "^0.0.8",
@@ -225,7 +225,7 @@
     "ws": "^8.5.0",
     "xdg-basedir": "^4.0.0",
     "yallist": "^4.0.0",
-    "zod": "^3.13.4"
+    "zod": "^4.6.7"
   },
   "scripts": {
     "test": "jest",
