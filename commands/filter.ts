@@ -192,10 +192,10 @@ export default {
                     if (!allow_repeat) {
                         const foundWord = (await db.query("SELECT * FROM filter_words WHERE guild = ? AND content = ?", [interaction.guildId, word.toLowerCase()]) as unknown as FilterWord[]);
                         if (foundWord[0]) return await utils.safeInteractionRespond(interaction, texts.errors.repeated);
-                        if (isProtected && !interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) return await utils.safeInteractionRespond(interaction, texts.errors.not_admin_add);
-                        await db.query("INSERT INTO filter_words SET ?", [{ guild: interaction.guildId, content: word.toLowerCase(), protected: isProtected ? true : false, single: isSingle ? true : false }]);
-                        await cacheManager.delete(utils.filterWordsCacheKey(interaction.guildId));
                     }
+                    if (isProtected && !interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) return await utils.safeInteractionRespond(interaction, texts.errors.not_admin_add);
+                    await db.query("INSERT INTO filter_words SET ?", [{ guild: interaction.guildId, content: word.toLowerCase(), protected: isProtected ? true : false, single: isSingle ? true : false }]);
+                    await cacheManager.delete(utils.filterWordsCacheKey(interaction.guildId));
                     if (!Boolean(filterMain.enabled)) await utils.safeInteractionRespond(interaction, `${texts.success.added_word} ${isProtected ? ` ${texts.common.protected_word}` : ""}\n${texts.common.turned_off}`);
                     else await utils.safeInteractionRespond(interaction, `${texts.success.added_word} ${isProtected ? ` ${texts.common.protected_word}` : ""}${isSingle ? ` ${texts.common.single_word}` : ""}`);
                     break;
