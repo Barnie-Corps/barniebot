@@ -96,6 +96,7 @@ class NIMChatSessionImpl implements NIMChatSession {
                     }
                 }
                 let k = removeFrom;
+                if (this.messages[k]?.role === "assistant") k++;
                 while (k < this.messages.length && this.messages[k].role === "tool") k++;
                 removeTo = k;
             }
