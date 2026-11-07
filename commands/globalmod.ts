@@ -247,6 +247,8 @@ export default {
       }
       case "status": {
         const user = interaction.options.getUser("user", true);
+        const perm = utils.ensureStaff(executorRank);
+        if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         const [blacklisted, muted, rank] = await Promise.all([
           utils.isUserBlacklistedCached(user.id),
           utils.isUserMutedCached(user.id),
