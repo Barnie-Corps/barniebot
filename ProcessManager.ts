@@ -225,7 +225,7 @@ export default class ProcessManager {
         const decision = decideRestart({
             code,
             signal,
-            isShuttingDown: this.isShuttingDown,
+            isShuttingDown: this.isShuttingDown || this.restartPending,
             autoRestart: this.options.autoRestart,
             stopOnCleanExit: this.options.stopOnCleanExit,
             restartCount: this.restartCount,
@@ -261,7 +261,6 @@ export default class ProcessManager {
         }
         this.restartPending = true;
         if (this.child) {
-            this.isShuttingDown = true;
             this.setState("restarting");
             this.killChild("SIGTERM");
             setTimeout(() => {
@@ -269,10 +268,12 @@ export default class ProcessManager {
                     this.log("Force killing process group...");
                     this.killChild("SIGKILL");
                 }
-                this.isShuttingDown = false;
                 this.child = null;
                 this.restartPending = false;
-                setTimeout(() => this.start(), 1000);
+                if (this.isShuttingDown) return;
+                setTimeout(() => {
+                    if (!this.isShuttingDown) this.start();
+                }, 1000);
             }, 5000);
         } else {
             this.restartPending = false;
