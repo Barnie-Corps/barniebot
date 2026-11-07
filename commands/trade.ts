@@ -404,9 +404,17 @@ export default {
                         initiatorName = initiator.name;
 
                         const BUYER_GOLD_ERR = "#NOT_ENOUGH_GOLD";
-                        if (gold < 0 || gold > character.gold) {
+                        const receiverRows = await conn.query(
+                            "SELECT gold FROM rpg_characters WHERE id = ? FOR UPDATE",
+                            [character.id]
+                        ) as unknown as any[];
+                        if (!receiverRows[0] || gold < 0 || gold > Number(receiverRows[0].gold)) {
                             throw new Error(BUYER_GOLD_ERR);
                         }
+                        const isEquipped = async (inventoryId: number) => {
+                            const rows = await conn.query("SELECT inventory_id FROM rpg_equipped_items WHERE inventory_id = ? LIMIT 1", [inventoryId]) as unknown as any[];
+                            return Boolean(rows[0]);
+                        };
 
                         const returnItems: any[] = [];
                         if (item1Id) {
@@ -416,7 +424,7 @@ export default {
                                 WHERE inv.id = ? AND inv.character_id = ? LIMIT 1 FOR UPDATE`,
                                 [item1Id, character.id]
                             ) as unknown as any[];
-                            if (!item[0] || !item[0].tradeable || item[0].bound || item[0].quantity < item1Qty) {
+                            if (!item[0] || !item[0].tradeable || item[0].bound || item[0].quantity < item1Qty || await isEquipped(item1Id)) {
                                 throw new Error("#INVALID_ITEM");
                             }
                             returnItems.push({ id: item1Id, name: item[0].name, quantity: item1Qty, item_id: item[0].item_id });
@@ -429,7 +437,7 @@ export default {
                                 WHERE inv.id = ? AND inv.character_id = ? LIMIT 1 FOR UPDATE`,
                                 [item2Id, character.id]
                             ) as unknown as any[];
-                            if (!item[0] || !item[0].tradeable || item[0].bound || item[0].quantity < item2Qty) {
+                            if (!item[0] || !item[0].tradeable || item[0].bound || item[0].quantity < item2Qty || await isEquipped(item2Id)) {
                                 throw new Error("#INVALID_ITEM");
                             }
                             returnItems.push({ id: item2Id, name: item[0].name, quantity: item2Qty, item_id: item[0].item_id });
@@ -448,7 +456,7 @@ export default {
                                 "SELECT * FROM rpg_inventory WHERE id = ? AND character_id = ? LIMIT 1 FOR UPDATE",
                                 [item.id, txnTrade.initiator_id]
                             ) as unknown as any[];
-                            if (!invItem[0] || invItem[0].quantity < item.quantity) {
+                            if (!invItem[0] || invItem[0].quantity < item.quantity || await isEquipped(item.id)) {
                                 throw new Error("#INITIATOR_ITEMS_GONE");
                             }
                         }
