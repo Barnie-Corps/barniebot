@@ -32,7 +32,7 @@ import data from "./data";
 import queries from "./mysql/queries";
 import db from "./mysql/database";
 import { initializeShopItems, initializeRPGData } from "./rpg_init";
-import utils, { safeRegexTest } from "./utils";
+import utils, { escapeRegex, safeRegexTest } from "./utils";
 import load_slash from "./load_slash";
 import ChatManager from "./managers/ChatManager";
 import StaffRanksManager from "./managers/StaffRanksManager";
@@ -1967,12 +1967,12 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (badWords.length > 0) for (const word of badWords) {
         if (word.single) {
             content = content.trim().split(" ").map((w: string) => {
-                if (new RegExp(`\\b${word.content}\\b`, "ig").test(w)) return `\`${utils.createCensored(word.content.length)}\``;
+                if (new RegExp(`\\b${escapeRegex(word.content)}\\b`, "ig").test(w)) return `\`${utils.createCensored(word.content.length)}\``;
                 return w;
             }).join(" ");
             continue;
         }
-        const reg = new RegExp(word.content, "ig");
+        const reg = new RegExp(escapeRegex(word.content), "ig");
         content = content.replace(reg, `\`${utils.createCensored(word.content.length)}\``).replace(new RegExp(/[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi), "[LINK]");
         continue;
     }
