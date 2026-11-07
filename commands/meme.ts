@@ -16,16 +16,13 @@ export default {
             texts = await utils.autoTranslate(texts, "en", lang).catch(() => texts);
         }
         async function getMeme() {
-            let rsp = await fetch("https://meme-api.com/gimme");
-            let json = await rsp.json();
-            return new Promise(async (resolve, reject) => {
-                do {
-                    rsp = await fetch("https://meme-api.com/gimme");
-                    json = await rsp.json();
-                }
-                while (json.nsfw);
-                resolve(json);
-            });
+            for (let attempt = 0; attempt < 5; attempt++) {
+                const rsp = await fetch("https://meme-api.com/gimme");
+                if (!rsp.ok) throw new Error(`Meme API responded with ${rsp.status}`);
+                const json: any = await rsp.json();
+                if (!json.nsfw) return json;
+            }
+            throw new Error("Could not find a safe meme");
         }
         const meme: any = await getMeme();
         const row = new ActionRowBuilder()
