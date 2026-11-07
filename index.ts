@@ -1950,12 +1950,18 @@ client.on("messageCreate", async (message): Promise<any> => {
     if (message.member?.permissions.has(PermissionFlagsBits.ManageMessages)) return;
     const webHookData: any = await db.query("SELECT * FROM filter_webhooks WHERE channel = ?", [message.channel.id]);
     let webhook: any;
-    if (webHookData[0]) {
-        webhook = (await (message.channel as TextChannel).fetchWebhooks()).find((h: any) => h.id === webHookData[0].id);
-    }
-    else {
-        webhook = await (message.channel as TextChannel).createWebhook({ name: "Filter Webhook", reason: "Filter webhook" });
-        await db.query("INSERT INTO filter_webhooks SET ?", [{ id: webhook.id, token: webhook.token, channel: message.channel.id }]);
+    try {
+        if (webHookData[0]) {
+            webhook = (await (message.channel as TextChannel).fetchWebhooks()).find((h: any) => h.id === webHookData[0].id);
+            if (!webhook) await db.query("DELETE FROM filter_webhooks WHERE id = ?", [webHookData[0].id]);
+        }
+        if (!webhook) {
+            webhook = await (message.channel as TextChannel).createWebhook({ name: "Filter Webhook", reason: "Filter webhook" });
+            await db.query("INSERT INTO filter_webhooks SET ?", [{ id: webhook.id, token: webhook.token, channel: message.channel.id }]);
+        }
+    } catch (error: any) {
+        Log.warn("Filter webhook unavailable", { component: "Filter", guildId: message.guildId, error: error?.message || String(error) });
+        return;
     }
     if (wordList.length < 1) { Log.info("No words found."); return; }
     const badWords = wordList.filter((w: any) => message.content.toLowerCase().includes(w.content)).sort((w1: any, w2: any) => {
@@ -1978,11 +1984,10 @@ client.on("messageCreate", async (message): Promise<any> => {
     }
     if (content === message.content) return;
     const { author } = message;
+    const reference: any = message.reference ? await message.fetchReference().catch(() => null) : null;
     await message.delete();
-    let reference: any;
-    if (message.reference) reference = await message.fetchReference();
     const msg = await webhook.send({
-        content: message.reference ? `> ${reference.content}\n<@${reference.author.id}> ${content}` : content,
+        content: reference ? `> ${reference.content}\n<@${reference.author.id}> ${content}` : content,
         avatarURL: author.displayAvatarURL(),
         allowedMentions: { parse: [] },
         username: message.member?.nickname ?? author.displayName,
