@@ -247,7 +247,25 @@ export default {
                 turns++;
             }
 
-            const victory = playerHp > 0;
+            const victory = playerHp > 0 && monsterHp <= 0;
+            const isFinalStage = run.stage >= run.stages;
+            const claim: any = !victory
+                ? await db.query(
+                    "UPDATE rpg_dungeon_runs SET status = 'failed', completed_at = ? WHERE character_id = ? AND status = 'in_progress' AND stage = ?",
+                    [Date.now(), character.id, run.stage]
+                )
+                : isFinalStage
+                    ? await db.query(
+                        "UPDATE rpg_dungeon_runs SET status = 'completed', completed_at = ? WHERE character_id = ? AND status = 'in_progress' AND stage = ?",
+                        [Date.now(), character.id, run.stage]
+                    )
+                    : await db.query(
+                        "UPDATE rpg_dungeon_runs SET stage = stage + 1 WHERE character_id = ? AND status = 'in_progress' AND stage = ?",
+                        [character.id, run.stage]
+                    );
+            if (!claim || claim.affectedRows !== 1) {
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.not_in_dungeon + "`/dungeon enter`" + texts.errors.to_start });
+            }
 
             if (victory) {
                 const stageExp = Math.floor((run.reward_exp_min + run.reward_exp_max) / (run.stages * 2));
@@ -257,14 +275,9 @@ export default {
                     [Math.max(1, playerHp), stageExp, stageGold, character.id]
                 );
 
-                if (run.stage >= run.stages) {
+                if (isFinalStage) {
                     const finalGold = Math.floor(Math.random() * (run.reward_gold_max - run.reward_gold_min + 1)) + run.reward_gold_min;
                     const finalExp = Math.floor(Math.random() * (run.reward_exp_max - run.reward_exp_min + 1)) + run.reward_exp_min;
-
-                    await db.query(
-                        "UPDATE rpg_dungeon_runs SET status = 'completed', stage = ?, completed_at = ? WHERE character_id = ? AND status = 'in_progress'",
-                        [run.stage, Date.now(), character.id]
-                    );
 
                     await db.query("UPDATE rpg_characters SET gold = gold + ?, experience = experience + ? WHERE id = ?", 
                         [finalGold, finalExp, character.id]
@@ -310,11 +323,6 @@ export default {
 
                     return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
                 } else {
-                    await db.query(
-                        "UPDATE rpg_dungeon_runs SET stage = stage + 1 WHERE character_id = ? AND status = 'in_progress'",
-                        [character.id]
-                    );
-
                     const embed = new EmbedBuilder()
                         .setColor("#2ECC71")
                         .setTitle(`⚔️ Stage ${run.stage} Complete!`)
@@ -331,11 +339,6 @@ export default {
                     return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
                 }
             } else {
-                await db.query(
-                    "UPDATE rpg_dungeon_runs SET status = 'failed', completed_at = ? WHERE character_id = ? AND status = 'in_progress'",
-                    [Date.now(), character.id]
-                );
-
                 await db.query("UPDATE rpg_characters SET hp = 1 WHERE id = ?", [character.id]);
 
                 const embed = new EmbedBuilder()
