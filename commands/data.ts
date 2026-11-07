@@ -1,4 +1,4 @@
-import { AttachmentBuilder, ChatInputCommandInteraction, EmbedBuilder, PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
+import { AttachmentBuilder, ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
 
@@ -131,7 +131,7 @@ export default {
             .addStringOption(option => option.setName("confirm").setDescription("Type DELETE to confirm").setRequired(true))),
     category: "Admin",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
-        if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+        if (!(await utils.isAdminStaff(interaction.user.id))) {
             return utils.safeInteractionRespond(interaction, "You must be an administrator to use this command.");
         }
 
