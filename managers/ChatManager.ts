@@ -80,6 +80,11 @@ export default class ChatManager extends EventEmitter {
         await this.preloadGuildCache();
     }
 
+    private isInvalidWebhookError(error: any): boolean {
+        const code = Number(error?.code);
+        const status = Number(error?.status ?? error?.httpStatus);
+        return code === 10015 || code === 50027 || status === 401 || status === 404;
+    }
     private async cleanupFailedGlobalChat(guildId: string, webhookId?: string): Promise<void> {
         try {
             await db.query("DELETE FROM globalchats WHERE guild = ?", [guildId]);
@@ -403,7 +408,7 @@ export default class ChatManager extends EventEmitter {
             catch (error: any) {
                 failed = true;
                 cacheManager.deleteLocal(`${CACHE_LOCAL_WEBHOOK_PREFIX}${graw.webhook_id}`);
-                await this.cleanupFailedGlobalChat(graw.guild, graw.webhook_id);
+                if (this.isInvalidWebhookError(error)) await this.cleanupFailedGlobalChat(graw.guild, graw.webhook_id);
             }
         });
         const dispatchEnd = Date.now();
@@ -490,7 +495,7 @@ export default class ChatManager extends EventEmitter {
             catch (error: any) {
                 Log.warn(`Couldn't send global message to guild ${guild.name}`, { guildId: guild.id, guildName: guild.name });
                 cacheManager.deleteLocal(`${CACHE_LOCAL_WEBHOOK_PREFIX}${graw.webhook_id}`);
-                await this.cleanupFailedGlobalChat(graw.guild, graw.webhook_id);
+                if (this.isInvalidWebhookError(error)) await this.cleanupFailedGlobalChat(graw.guild, graw.webhook_id);
             }
         });
     }
