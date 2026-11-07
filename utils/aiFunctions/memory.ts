@@ -1,12 +1,22 @@
-import { decryptText, encryptText, parseRelatedEntities } from "../../utils";
+import { decryptText, encryptText, isOwner, isSystemRequester, parseRelatedEntities, resolveSubjectUser } from "../../utils";
 import db from "../../mysql/database";
 import NVIDIAModels from "../../NVIDIAModels";
+
+const requesterOwnsSession = async (sessionId: string, requesterId?: string): Promise<boolean> => {
+  if (!requesterId) return false;
+  if (isOwner(requesterId) || isSystemRequester(requesterId)) return true;
+  const rows = await db.query("SELECT user_id FROM ai_chat_sessions WHERE session_id = ?", [sessionId]) as unknown as any[];
+  return Array.isArray(rows) && rows[0]?.user_id === requesterId;
+};
 
 const memoryFunctions = {
     get_current_datetime: (): string => {
       return new Date().toISOString();
     },
-    create_chat_session: async (args: { userId: string; title?: string }): Promise<any> => {
+    create_chat_session: async (args: { requesterId?: string; userId?: string; title?: string }): Promise<any> => {
+      const subject = resolveSubjectUser(args);
+      if (subject.error) return { error: subject.error };
+      args.userId = subject.userId!;
       if (!args.userId) return { error: "Missing userId parameter" };
       const sessionId = `chat_${args.userId}_${Date.now()}`;
       const now = Date.now();
@@ -22,7 +32,10 @@ const memoryFunctions = {
       }]);
       return { sessionId, title, createdAt: now };
     },
-    list_chat_sessions: async (args: { userId: string }): Promise<any> => {
+    list_chat_sessions: async (args: { requesterId?: string; userId?: string }): Promise<any> => {
+      const subject = resolveSubjectUser(args);
+      if (subject.error) return { error: subject.error };
+      args.userId = subject.userId!;
       if (!args.userId) return { error: "Missing userId parameter" };
       const sessions = await db.query(
         "SELECT session_id, title, created_at, updated_at, message_count, is_active FROM ai_chat_sessions WHERE user_id = ? AND is_active = TRUE ORDER BY updated_at DESC LIMIT 20",
@@ -30,7 +43,10 @@ const memoryFunctions = {
       ) as unknown as any[];
       return { sessions };
     },
-    load_chat_session: async (args: { userId: string; sessionId: string }): Promise<any> => {
+    load_chat_session: async (args: { requesterId?: string; userId?: string; sessionId: string }): Promise<any> => {
+      const subject = resolveSubjectUser(args);
+      if (subject.error) return { error: subject.error };
+      args.userId = subject.userId!;
       if (!args.userId || !args.sessionId) return { error: "Missing parameters" };
       const sessions = await db.query(
         "SELECT * FROM ai_chat_sessions WHERE session_id = ? AND user_id = ?",
@@ -49,7 +65,10 @@ const memoryFunctions = {
       }));
       return { session: sessions[0], messages: decryptedMessages };
     },
-    delete_chat_session: async (args: { userId: string; sessionId: string }): Promise<any> => {
+    delete_chat_session: async (args: { requesterId?: string; userId?: string; sessionId: string }): Promise<any> => {
+      const subject = resolveSubjectUser(args);
+      if (subject.error) return { error: subject.error };
+      args.userId = subject.userId!;
       if (!args.userId || !args.sessionId) return { error: "Missing parameters" };
       const result: any = await db.query(
         "UPDATE ai_chat_sessions SET is_active = FALSE WHERE session_id = ? AND user_id = ?",
@@ -58,8 +77,9 @@ const memoryFunctions = {
       if (result.affectedRows === 0) return { error: "Session not found" };
       return { success: true };
     },
-    save_chat_message: async (args: { sessionId: string; role: string; content: string; toolCalls?: any; toolResults?: any }): Promise<any> => {
+    save_chat_message: async (args: { requesterId?: string; sessionId: string; role: string; content: string; toolCalls?: any; toolResults?: any }): Promise<any> => {
       if (!args.sessionId || !args.role || !args.content) return { error: "Missing parameters" };
+      if (!(await requesterOwnsSession(args.sessionId, args.requesterId))) return { error: "Session not found" };
       const now = Date.now();
       const encryptedContent = encryptText(args.content);
       const encryptedToolCalls = args.toolCalls ? encryptText(JSON.stringify(args.toolCalls)) : null;
@@ -79,8 +99,9 @@ const memoryFunctions = {
       );
       return { success: true };
     },
-    compress_chat_context: async (args: { sessionId: string }): Promise<any> => {
+    compress_chat_context: async (args: { requesterId?: string; sessionId: string }): Promise<any> => {
       if (!args.sessionId) return { error: "Missing sessionId parameter" };
+      if (!(await requesterOwnsSession(args.sessionId, args.requesterId))) return { error: "Session not found" };
       const messages = await db.query(
         "SELECT id, role, content FROM ai_chat_messages WHERE session_id = ? AND compressed = FALSE ORDER BY created_at ASC LIMIT 100",
         [args.sessionId]
@@ -104,7 +125,10 @@ const memoryFunctions = {
       }
       return { summary: summary.content, compressed: idsToCompress.length };
     },
-    add_memory_to_graph: async (args: { userId: string; memoryType: string; subject: string; content: string; relatedEntities?: any[]; confidence?: number }): Promise<any> => {
+    add_memory_to_graph: async (args: { requesterId?: string; userId?: string; memoryType: string; subject: string; content: string; relatedEntities?: any[]; confidence?: number }): Promise<any> => {
+      const subject = resolveSubjectUser(args);
+      if (subject.error) return { error: subject.error };
+      args.userId = subject.userId!;
       if (!args.userId || !args.memoryType || !args.subject || !args.content) return { error: "Missing parameters" };
       const now = Date.now();
       const confidence = args.confidence || 1.0;
@@ -135,7 +159,10 @@ const memoryFunctions = {
       }]);
       return { success: true, updated: false, id: result.insertId };
     },
-    get_memory_graph: async (args: { userId: string; memoryType?: string; subject?: string; limit?: number }): Promise<any> => {
+    get_memory_graph: async (args: { requesterId?: string; userId?: string; memoryType?: string; subject?: string; limit?: number }): Promise<any> => {
+      const subject = resolveSubjectUser(args);
+      if (subject.error) return { error: subject.error };
+      args.userId = subject.userId!;
       if (!args.userId) return { error: "Missing userId parameter" };
       const limit = Math.min(args.limit || 50, 200);
       let query = "SELECT * FROM ai_memory_graph WHERE user_id = ?";
@@ -166,7 +193,10 @@ const memoryFunctions = {
       }));
       return { memories: decryptedMemories };
     },
-    search_memory_graph: async (args: { userId: string; query: string; limit?: number }): Promise<any> => {
+    search_memory_graph: async (args: { requesterId?: string; userId?: string; query: string; limit?: number }): Promise<any> => {
+      const subject = resolveSubjectUser(args);
+      if (subject.error) return { error: subject.error };
+      args.userId = subject.userId!;
       if (!args.userId || !args.query) return { error: "Missing parameters" };
       const limit = Math.min(args.limit || 20, 100);
       const searchTerm = `%${args.query}%`;

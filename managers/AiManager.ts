@@ -512,7 +512,7 @@ class AiManager {
             })(),
             (async () => {
                 try {
-                    return { name: "get_memory_graph", result: await utils.AIFunctions.get_memory_graph({ userId: id, limit: 50 }), args: { userId: id, limit: 50 } };
+                    return { name: "get_memory_graph", result: await utils.AIFunctions.get_memory_graph({ requesterId: id, userId: id, limit: 50 }), args: { userId: id, limit: 50 } };
                 } catch (error: any) {
                     return { name: "get_memory_graph", result: { error: error?.message || String(error) }, args: { userId: id } };
                 }

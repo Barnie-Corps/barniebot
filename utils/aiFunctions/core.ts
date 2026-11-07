@@ -1,4 +1,4 @@
-import { assertPublicUrl, buildSnippetFromTerms, canAccessKnowledge, chunkText, decryptText, encryptText, fetchUrlSafe, isOwner, loadKnowledgeCache, loadProjectKnowledgeCache, scoreHybridChunk, tokenizeSearchText } from "../../utils";
+import { resolveSubjectUser, assertPublicUrl, buildSnippetFromTerms, canAccessKnowledge, chunkText, decryptText, encryptText, fetchUrlSafe, isOwner, loadKnowledgeCache, loadProjectKnowledgeCache, scoreHybridChunk, tokenizeSearchText } from "../../utils";
 import db from "../../mysql/database";
 import client from "../..";
 import data from "../../data";
@@ -89,7 +89,10 @@ const coreFunctions = {
       const language = await db.query("SELECT * FROM languages WHERE userid = ?", [id]) as unknown as UserLanguage[];
       return { user: user[0], language: language[0] ?? "en" };
     },
-    set_user_language: async (args: { userId: string; language: string }): Promise<{ error: string } | { success: true }> => {
+    set_user_language: async (args: { requesterId?: string; userId?: string; language: string }): Promise<{ error: string } | { success: true }> => {
+      const subject = resolveSubjectUser(args);
+      if (subject.error) return { error: subject.error };
+      args.userId = subject.userId!;
       if (!args.userId || !args.language) return { error: "Missing parameters" };
       const user = await db.query("SELECT * FROM discord_users WHERE id = ?", [args.userId]) as unknown as DiscordUser[];
       if (!user[0]) return { error: "User not found" };
@@ -195,7 +198,10 @@ const coreFunctions = {
         return { error: "User not found" };
       }
     },
-    get_memories: async (args: { userId: string }): Promise<{ error: string } | { memories: AIMemory[] }> => {
+    get_memories: async (args: { requesterId?: string; userId?: string }): Promise<{ error: string } | { memories: AIMemory[] }> => {
+      const subject = resolveSubjectUser(args);
+      if (subject.error) return { error: subject.error };
+      args.userId = subject.userId!;
       if (!args.userId) return { error: "Missing userId parameter" };
       const memories = await db.query("SELECT * FROM ai_memories WHERE uid = ?", [args.userId]) as unknown as AIMemory[];
       const decryptedMemories = memories.map((mem: any) => ({
@@ -204,18 +210,27 @@ const coreFunctions = {
       }));
       return { memories: decryptedMemories };
     },
-    insert_memory: async (args: { userId: string; memory: string }): Promise<any> => {
+    insert_memory: async (args: { requesterId?: string; userId?: string; memory: string }): Promise<any> => {
+      const subject = resolveSubjectUser(args);
+      if (subject.error) return { error: subject.error };
+      args.userId = subject.userId!;
       if (!args.userId || !args.memory) return { error: "Missing parameters" };
       const encryptedMemory = encryptText(args.memory);
       await db.query("INSERT INTO ai_memories SET ?", [{ uid: args.userId, memory: encryptedMemory }]);
       return { success: true };
     },
-    remove_memory: async (args: { userId: string; memoryId: number }): Promise<any> => {
+    remove_memory: async (args: { requesterId?: string; userId?: string; memoryId: number }): Promise<any> => {
+      const subject = resolveSubjectUser(args);
+      if (subject.error) return { error: subject.error };
+      args.userId = subject.userId!;
       if (!args.userId || !args.memoryId) return { error: "Missing parameters" };
       await db.query("DELETE FROM ai_memories WHERE id = ? AND uid = ?", [args.memoryId, args.userId]);
       return { success: true };
     },
-    remove_memories: async (args: { userId: string }): Promise<any> => {
+    remove_memories: async (args: { requesterId?: string; userId?: string }): Promise<any> => {
+      const subject = resolveSubjectUser(args);
+      if (subject.error) return { error: subject.error };
+      args.userId = subject.userId!;
       if (!args.userId) return { error: "Missing userId parameter" };
       await db.query("DELETE FROM ai_memories WHERE uid = ?", [args.userId]);
       return { success: true };
@@ -233,8 +248,9 @@ const coreFunctions = {
       const users = client.users.cache.filter(u => u.username.toLowerCase().includes(args.username.toLowerCase()));
       return { users: Array.from(users.values()) };
     },
-    update_user_data: async (args: { userId: string; data: any }): Promise<any> => {
+    update_user_data: async (args: { requesterId?: string; userId: string; data: any }): Promise<any> => {
       if (!args.userId || !args.data) return { error: "Missing parameters" };
+      if (!isOwner(args.requesterId)) return { error: "Requester is not authorized to update user data" };
       const user: any = await db.query("SELECT * FROM discord_users WHERE id = ?", [args.userId]);
       if (!user[0]) return { error: "User not found" };
       await db.query("UPDATE discord_users SET ? WHERE id = ?", [args.data, args.userId]);

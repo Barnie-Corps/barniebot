@@ -1124,6 +1124,15 @@ export const authorizeGuildRequester = async (requesterId: string | null | undef
   if (!member.permissions.has(permission)) return { error: "Requester is not authorized" };
   return { guild, member, privileged: false };
 };
+export const resolveSubjectUser = (args: { requesterId?: string | null; userId?: string | null }): { userId?: string; error?: string } => {
+  const requesterId = args?.requesterId ?? null;
+  if (!requesterId) return { error: "Missing requesterId" };
+  const userId = args.userId || requesterId;
+  if (userId !== requesterId && !isOwner(requesterId) && !isSystemRequester(requesterId)) {
+    return { error: "Requester is not authorized to access another user's data" };
+  }
+  return { userId };
+};
 export const outranksMember = (guild: any, actor: any, target: any): boolean => {
   if (!guild || !actor || !target) return false;
   if (target.id === guild.ownerId) return false;

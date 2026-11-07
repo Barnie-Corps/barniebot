@@ -176,4 +176,23 @@ describe("AI tool authorization", () => {
     const result = await tools.send_email({ requesterId: "user-1", to: "victim@example.com", subject: "s", body: "b" });
     expect(result.error).toBeDefined();
   });
+
+  test("memory tools refuse to read another user's memories", async () => {
+    const result = await tools.get_memories({ requesterId: "user-1", userId: "user-2" });
+    expect(result.error).toBeDefined();
+    expect((db as any).query).not.toHaveBeenCalledWith(expect.stringContaining("ai_memories"), ["user-2"]);
+  });
+
+  test("memory tools default to the requester's own data", async () => {
+    (db as any).query.mockResolvedValue([]);
+    const result = await tools.get_memories({ requesterId: "user-1" });
+    expect(result).toEqual({ memories: [] });
+    expect((db as any).query).toHaveBeenCalledWith("SELECT * FROM ai_memories WHERE uid = ?", ["user-1"]);
+  });
+
+  test("update_user_data is owner-only", async () => {
+    const result = await tools.update_user_data({ requesterId: "user-1", userId: "user-1", data: { id: "x" } });
+    expect(result.error).toBeDefined();
+  });
 });
+
