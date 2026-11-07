@@ -167,19 +167,22 @@ export default class ProcessManager {
     }
 
     private attachHandlers(): void {
-        if (!this.child) return;
+        const child = this.child;
+        if (!child) return;
+        const pid = child.pid ?? null;
         const noop = (): void => {};
-        if (this.child.stdout) {
-            this.child.stdout.on("data", (data: Buffer) => this.handleChildStream("out", data));
-            this.child.stdout.on("error", noop);
+        if (child.stdout) {
+            child.stdout.on("data", (data: Buffer) => this.handleChildStream("out", data));
+            child.stdout.on("error", noop);
         }
-        if (this.child.stderr) {
-            this.child.stderr.on("data", (data: Buffer) => this.handleChildStream("err", data));
-            this.child.stderr.on("error", noop);
+        if (child.stderr) {
+            child.stderr.on("data", (data: Buffer) => this.handleChildStream("err", data));
+            child.stderr.on("error", noop);
         }
-        this.child.on("exit", (code: number | null, signal: NodeJS.Signals | null) => this.handleExit(code, signal, this.child?.pid ?? null));
-        this.child.on("error", (error: Error) => {
+        child.on("exit", (code: number | null, signal: NodeJS.Signals | null) => this.handleExit(code, signal, pid));
+        child.on("error", (error: Error) => {
             this.log(`Process spawn error: ${error.message}`);
+            if (this.child !== child) return;
             this.child = null;
             this.processStartTime = 0;
             if (this.isShuttingDown || !this.options.autoRestart) {
