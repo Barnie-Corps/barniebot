@@ -431,3 +431,19 @@ describe("safeRegexTest", () => {
     expect(new RegExp(escapeRegex("c++"), "i").test("I like C++")).toBe(true);
   });
 });
+
+describe("readBodyLimited", () => {
+  const { readBodyLimited } = require("../utils");
+
+  test("reads small bodies completely", async () => {
+    const result = await readBodyLimited(new Response("hello"), 100);
+    expect(result.buffer.toString()).toBe("hello");
+    expect(result.truncated).toBe(false);
+  });
+
+  test("stops reading once the limit is exceeded", async () => {
+    const result = await readBodyLimited(new Response("x".repeat(5000)), 1000);
+    expect(result.buffer.length).toBe(1000);
+    expect(result.truncated).toBe(true);
+  });
+});

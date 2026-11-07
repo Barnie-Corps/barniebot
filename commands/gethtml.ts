@@ -1,7 +1,7 @@
 import { ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder } from "discord.js";
 import * as fs from "fs";
 import * as path from "path";
-import utils from "../utils";
+import utils, { readBodyLimited } from "../utils";
 
 export default {
     data: new SlashCommandBuilder()
@@ -37,14 +37,22 @@ export default {
             await utils.safeInteractionRespond(interaction, texts.invalid);
             return;
         }
-        clearTimeout(timeout);
         if (!response) {
+            clearTimeout(timeout);
             await utils.safeInteractionRespond(interaction, texts.invalid);
             return;
         }
         const MAX_BYTES = 2 * 1024 * 1024;
-        const buf = Buffer.from(await response.arrayBuffer());
-        let html = buf.subarray(0, MAX_BYTES).toString("utf-8");
+        let buf: Buffer;
+        try {
+            buf = (await readBodyLimited(response, MAX_BYTES)).buffer;
+        } catch {
+            await utils.safeInteractionRespond(interaction, texts.invalid);
+            return;
+        } finally {
+            clearTimeout(timeout);
+        }
+        let html = buf.toString("utf-8");
         const systemIp = String(process.env.SYSTEM_IP || "");
         if (systemIp.length > 1) {
             html = (html as any).replaceAll(systemIp, "[SYSTEM IP CENSORED]");

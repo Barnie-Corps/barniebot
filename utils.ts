@@ -428,6 +428,32 @@ const recordDailyDistinctMetric = async (metricName: string, entityId: string, t
   }]);
 };
 
+export const readBodyLimited = async (response: Response, maxBytes: number): Promise<{ buffer: Buffer; truncated: boolean }> => {
+  if (!response.body) return { buffer: Buffer.alloc(0), truncated: false };
+  const reader = response.body.getReader();
+  const parts: Buffer[] = [];
+  let total = 0;
+  let truncated = false;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = Buffer.from(value);
+      if (total + chunk.length > maxBytes) {
+        parts.push(chunk.subarray(0, maxBytes - total));
+        total = maxBytes;
+        truncated = true;
+        break;
+      }
+      parts.push(chunk);
+      total += chunk.length;
+    }
+  } finally {
+    if (truncated) await reader.cancel().catch(() => { });
+    reader.releaseLock();
+  }
+  return { buffer: Buffer.concat(parts, total), truncated };
+};
 export const fetchUrlSafe = async (args: { url: string; maxChars?: number; timeoutMs?: number }): Promise<any> => {
   if (!args.url) return { error: "Missing url parameter" };
   let parsed: URL;
@@ -460,8 +486,8 @@ export const fetchUrlSafe = async (args: { url: string; maxChars?: number; timeo
     if (!/^text\//i.test(contentType) && !/application\/(json|xml)/i.test(contentType)) {
       return { error: "Unsupported content type", status, contentType };
     }
-    const buf = Buffer.from(await response.arrayBuffer());
-    if (buf.length > maxBytes) return { error: "Content too large", status, contentLength: buf.length };
+    const { buffer: buf, truncated: tooLarge } = await readBodyLimited(response, maxBytes);
+    if (tooLarge) return { error: "Content too large", status, contentLength: buf.length };
     const text = buf.toString("utf8").slice(0, maxChars);
     return { url: parsed.toString(), status, contentType, truncated: text.length >= maxChars, content: text };
   } catch (error: any) {
