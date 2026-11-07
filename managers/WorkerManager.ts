@@ -98,6 +98,9 @@ export default class WorkerManager extends EventEmitter {
             this.resolvePending(id, message);
             this.emit("message", { id, message });
         });
+        worker.on("error", error => {
+            Log.error(`Worker with ID ${id} and type ${type} crashed`, error);
+        });
         worker.on("exit", c => {
             Log.info(`Worker with ID ${id} and type ${type} exited with code ${c}`, { workerId: id, workerType: type, exitCode: c });
             this.Cache.delete(id);
