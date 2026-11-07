@@ -129,6 +129,8 @@ const ensureUniqueColumns = async (tableName: string, uniqueColumns: string[]): 
     }
 };
 
+const normalizeConstraintSql = (value: string): string => normalizeSql(value).replace(/\s*([(),])\s*/g, "$1").toLowerCase();
+
 const ensureExtraConstraints = async (tableName: string, constraints: string[]): Promise<void> => {
     if (constraints.length === 0) return;
     const existingIndexes = new Set<string>();
@@ -150,7 +152,7 @@ const ensureExtraConstraints = async (tableName: string, constraints: string[]):
             if (!showCreate) {
                 try { showCreate = await getShowCreateTable(tableName); } catch {}
             }
-            if (showCreate && normalizeSql(showCreate).includes(normalizeSql(constraint))) continue;
+            if (showCreate && normalizeConstraintSql(showCreate).includes(normalizeConstraintSql(constraint))) continue;
         }
         try {
             await db.query(`ALTER TABLE \`${tableName}\` ADD ${constraint}`);
