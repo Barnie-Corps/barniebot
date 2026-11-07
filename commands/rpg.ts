@@ -584,10 +584,13 @@ export default {
                         return utils.safeInteractionRespond(interaction, "❌ " + texts.stats.only_have + character.stat_points + texts.stats.stat_points);
                     }
 
-                    await db.query(
-                        `UPDATE rpg_characters SET ${stat} = ${stat} + ?, stat_points = stat_points - ? WHERE id = ?`,
-                        [points, points, character.id]
+                    const allocated: any = await db.query(
+                        `UPDATE rpg_characters SET ${stat} = ${stat} + ?, stat_points = stat_points - ? WHERE id = ? AND stat_points >= ?`,
+                        [points, points, character.id, points]
                     );
+                    if (!allocated || allocated.affectedRows !== 1) {
+                        return utils.safeInteractionRespond(interaction, "❌ " + texts.stats.only_have + character.stat_points + texts.stats.stat_points);
+                    }
 
                     const statIcons: Record<string, string> = {
                         strength: "⚔️",
@@ -1739,10 +1742,13 @@ export default {
                 
                 const winnings = result.win ? Math.floor(bet * result.multiplier) - bet : -bet;
                 
-                await db.query(
-                    "UPDATE rpg_characters SET gold = gold + ? WHERE id = ?",
-                    [winnings, character.id]
+                const settled: any = await db.query(
+                    "UPDATE rpg_characters SET gold = gold + ? WHERE id = ? AND gold >= ?",
+                    [winnings, character.id, bet]
                 );
+                if (!settled || settled.affectedRows !== 1) {
+                    return utils.safeInteractionRespond(interaction, "❌ You don't have enough gold to place this bet!");
+                }
 
                 const gambleEmbed = new EmbedBuilder()
                     .setColor(result.win ? "#2ECC71" : "#E74C3C")
