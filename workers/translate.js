@@ -10,7 +10,7 @@ async function run(text, from, to) {
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(), timeout);
     try {
-        const result = await translate(text, { to, from, fetchOptions: { signal: controller.signal } });
+        const result = await translate(text, { to, from, requestOptions: { signal: controller.signal } });
         return result.text;
     } finally {
         clearTimeout(timeoutHandle);
