@@ -233,7 +233,10 @@ export default {
             const happinessGain = Math.floor(Math.random() * 20) + 10;
             const newHappiness = Math.min(100, pet[0].happiness + happinessGain);
 
-            await db.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ?", [feedCost, character.id]);
+            const paid: any = await db.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ? AND gold >= ?", [feedCost, character.id, feedCost]);
+            if (!paid || paid.affectedRows !== 1) {
+                return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.need_gold_feed + feedCost + texts.errors.to_feed });
+            }
             await db.query(
                 "UPDATE rpg_character_pets SET happiness = ?, last_fed = ? WHERE id = ?",
                 [newHappiness, Date.now(), petId]
