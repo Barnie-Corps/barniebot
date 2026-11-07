@@ -42,7 +42,7 @@ export default {
         )))
     .addSubcommand(s => s.setName("mute").setDescription("Mute a user in global chat")
       .addUserOption(o => o.setName("user").setDescription("User").setRequired(true))
-      .addIntegerOption(o => o.setName("minutes").setDescription("Duration in minutes (0 for indefinite)").setRequired(true))
+      .addIntegerOption(o => o.setName("minutes").setDescription("Duration in minutes (0 for indefinite)").setRequired(true).setMinValue(0))
       .addStringOption(o => o.setName("reason").setDescription("Reason").setRequired(false)))
     .addSubcommand(s => s.setName("unmute").setDescription("Unmute a user in global chat")
       .addUserOption(o => o.setName("user").setDescription("User").setRequired(true)))
