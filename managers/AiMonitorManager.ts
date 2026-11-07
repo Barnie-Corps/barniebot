@@ -1765,6 +1765,10 @@ export default class AiMonitorManager {
             await interaction.editReply({ content: "Invalid guild." });
             return true;
         }
+        if (record.status && record.status !== "open") {
+            await interaction.editReply({ content: "This case has already been handled." });
+            return true;
+        }
         const config = await this.getConfig(record.guild_id);
         const labelConfig = await this.getLogLabels(config?.monitor_language ?? "en");
         const inGuildMember = interaction.member as GuildMember | null;
@@ -1831,6 +1835,31 @@ export default class AiMonitorManager {
         const manualActions = actionable.filter((a: ActionType) => a !== "notify");
         if (manualActions.length === 0) {
             await interaction.editReply({ content: "No action recommended for this case." });
+            return true;
+        }
+        if (!MainData.bot.owners.includes(interaction.user.id)) {
+            const requiredPermissions: Record<string, bigint> = {
+                delete_message: PermissionFlagsBits.ManageMessages,
+                warn: PermissionFlagsBits.ModerateMembers,
+                timeout: PermissionFlagsBits.ModerateMembers,
+                kick: PermissionFlagsBits.KickMembers,
+                ban: PermissionFlagsBits.BanMembers
+            };
+            const missing = manualActions.slice(0, 2).filter((action: ActionType) => requiredPermissions[action] !== undefined && !inGuildMember?.permissions?.has?.(requiredPermissions[action]));
+            if (!inGuildMember || missing.length > 0) {
+                await interaction.editReply({ content: "You don't have permission to take this action." });
+                return true;
+            }
+            const targetId = payload.userId ?? record.user_id;
+            const targetMember = targetId ? await guild.members.fetch(targetId).catch(() => null) : null;
+            if (targetMember && (targetMember.id === guild.ownerId || (inGuildMember.id !== guild.ownerId && inGuildMember.roles.highest.comparePositionTo(targetMember.roles.highest) <= 0))) {
+                await interaction.editReply({ content: "You cannot act on a member with an equal or higher role." });
+                return true;
+            }
+        }
+        const claim = await db.query("UPDATE ai_monitor_cases SET status = 'actioned', updated_at = ? WHERE case_id = ? AND status = 'open'", [Date.now(), caseId]) as any;
+        if (!claim || claim.affectedRows !== 1) {
+            await interaction.editReply({ content: "This case has already been handled." });
             return true;
         }
         const results: string[] = [];
