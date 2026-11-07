@@ -1636,10 +1636,13 @@ export default {
                         return utils.safeInteractionRespond(interaction, `❌ Quest not ready! Progress: ${charQuest[0].progress}/${charQuest[0].requirement}`);
                     }
 
-                    await db.query(
-                        "UPDATE rpg_character_quests SET status = 'completed', completed_at = ? WHERE character_id = ? AND quest_id = ?",
+                    const claimed: any = await db.query(
+                        "UPDATE rpg_character_quests SET status = 'completed', completed_at = ? WHERE character_id = ? AND quest_id = ? AND status = 'active'",
                         [Date.now(), character.id, questId]
                     );
+                    if (!claimed || claimed.affectedRows < 1) {
+                        return utils.safeInteractionRespond(interaction, "❌ Quest not found or already completed!");
+                    }
 
                     await db.query(
                         "UPDATE rpg_characters SET gold = gold + ?, experience = experience + ? WHERE id = ?",
@@ -1651,8 +1654,8 @@ export default {
                         .setTitle("✅ Quest Complete!")
                         .setDescription(`**${charQuest[0].name}** has been completed!`)
                         .addFields(
-                            { name: "💰 Gold", value: charQuest[0].gold_reward.toLocaleString(), inline: true },
-                            { name: "⭐ Experience", value: charQuest[0].exp_reward.toString(), inline: true }
+                            { name: "💰 Gold", value: Number(charQuest[0].reward_gold ?? 0).toLocaleString(), inline: true },
+                            { name: "⭐ Experience", value: String(charQuest[0].reward_experience ?? 0), inline: true }
                         )
                         .setTimestamp();
 
