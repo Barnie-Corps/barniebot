@@ -59,6 +59,11 @@ export default {
     const sub = interaction.options.getSubcommand();
     const executor = interaction.user;
     const executorRank = await utils.getCachedUserStaffRank(executor.id);
+    const outranksTarget = async (targetId: string) => {
+      const targetRank = await utils.getCachedUserStaffRank(targetId);
+      if (!targetRank) return true;
+      return utils.getStaffRankIndex(executorRank) > utils.getStaffRankIndex(targetRank);
+    };
 
     switch (sub) {
       case "blacklist": {
@@ -66,6 +71,7 @@ export default {
         const reason = interaction.options.getString("reason") ?? "no reason";
         const perm = utils.ensureCoMPlus(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
+        if (!(await outranksTarget(user.id))) return utils.safeInteractionRespond(interaction, "You cannot act on a staff member of equal or higher rank.");
         await db.query("INSERT INTO global_bans (id, active, times) VALUES (?, TRUE, 1) ON DUPLICATE KEY UPDATE active = TRUE, times = times + 1", [user.id]);
         utils.invalidateStaffModCache(user.id);
         await manager.announce(`User \`${user.username}\` has been globally blacklisted by ${executor.username}. Reason: ${reason}`, "en");
@@ -91,6 +97,7 @@ export default {
 
         const perm = utils.ensureStaff(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
+        if (!(await outranksTarget(user.id))) return utils.safeInteractionRespond(interaction, "You cannot act on a staff member of equal or higher rank.");
 
         const expiresAt = Date.now() + (expiryDays * 24 * 60 * 60 * 1000);
 
@@ -220,6 +227,7 @@ export default {
         const reason = interaction.options.getString("reason") ?? "no reason";
         const perm = utils.ensureModPlus(executorRank);
         if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
+        if (!(await outranksTarget(user.id))) return utils.safeInteractionRespond(interaction, "You cannot act on a staff member of equal or higher rank.");
         const until = minutes > 0 ? Date.now() + minutes * 60_000 : 0;
         await db.query("INSERT INTO global_mutes SET ? ON DUPLICATE KEY UPDATE reason = VALUES(reason), authorid = VALUES(authorid), createdAt = VALUES(createdAt), until = VALUES(until)", [{ id: user.id, reason, authorid: executor.id, createdAt: Date.now(), until }]);
         utils.invalidateStaffModCache(user.id);
