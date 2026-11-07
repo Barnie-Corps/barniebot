@@ -1771,11 +1771,9 @@ const utils: any = {
     }
     return { session: profile.session, character: profile.character };
   },
-  isStaff(uid: string): Promise<boolean> {
-    return new Promise(async (resolve) => {
-      const rank = await utils.getUserStaffRank(uid);
-      resolve(rank !== null);
-    });
+  async isStaff(uid: string): Promise<boolean> {
+    const rank = await utils.getUserStaffRank(uid);
+    return rank !== null;
   },
   globalChatCacheKey: (guildId: string) => `barniebot:index:globalchat:${guildId}`,
   filterConfigCacheKey: (guildId: string) => `barniebot:index:filter:config:${guildId}`,
