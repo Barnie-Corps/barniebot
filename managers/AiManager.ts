@@ -565,8 +565,8 @@ class AiManager {
             return Promise.reject(new Error("Ollama integration is disabled"));
         }
         return new Promise(async (resolve, reject) => {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), timeoutMs ?? 60000);
+            const effectiveTimeout = timeoutMs ?? 60000;
+            const timeout = setTimeout(() => reject(new Error(`Ollama request timed out after ${effectiveTimeout}ms`)), effectiveTimeout);
             try {
                 const response = await this.ollamaClient.chat({
                     model,
