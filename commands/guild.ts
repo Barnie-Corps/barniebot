@@ -99,7 +99,8 @@ export default {
             noGuilds: "📜 No guilds have been created yet! Be the first with `/guild create`",
             guildListTitle: "🏰 Guild List",
             guildListDesc: "Top guilds in the realm",
-            guildListItem: "*{desc}*\n👥 {count}/{capacity} | 💰 {gold}"
+            guildListItem: "*{desc}*\n👥 {count}/{capacity} | 💰 {gold}",
+            inviteHowTo: "📨 Guilds are open to join. Ask **{character}** to use `/guild join name:{name}`."
         };
         if (lang !== "en") {
             texts = await utils.autoTranslate(texts, "en", lang).catch(() => texts);
@@ -215,6 +216,18 @@ export default {
                 .setTimestamp();
 
             return utils.safeInteractionRespond(interaction, { embeds: [embed], content: "" });
+        }
+
+        if (sub === "invite") {
+            const membership = (await db.query(
+                "SELECT gm.*, g.name FROM rpg_guild_members gm JOIN rpg_guilds g ON gm.guild_id = g.id WHERE gm.character_id = ?",
+                [character.id]
+            ) as unknown as (RPGGuildMember & { name: string })[]);
+            if (!membership[0]) {
+                return utils.safeInteractionRespond(interaction, { content: texts.notInGuild });
+            }
+            const invitee = interaction.options.getString("character", true);
+            return utils.safeInteractionRespond(interaction, { content: texts.inviteHowTo.replace("{character}", () => invitee).replace("{name}", () => membership[0].name) });
         }
 
         if (sub === "join") {
