@@ -1150,7 +1150,9 @@ export default {
                             await db.query("INSERT INTO rpg_inventory SET ?", [{
                                 character_id: character.id,
                                 item_id: itemData[0].id,
-                                quantity: 1
+                                quantity: 1,
+                                acquired_at: Date.now(),
+                                bound: false
                             }]);
                         }
                     }
@@ -1492,7 +1494,9 @@ export default {
                             await conn.query("INSERT INTO rpg_inventory SET ?", [{
                                 character_id: character.id,
                                 item_id: current.item_id,
-                                quantity: 1
+                                quantity: 1,
+                                acquired_at: Date.now(),
+                                bound: false
                             }]);
                         }
                     });
