@@ -154,4 +154,26 @@ describe("AI tool authorization", () => {
     expect(result).toEqual({ success: true });
     expect(target.kick).toHaveBeenCalledWith("x");
   });
+
+  test("guild config tools require Manage Guild and never expose webhook tokens", async () => {
+    const guild: any = setupGuild({ "user-1": makeMember("user-1", 5, []), "admin-1": makeMember("admin-1", 9, [PermissionFlagsBits.ManageGuild]) });
+    guild.channels = { cache: new Map([["chan-1", {}]]) };
+    (db as any).query.mockImplementation(async (sql: string) => {
+      if (sql.includes("filter_webhooks")) return [{ id: "wh-1", channel: "chan-1", ...(sql.includes("token") ? { token: "secret" } : {}) }];
+      return [];
+    });
+    const denied = await tools.get_filter_webhooks({ requesterId: "user-1", guildId: "guild-1" });
+    expect(denied.error).toBeDefined();
+    const allowed = await tools.get_filter_webhooks({ requesterId: "admin-1", guildId: "guild-1" });
+    expect(allowed.webhooks).toEqual([{ id: "wh-1", channel: "chan-1" }]);
+  });
+
+  test("send_email only lets regular users email their own verified address", async () => {
+    (db as any).query.mockImplementation(async (sql: string) => {
+      if (sql.includes("registered_accounts")) return [{ email: "me@example.com" }];
+      return [];
+    });
+    const result = await tools.send_email({ requesterId: "user-1", to: "victim@example.com", subject: "s", body: "b" });
+    expect(result.error).toBeDefined();
+  });
 });

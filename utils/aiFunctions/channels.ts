@@ -1,4 +1,5 @@
-import utils, { getGuildAndMember, hasGuildPermission, isAdminStaffUser, isOwner } from "../../utils";
+import utils, { getGuildAndMember, hasGuildPermission, isAdminStaffUser, isOwner, isPrivilegedRequester } from "../../utils";
+import db from "../../mysql/database";
 import client from "../..";
 import { PermissionFlagsBits, PermissionsBitField, EmbedBuilder, ChannelType } from "discord.js";
 
@@ -198,13 +199,18 @@ const channelsFunctions = {
       });
       return { thread: { id: thread.id, name: thread.name, type: thread.type } };
     },
-    send_email: async (args: { to?: string; subject?: string; body?: string; content?: string; isHtml?: boolean }): Promise<any> => {
+    send_email: async (args: { requesterId?: string; to?: string; subject?: string; body?: string; content?: string; isHtml?: boolean }): Promise<any> => {
       const to = typeof args?.to === "string" ? args.to.trim() : "";
       const subject = typeof args?.subject === "string" ? args.subject.trim() : "";
       const body = typeof args?.body === "string"
         ? args.body
         : (typeof args?.content === "string" ? args.content : "");
       if (!to || !subject || !body) return { error: "Missing parameters" };
+      if (!(await isPrivilegedRequester(args.requesterId))) {
+        const accounts: any = args.requesterId ? await db.query("SELECT email FROM registered_accounts WHERE uid = ? AND verified = TRUE", [args.requesterId]) : [];
+        const ownsAddress = Array.isArray(accounts) && accounts.some((row: any) => typeof row?.email === "string" && row.email.trim().toLowerCase() === to.toLowerCase());
+        if (!ownsAddress) return { error: "Requester is not authorized to send email to this address" };
+      }
       try {
         const isHtml = Boolean(args?.isHtml);
         await (isHtml ? utils.sendEmail(to, subject, "", body) : utils.sendEmail(to, subject, body));
@@ -248,7 +254,9 @@ const channelsFunctions = {
       }
       const botPerms = channel.permissionsFor(guild.members.me);
       if (!botPerms || !botPerms.has(PermissionFlagsBits.SendMessages)) return { error: "Bot lacks SendMessages permission" };
-      const sent = await channel.send({ content: args.content });
+      const canMentionEveryone = owner || adminStaff || isCrossGuild || !!channel.permissionsFor(member)?.has(PermissionFlagsBits.MentionEveryone);
+      const allowedMentions = canMentionEveryone ? undefined : { parse: ["users" as const] };
+      const sent = await channel.send({ content: args.content, allowedMentions });
       return { message: { id: sent.id, channelId: sent.channelId } };
     },
     send_channel_embed: async (args: { requesterId?: string; guildId?: string; channelId: string; embed: any; content?: string; sourceGuildId?: string | null }): Promise<any> => {
@@ -278,6 +286,8 @@ const channelsFunctions = {
       }
       const botPerms = channel.permissionsFor(guild.members.me);
       if (!botPerms || !botPerms.has(PermissionFlagsBits.SendMessages)) return { error: "Bot lacks SendMessages permission" };
+      const canMentionEveryone = owner || adminStaff || isCrossGuild || !!channel.permissionsFor(member)?.has(PermissionFlagsBits.MentionEveryone);
+      const allowedMentions = canMentionEveryone ? undefined : { parse: ["users" as const] };
       const embedBuilder = new EmbedBuilder();
       if (args.embed.title) embedBuilder.setTitle(String(args.embed.title));
       if (args.embed.description) embedBuilder.setDescription(String(args.embed.description));
@@ -298,7 +308,7 @@ const channelsFunctions = {
           if (!Number.isNaN(num)) embedBuilder.setColor(num);
         }
       }
-      const sent = await channel.send({ content: args.content ?? undefined, embeds: [embedBuilder] });
+      const sent = await channel.send({ content: args.content ?? undefined, embeds: [embedBuilder], allowedMentions });
       return { message: { id: sent.id, channelId: sent.channelId } };
     },
     set_channel_permissions: async (args: { requesterId?: string; guildId?: string; channelId: string; targetId: string; allow?: string[]; deny?: string[] }): Promise<any> => {
@@ -309,21 +319,25 @@ const channelsFunctions = {
       if (guildInfo.error) return { error: guildInfo.error };
       const guild = guildInfo.guild as any;
       const member = guildInfo.member as any;
-      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageChannels);
+      const hasPerm = hasGuildPermission(member, PermissionFlagsBits.ManageChannels) && hasGuildPermission(member, PermissionFlagsBits.ManageRoles);
       if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
       const botMember = guild.members.me;
       if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageChannels)) return { error: "Bot lacks ManageChannels permission" };
       const channel = guild.channels.cache.get(args.channelId) as any;
       if (!channel) return { error: "Channel not found" };
-      let allow: bigint | undefined;
-      let deny: bigint | undefined;
+      const allowNames = Array.isArray(args.allow) ? args.allow : [];
+      const denyNames = Array.isArray(args.deny) ? args.deny : [];
+      let requested: bigint;
       try {
-        if (args.allow && args.allow.length > 0) allow = PermissionsBitField.resolve(args.allow as any);
-        if (args.deny && args.deny.length > 0) deny = PermissionsBitField.resolve(args.deny as any);
+        requested = PermissionsBitField.resolve([...allowNames, ...denyNames] as any);
       } catch {
         return { error: "Invalid permission names" };
       }
-      await channel.permissionOverwrites.edit(args.targetId, { allow, deny });
+      if (!owner && !adminStaff && !member.permissions.has(requested)) return { error: "Requester cannot manage permissions they do not have" };
+      const overwrite: Record<string, boolean> = {};
+      for (const name of allowNames) overwrite[name] = true;
+      for (const name of denyNames) overwrite[name] = false;
+      await channel.permissionOverwrites.edit(args.targetId, overwrite);
       return { success: true };
     },
 };
