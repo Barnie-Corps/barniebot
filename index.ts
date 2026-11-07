@@ -195,7 +195,9 @@ client.on("clientReady", async (): Promise<any> => {
                     await user.send(reminderContent);
                     await db.query("UPDATE reminders SET status = 'sent' WHERE id = ?", [r.id]);
                 } catch {
-                    await db.query("UPDATE reminders SET status = 'failed' WHERE id = ?", [r.id]);
+                    try {
+                        await db.query("UPDATE reminders SET status = 'failed' WHERE id = ?", [r.id]);
+                    } catch { }
                 }
             }
         } catch (e) {
