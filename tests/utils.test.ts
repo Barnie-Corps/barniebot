@@ -143,6 +143,11 @@ describe("utils.password helpers", () => {
     expect((await utils.verifyPassword(hashed, "correct horse battery staple")).valid).toBe(true);
     expect((await utils.verifyPassword(hashed, "nope")).valid).toBe(false);
   });
+
+  test("flags matching plaintext legacy passwords for migration", async () => {
+    expect(await utils.verifyPassword("legacy-plain", "legacy-plain")).toEqual({ valid: true, migrated: true });
+    expect(await utils.verifyPassword("legacy-plain", "other")).toEqual({ valid: false, migrated: false });
+  });
 });
 
 describe("utils.parseToolCalls", () => {
