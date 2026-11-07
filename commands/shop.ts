@@ -329,24 +329,30 @@ export default {
                 try {
                     await withTransaction(async (conn) => {
                         const inventoryResult: any = await conn.query(
-                            invItem[0].quantity <= quantity
-                                ? "SELECT * FROM rpg_inventory WHERE id = ? AND quantity = ? FOR UPDATE"
-                                : "SELECT * FROM rpg_inventory WHERE id = ? FOR UPDATE",
-                            invItem[0].quantity <= quantity ? [inventoryId, invItem[0].quantity] : [inventoryId]
+                            "SELECT * FROM rpg_inventory WHERE id = ? AND character_id = ? FOR UPDATE",
+                            [inventoryId, character.id]
                         );
-                        if (!inventoryResult?.[0]) {
+                        const locked = inventoryResult?.[0];
+                        if (!locked || Number(locked.quantity) < quantity) {
                             throw new Error("#ITEM_GONE");
                         }
-                        if (invItem[0].quantity <= quantity) {
+                        const equippedNow: any = await conn.query("SELECT inventory_id FROM rpg_equipped_items WHERE inventory_id = ? LIMIT 1", [inventoryId]);
+                        if (equippedNow?.[0]) {
+                            throw new Error("#EQUIPPED");
+                        }
+                        if (Number(locked.quantity) <= quantity) {
                             await conn.query("DELETE FROM rpg_inventory WHERE id = ?", [inventoryId]);
                         } else {
-                            await conn.query("UPDATE rpg_inventory SET quantity = quantity - ? WHERE id = ? AND quantity >= ?", [quantity, inventoryId, quantity]);
+                            await conn.query("UPDATE rpg_inventory SET quantity = quantity - ? WHERE id = ?", [quantity, inventoryId]);
                         }
                         await conn.query("UPDATE rpg_characters SET gold = gold + ? WHERE id = ?", [sellPrice, character.id]);
                     });
                 } catch (error: any) {
                     if (error?.message === "#ITEM_GONE") {
                         return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.item_not_found);
+                    }
+                    if (error?.message === "#EQUIPPED") {
+                        return utils.safeInteractionRespond(interaction, "❌ " + texts.errors.must_unequip);
                     }
                     Log.error("Shop sell failed:", error);
                     return utils.safeInteractionRespond(interaction, "❌ An error occurred while selling your item.");
