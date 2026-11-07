@@ -177,6 +177,10 @@ Your global chat messages will be translated from this language, and automated m
         }
 
         try {
+            const authorId = message.author.id;
+            if (await utils.isUserBlacklistedCached(authorId) || await utils.isUserMutedCached(authorId) || await manager.isRatelimited(authorId)) {
+                return true;
+            }
             await manager.processUser(message.author);
             await manager.processMessage(message);
 
@@ -196,8 +200,10 @@ Your global chat messages will be translated from this language, and automated m
                 const dm = await message.author.send(finalContent).catch(() => null);
                 if (!dm) await message.reply({ content: finalContent }).catch(() => { });
             } else {
-                setTimeout(async () => {
-                    await manager.announce(finalContent, targetLanguage);
+                setTimeout(() => {
+                    manager.announce(finalContent, targetLanguage).catch((error: any) => {
+                        Log.warn("Global command announce failed", { component: "GlobalCommandsManager", error: error?.message || String(error) });
+                    });
                 }, 500);
             }
 
