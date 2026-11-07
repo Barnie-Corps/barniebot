@@ -117,7 +117,8 @@ export default {
       if (ok && fileSize && fileSize > MAX_ATTACHMENT_SIZE) {
         embed.addFields({ name: "Note", value: `Backup file is ${utils.formatBytes(fileSize)} and exceeds the attachment limit.` });
       }
-      await interaction.followUp({ embeds: [embed], files });
+      await utils.safeInteractionRespond(interaction, { content: "", embeds: [embed], files });
+      await interaction.followUp({ embeds: [embed] });
     };
 
     const runDumpAttempt = async (host: string): Promise<{ code: number; stderr: string; toolMissing: boolean; writeFailed: boolean }> => {
