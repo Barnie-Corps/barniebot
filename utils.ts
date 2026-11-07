@@ -399,11 +399,16 @@ const verifyPassword = async (storedPassword: string, plainPassword: string): Pr
   if (isBcryptPasswordHash(storedPassword)) {
     return { valid: await bcrypt.compare(plainPassword, storedPassword), migrated: false };
   }
+  let legacy: string | null = null;
   try {
-    const legacy = decryptWithAESLegacy(data.bot.encryption_key, storedPassword);
-    if (legacy === plainPassword) return { valid: true, migrated: true };
+    legacy = decryptWithAESLegacy(data.bot.encryption_key, storedPassword);
   } catch { }
-  return { valid: storedPassword === plainPassword, migrated: false };
+  if (legacy !== null) {
+    const valid = legacy === plainPassword;
+    return { valid, migrated: valid };
+  }
+  const valid = storedPassword === plainPassword;
+  return { valid, migrated: valid };
 };
 
 const recordDailyMetric = async (metricName: string, increment = 1, timestamp = Date.now()): Promise<void> => {
