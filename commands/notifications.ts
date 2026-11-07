@@ -111,7 +111,8 @@ export default {
 
         await showPage(currentPage);
 
-        const collector = interaction.channel?.createMessageComponentCollector({
+        const replyMessage = await interaction.fetchReply().catch(() => null);
+        const collector = replyMessage?.createMessageComponentCollector({
             filter: (i: any) => i.user.id === interaction.user.id && i.customId.startsWith("notif_"),
             time: 300000
         });
@@ -132,7 +133,8 @@ export default {
                     const notifId = parseInt(value);
                     await utils.markNotificationRead(interaction.user.id, notifId);
 
-                    notifications.splice(notifications.findIndex((n: any) => n.id === notifId), 1);
+                    const readIndex = notifications.findIndex((n: any) => n.id === notifId);
+                    if (readIndex !== -1) notifications.splice(readIndex, 1);
 
                     if (notifications.length === 0) {
                         await utils.safeComponentUpdate(i, {
