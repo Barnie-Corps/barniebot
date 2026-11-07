@@ -1,11 +1,12 @@
-import { getGuildAndMember, hasGuildPermission, isAdminStaffUser, isOwner } from "../../utils";
+import { authorizeGuildRequester, getGuildAndMember, hasGuildPermission, isAdminStaffUser, isOwner, isPrivilegedRequester, outranksMember, outranksRole } from "../../utils";
 import db from "../../mysql/database";
 import client from "../..";
 import { PermissionFlagsBits, PermissionsBitField, ChannelType } from "discord.js";
 
 const membersFunctions = {
-    send_dm: async (args: { userId: string; content: string; }): Promise<any> => {
-      if (!args.userId || !args.content) return { error: "Missing parameters" };
+    send_dm: async (args: { requesterId?: string; userId: string; content: string; }): Promise<any> => {
+      if (!args?.userId || !args.content) return { error: "Missing parameters" };
+      if (args.userId !== args.requesterId && !(await isPrivilegedRequester(args.requesterId))) return { error: "Requester is not authorized to DM other users" };
       let user;
       try {
         user = await client.users.fetch(args.userId);
@@ -19,12 +20,14 @@ const membersFunctions = {
         return { error: "Failed to send DM" };
       }
     },
-    kick_member: async (args: { guildId: string; memberId: string; reason: string }): Promise<any> => {
-      if (!args.guildId || !args.memberId || !args.reason) return { error: "Missing parameters" };
-      const guild = client.guilds.cache.get(args.guildId);
-      if (!guild) return { error: "Guild not found" };
-      let member = guild.members.cache.get(args.memberId);
+    kick_member: async (args: { requesterId?: string; guildId: string; memberId: string; reason: string }): Promise<any> => {
+      if (!args?.guildId || !args.memberId || !args.reason) return { error: "Missing parameters" };
+      const auth = await authorizeGuildRequester(args.requesterId, args.guildId, PermissionFlagsBits.KickMembers);
+      if (auth.error) return { error: auth.error };
+      const guild = auth.guild;
+      const member = await guild.members.fetch(args.memberId).catch(() => null);
       if (!member) return { error: "Member not found" };
+      if (!auth.privileged && !outranksMember(guild, auth.member, member)) return { error: "Requester cannot moderate a member with an equal or higher role" };
       try {
         await member.kick(args.reason);
         return { success: true };
@@ -117,6 +120,7 @@ const membersFunctions = {
           return { error: "Invalid permission names" };
         }
       }
+      if (!owner && !adminStaff && permissions !== undefined && !member.permissions.has(permissions)) return { error: "Requester cannot grant permissions they do not have" };
       const role = await guild.roles.create({
         name: args.name,
         color,
@@ -141,6 +145,7 @@ const membersFunctions = {
       if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageRoles)) return { error: "Bot lacks ManageRoles permission" };
       const role = guild.roles.cache.get(args.roleId);
       if (!role) return { error: "Role not found" };
+      if (!owner && !adminStaff && !outranksRole(guild, member, role)) return { error: "Requester cannot manage a role equal to or above their highest role" };
       let color: number | undefined;
       if (args.color) {
         const hex = args.color.startsWith("#") ? args.color.slice(1) : args.color;
@@ -155,6 +160,7 @@ const membersFunctions = {
           return { error: "Invalid permission names" };
         }
       }
+      if (!owner && !adminStaff && permissions !== undefined && !member.permissions.has(permissions)) return { error: "Requester cannot grant permissions they do not have" };
       const updated = await role.edit({
         name: args.name,
         color,
@@ -180,6 +186,7 @@ const membersFunctions = {
       const role = guild.roles.cache.get(args.roleId);
       if (!role) return { error: "Role not found" };
       if (role.managed) return { error: "Cannot delete managed roles" };
+      if (!owner && !adminStaff && !outranksRole(guild, member, role)) return { error: "Requester cannot manage a role equal to or above their highest role" };
       await role.delete(args.reason);
       return { success: true };
     },
@@ -199,6 +206,7 @@ const membersFunctions = {
       if (!targetMember) return { error: "Member not found" };
       const role = guild.roles.cache.get(args.roleId);
       if (!role) return { error: "Role not found" };
+      if (!owner && !adminStaff && !outranksRole(guild, member, role)) return { error: "Requester cannot manage a role equal to or above their highest role" };
       await targetMember.roles.add(role, args.reason);
       return { success: true };
     },
@@ -218,6 +226,7 @@ const membersFunctions = {
       if (!targetMember) return { error: "Member not found" };
       const role = guild.roles.cache.get(args.roleId);
       if (!role) return { error: "Role not found" };
+      if (!owner && !adminStaff && !outranksRole(guild, member, role)) return { error: "Requester cannot manage a role equal to or above their highest role" };
       await targetMember.roles.remove(role, args.reason);
       return { success: true };
     },
@@ -341,6 +350,10 @@ const membersFunctions = {
       if (!owner && !adminStaff && !hasPerm) return { error: "Requester is not authorized" };
       const botMember = guild.members.me;
       if (!botMember || !botMember.permissions.has(PermissionFlagsBits.BanMembers)) return { error: "Bot lacks BanMembers permission" };
+      if (!owner && !adminStaff) {
+        const targetMember = await guild.members.fetch(args.memberId).catch(() => null);
+        if (targetMember && !outranksMember(guild, member, targetMember)) return { error: "Requester cannot moderate a member with an equal or higher role" };
+      }
       try {
         await guild.members.ban(args.memberId, {
           reason: args.reason ?? "No reason provided",
@@ -384,6 +397,7 @@ const membersFunctions = {
       if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ModerateMembers)) return { error: "Bot lacks ModerateMembers permission" };
       const targetMember = await guild.members.fetch(args.memberId).catch(() => null);
       if (!targetMember) return { error: "Member not found" };
+      if (!owner && !adminStaff && !outranksMember(guild, member, targetMember)) return { error: "Requester cannot moderate a member with an equal or higher role" };
       const maxTimeout = 28 * 24 * 60 * 60 * 1000; // 28 days
       const duration = Math.min(args.durationMs, maxTimeout);
       try {
@@ -407,6 +421,7 @@ const membersFunctions = {
       if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ModerateMembers)) return { error: "Bot lacks ModerateMembers permission" };
       const targetMember = await guild.members.fetch(args.memberId).catch(() => null);
       if (!targetMember) return { error: "Member not found" };
+      if (!owner && !adminStaff && !outranksMember(guild, member, targetMember)) return { error: "Requester cannot moderate a member with an equal or higher role" };
       try {
         await targetMember.timeout(null, args.reason ?? "Timeout removed");
         return { success: true };
@@ -428,6 +443,7 @@ const membersFunctions = {
       if (!botMember || !botMember.permissions.has(PermissionFlagsBits.ManageNicknames)) return { error: "Bot lacks ManageNicknames permission" };
       const targetMember = await guild.members.fetch(args.memberId).catch(() => null);
       if (!targetMember) return { error: "Member not found" };
+      if (!owner && !adminStaff && targetMember.id !== member.id && !outranksMember(guild, member, targetMember)) return { error: "Requester cannot moderate a member with an equal or higher role" };
       try {
         await targetMember.setNickname(args.nickname ?? null, args.reason ?? "Nickname changed");
         return { success: true };

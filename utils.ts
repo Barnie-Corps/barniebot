@@ -1102,6 +1102,39 @@ export const isAdminStaffUser = async (userId: string) => {
 export const hasGuildPermission = (member: any, permission: bigint) => {
   return member.permissions?.has(permission);
 };
+export const isPrivilegedRequester = async (requesterId?: string | null): Promise<boolean> => {
+  if (!requesterId) return false;
+  if (isOwner(requesterId) || isSystemRequester(requesterId)) return true;
+  return (await utils.getUserStaffRank(requesterId)) !== null;
+};
+export const canAccessUserData = async (requesterId?: string | null, userId?: string | null): Promise<boolean> => {
+  if (!requesterId || !userId) return false;
+  if (requesterId === userId) return true;
+  return isPrivilegedRequester(requesterId);
+};
+export const authorizeGuildRequester = async (requesterId: string | null | undefined, guildId: string | null | undefined, permission: bigint): Promise<{ error?: string; guild?: any; member?: any; privileged?: boolean }> => {
+  if (!requesterId || !guildId) return { error: "Missing parameters" };
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return { error: "Guild not found" };
+  if (isOwner(requesterId) || isSystemRequester(requesterId) || await isAdminStaffUser(requesterId)) {
+    return { guild, privileged: true };
+  }
+  const member = await guild.members.fetch(requesterId).catch(() => null);
+  if (!member) return { error: "Member not found in guild" };
+  if (!member.permissions.has(permission)) return { error: "Requester is not authorized" };
+  return { guild, member, privileged: false };
+};
+export const outranksMember = (guild: any, actor: any, target: any): boolean => {
+  if (!guild || !actor || !target) return false;
+  if (target.id === guild.ownerId) return false;
+  if (actor.id === guild.ownerId) return true;
+  return actor.roles.highest.comparePositionTo(target.roles.highest) > 0;
+};
+export const outranksRole = (guild: any, actor: any, role: any): boolean => {
+  if (!guild || !actor || !role) return false;
+  if (actor.id === guild.ownerId) return true;
+  return actor.roles.highest.comparePositionTo(role) > 0;
+};
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
   port: 465,
