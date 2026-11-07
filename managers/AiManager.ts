@@ -272,8 +272,9 @@ class AiManager {
         }
         return reply;
     }
-    public async executeFunction(id: string, name: string, args: any, message: Message, Queue?: NIMToolCall[], options?: { suppressProgress?: boolean; deferEdit?: boolean }): Promise<any> {
+    public async executeFunction(id: string, name: string, args: any, message: Message, Queue?: NIMToolCall[], options?: { suppressProgress?: boolean; deferEdit?: boolean; requesterId?: string }): Promise<any> {
         const suppressProgress = options?.suppressProgress ?? true;
+        const requesterId = options?.requesterId ?? id;
         const deferEdit = options?.deferEdit ?? false;
         const startedAt = Date.now();
         let status = "unknown";
@@ -334,12 +335,12 @@ class AiManager {
                     const isPlainObject = typeof args === "object" && args !== null && !Array.isArray(args);
                     if (isPlainObject) {
                         if (Object.keys(args).length === 0) {
-                            preparedArgs = id;
+                            preparedArgs = requesterId;
                             if (AI_DEBUG) console.log(name, preparedArgs);
                         } else {
                             preparedArgs = {
                                 ...args,
-                                requesterId: id,
+                                requesterId,
                                 guildId: args.guildId ?? message?.guild?.id ?? null,
                                 channelId: args.channelId ?? message?.channel?.id ?? null,
                                 sourceGuildId: message?.guild?.id ?? null
@@ -347,7 +348,7 @@ class AiManager {
                             if (AI_DEBUG) console.log(name, preparedArgs);
                         }
                     } else if (preparedArgs === null || preparedArgs === undefined || preparedArgs === "") {
-                        preparedArgs = id;
+                        preparedArgs = requesterId;
                         if (AI_DEBUG) console.log(name, preparedArgs);
                     }
                 }

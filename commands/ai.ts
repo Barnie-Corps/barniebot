@@ -503,7 +503,7 @@ export default {
                                 const call = toolCalls[i];
                                 const remaining = toolCalls.slice(i + 1);
                                 const deferEdit = i < toolCalls.length - 1;
-                                lastResult = await ai.executeFunction(convoOwnerId, call.name, call.args, placeholder, remaining, { suppressProgress: true, deferEdit });
+                                lastResult = await ai.executeFunction(convoOwnerId, call.name, call.args, placeholder, remaining, { suppressProgress: true, deferEdit, requesterId: message.author.id });
                             }
                             if (typeof lastResult === "string" && !lastResult.trim()) {
                                 await placeholder.edit(texts.errors.no_response).catch(() => { });
