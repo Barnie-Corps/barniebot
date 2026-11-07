@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
-import db from "../mysql/database";
+import db, { withTransaction } from "../mysql/database";
 import utils from "../utils";
 import { RPGGuild, RPGGuildMember } from "../types/interfaces";
 import type { GuildCountRow, GuildInsertResult, GuildMemberRow, GuildWithCounts } from "../types/guildCommand";
@@ -128,27 +128,35 @@ export default {
                 return utils.safeInteractionRespond(interaction, { content: texts.nameTaken });
             }
 
-            const result = (await db.query("INSERT INTO rpg_guilds SET ?", [{
-                name: name,
-                description: description,
-                founder_id: character.id,
-                level: 1,
-                experience: 0,
-                gold: 0,
-                member_capacity: 20,
-                created_at: Date.now(),
-                emblem_icon: emblem
-            }]) as unknown as GuildInsertResult);
-
-            await db.query("INSERT INTO rpg_guild_members SET ?", [{
-                character_id: character.id,
-                guild_id: result.insertId,
-                role: "leader",
-                joined_at: Date.now(),
-                contribution_points: 0
-            }]);
-
-            await db.query("UPDATE rpg_characters SET gold = gold - 5000 WHERE id = ?", [character.id]);
+            try {
+                await withTransaction(async conn => {
+                    const paid = await conn.query("UPDATE rpg_characters SET gold = gold - 5000 WHERE id = ? AND gold >= 5000", [character.id]);
+                    if (paid.affectedRows !== 1) throw new Error("#NOT_ENOUGH_GOLD");
+                    const result = await conn.query("INSERT INTO rpg_guilds SET ?", [{
+                        name: name,
+                        description: description,
+                        founder_id: character.id,
+                        level: 1,
+                        experience: 0,
+                        gold: 0,
+                        member_capacity: 20,
+                        created_at: Date.now(),
+                        emblem_icon: emblem
+                    }]) as GuildInsertResult;
+                    await conn.query("INSERT INTO rpg_guild_members SET ?", [{
+                        character_id: character.id,
+                        guild_id: result.insertId,
+                        role: "leader",
+                        joined_at: Date.now(),
+                        contribution_points: 0
+                    }]);
+                });
+            } catch (error: any) {
+                if (error?.message === "#NOT_ENOUGH_GOLD") {
+                    return utils.safeInteractionRespond(interaction, { content: texts.needGoldToCreate });
+                }
+                throw error;
+            }
 
             const embed = new EmbedBuilder()
                 .setColor("#9B59B6")
@@ -280,7 +288,10 @@ export default {
             if (!membership[0]) {
                 return utils.safeInteractionRespond(interaction, { content: texts.notInGuild });
             }
-            await db.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ?", [amount, character.id]);
+            const paid: any = await db.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ? AND gold >= ?", [amount, character.id, amount]);
+            if (!paid || paid.affectedRows !== 1) {
+                return utils.safeInteractionRespond(interaction, { content: texts.notEnoughGold });
+            }
             await db.query("UPDATE rpg_guilds SET gold = gold + ? WHERE id = ?", [amount, membership[0].guild_id]);
             await db.query(
                 "UPDATE rpg_guild_members SET contribution_points = contribution_points + ? WHERE character_id = ? AND guild_id = ?",
