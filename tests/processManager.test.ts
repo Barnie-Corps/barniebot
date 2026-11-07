@@ -118,6 +118,12 @@ describe("decideRestart", () => {
     expect(d.reason).toBe("max restarts");
   });
 
+  test("restarts after max restarts once the quiet window has passed", () => {
+    const d = decideRestart({ ...base, restartCount: 5, elapsedSinceLastCrash: 3600001 });
+    expect(d.restart).toBe(true);
+    expect(d.resetCount).toBe(true);
+  });
+
   test("resets count after long quiet window", () => {
     const d = decideRestart({ ...base, elapsedSinceLastCrash: 3600001 });
     expect(d.restart).toBe(true);
