@@ -48,6 +48,7 @@ export const withTransaction = async <T = void>(
         db.getConnection((err: any, c: any) => (err ? reject(err) : resolve(c)))
     );
     const query = promisify(conn.query.bind(conn));
+    let reusable = true;
     try {
         await promisify(conn.beginTransaction.bind(conn))();
         const result = await fn({ query });
@@ -56,10 +57,13 @@ export const withTransaction = async <T = void>(
     } catch (error) {
         try {
             await promisify(conn.rollback.bind(conn))();
-        } catch { }
+        } catch {
+            reusable = false;
+        }
         throw error;
     } finally {
-        conn.release();
+        if (reusable) conn.release();
+        else conn.destroy();
     }
 };
 
