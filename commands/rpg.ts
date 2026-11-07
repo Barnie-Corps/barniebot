@@ -3,6 +3,14 @@ import db, { withTransaction } from "../mysql/database";
 import utils from "../utils";
 import Log from "../Log";
 
+const claimCooldown = async (characterId: number, lastAction: number | null | undefined): Promise<boolean> => {
+    const result: any = await db.query(
+        "UPDATE rpg_characters SET last_action = ? WHERE id = ? AND COALESCE(last_action, 0) = ?",
+        [Date.now(), characterId, Number(lastAction ?? 0)]
+    );
+    return Boolean(result && result.affectedRows === 1);
+};
+
 const CLASSES = {
     warrior: {
         name: "Warrior",
@@ -754,6 +762,9 @@ export default {
                     const minutes = Math.ceil(timeLeft / 60000);
                     return utils.safeInteractionRespond(interaction, "⏰ " + texts.rest.can_rest_in + minutes + texts.rest.minutes);
                 }
+                if (!(await claimCooldown(character.id, character.last_action))) {
+                    return utils.safeInteractionRespond(interaction, "⏰ " + texts.rest.can_rest_in + Math.ceil(cooldown / 60000) + texts.rest.minutes);
+                }
 
                 await db.query(
                     "UPDATE rpg_characters SET hp = max_hp, mp = max_mp, last_action = ? WHERE id = ?",
@@ -1032,6 +1043,9 @@ export default {
                     const minutes = Math.ceil(timeLeft / 60000);
                     return utils.safeInteractionRespond(interaction, `⏰ You're still recovering from your last adventure! Wait ${minutes} minute(s).`);
                 }
+                if (!(await claimCooldown(character.id, character.last_action))) {
+                    return utils.safeInteractionRespond(interaction, `⏰ You're still recovering from your last adventure! Wait ${Math.ceil(cooldown / 60000)} minute(s).`);
+                }
 
                 const adventures: any = {
                     forest: {
@@ -1193,6 +1207,9 @@ export default {
                     const minutes = Math.ceil(timeLeft / 60000);
                     return utils.safeInteractionRespond(interaction, `⏰ You're still working! Wait ${minutes} minute(s) before taking another job.`);
                 }
+                if (!(await claimCooldown(character.id, character.last_action))) {
+                    return utils.safeInteractionRespond(interaction, `⏰ You're still working! Wait ${Math.ceil(cooldown / 60000)} minute(s) before taking another job.`);
+                }
 
                 const jobs: any = {
                     guard: {
@@ -1272,6 +1289,9 @@ export default {
                 if (timeLeft > 0) {
                     const minutes = Math.ceil(timeLeft / 60000);
                     return utils.safeInteractionRespond(interaction, `⏰ You're still gathering! Wait ${minutes} minute(s).`);
+                }
+                if (!(await claimCooldown(character.id, character.last_action))) {
+                    return utils.safeInteractionRespond(interaction, `⏰ You're still gathering! Wait ${Math.ceil(cooldown / 60000)} minute(s).`);
                 }
 
                 const resources: any = {
