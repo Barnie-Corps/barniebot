@@ -1,4 +1,4 @@
-import OpenAi from "openai";
+import OpenAi, { APIUserAbortError, APIConnectionTimeoutError } from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
@@ -178,6 +178,7 @@ class NIMChatSessionImpl implements NIMChatSession {
         onChunk?: (delta: string) => void,
         signal?: AbortSignal
     ): Promise<NIMChatResult> {
+        if (signal?.aborted) throw new APIUserAbortError();
         this.trimContext();
         const pushedIndex = this.messages.length;
         this.pushInput(input);
@@ -221,6 +222,9 @@ class NIMChatSessionImpl implements NIMChatSession {
                     }
                 }
             }
+            if (controller.signal.aborted) {
+                throw signal?.aborted ? new APIUserAbortError() : new APIConnectionTimeoutError();
+            }
             clearTimeout(timer);
             signal?.removeEventListener("abort", onAbort);
             this.manager.markClientSuccess(client);
@@ -247,7 +251,7 @@ class NIMChatSessionImpl implements NIMChatSession {
             clearTimeout(timer);
             signal?.removeEventListener("abort", onAbort);
             this.messages.splice(pushedIndex);
-            this.manager.markClientFailure(client, err);
+            if (!signal?.aborted) this.manager.markClientFailure(client, err);
             throw err;
         }
     }
