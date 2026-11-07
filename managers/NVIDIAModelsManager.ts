@@ -5,7 +5,6 @@ import * as protoLoader from "@grpc/proto-loader";
 import * as path from "path";
 import { promises as fs } from "fs";
 import * as fsSync from "fs";
-import * as https from "https";
 import sharp from "sharp";
 import Log from "../Log";
 import type { NIMChatMessage, NIMChatResult, NIMChatSession, NIMToolDefinition } from "../types/nvidia";
@@ -262,14 +261,12 @@ export default class NVIDIAModelsManager {
         if (!apiKeys || apiKeys.length === 0) {
             throw new Error("At least one NVIDIA API key is required");
         }
-        const agent = new https.Agent({ keepAlive: true, timeout: 120000 });
         this.clients = apiKeys.map(key => ({
             key,
             openai: new OpenAi({
                 apiKey: key,
                 baseURL: "https://integrate.api.nvidia.com/v1",
-                timeout: 120000,
-                httpAgent: agent
+                timeout: 120000
             }),
             consecutiveFailures: 0,
             disabledUntil: 0
