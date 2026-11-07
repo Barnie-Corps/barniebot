@@ -387,8 +387,11 @@ const diagnosticsFunctions = {
     github_fetch_repo_file: async (args: { path: string; ref?: string }): Promise<any> => {
       if (!args?.path) return { error: "Missing path parameter" };
       const ref = args.ref ?? "master";
-      const filePath = args.path.replace(/^\/+/, "");
-      const url = `https://raw.githubusercontent.com/Barnie-Corps/barniebot/${encodeURIComponent(ref)}/${filePath}`;
+      if (ref === "." || ref === ".." || ref.includes("/") || ref.includes("\\")) return { error: "Invalid ref" };
+      const segments = args.path.replace(/^\/+/, "").split("/");
+      if (segments.some(segment => segment === ".." || segment === "." || segment.includes("\\"))) return { error: "Invalid path" };
+      const filePath = segments.join("/");
+      const url = `https://raw.githubusercontent.com/Barnie-Corps/barniebot/${encodeURIComponent(ref)}/${segments.map(encodeURIComponent).join("/")}`;
       const headers: Record<string, string> = {
         "User-Agent": "barniebot"
       };
@@ -401,6 +404,7 @@ const diagnosticsFunctions = {
     },
     github_search_repo: async (args: { query: string; path?: string; filename?: string; limit?: number }): Promise<any> => {
       if (!args?.query) return { error: "Missing query parameter" };
+      if (/\b(repo|org|user):/i.test(`${args.query} ${args.path ?? ""} ${args.filename ?? ""}`)) return { error: "Query cannot change the searched repository" };
       const repoQuery = [`${args.query} repo:Barnie-Corps/barniebot`];
       if (args.path) repoQuery.push(`path:${args.path}`);
       if (args.filename) repoQuery.push(`filename:${args.filename}`);
