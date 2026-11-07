@@ -131,7 +131,7 @@ export default {
             return await utils.safeInteractionRespond(interaction, "No commands found in this category.");
         }
 
-        const totalPages = Math.ceil(allCommands.length / COMMANDS_PER_PAGE);
+        let totalPages = Math.ceil(allCommands.length / COMMANDS_PER_PAGE);
         let currentPage = 0;
 
         let texts = {
@@ -294,6 +294,7 @@ export default {
                     }
                 }
 
+                totalPages = Math.max(1, Math.ceil(allCommands.length / COMMANDS_PER_PAGE));
                 currentPage = 0;
             }
 
