@@ -210,5 +210,9 @@ describe("AI tool authorization", () => {
   test("warning tools only expose the requester's own warnings", async () => {
     expect((await tools.get_user_warnings({ requesterId: "user-1", userId: "user-2" })).error).toBeDefined();
   });
+
+  test("fetch_ai_rules loads the repository rules file", async () => {
+    await expect(tools.fetch_ai_rules()).resolves.toEqual(require("../ai_rules.json"));
+  });
 });
 

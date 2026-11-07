@@ -237,7 +237,7 @@ const coreFunctions = {
       return { success: true };
     },
     fetch_ai_rules: async (): Promise<any> => {
-      return require("./ai_rules.json");
+      return require("../../ai_rules.json");
     },
     search_user_by_username: async (args: { username: string }): Promise<any> => {
       if (!args.username) return { error: "Missing username parameter" };
