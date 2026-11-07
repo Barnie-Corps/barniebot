@@ -2,6 +2,7 @@ import { ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder, Timesta
 import * as osu from "node-os-utils";
 import utils from "../utils";
 import db from "../mysql/database";
+import data from "../data";
 import type { ExecutedCommand } from "../types/interfaces";
 import * as nodeDiskInfo from "node-disk-info";
 import os from "os";
@@ -171,7 +172,7 @@ export default {
                         `${texts.fields.total_users}: ${totalUsers}`,
                         `${texts.fields.guilds}: ${interaction.client.guilds.cache.size}`,
                         `${texts.fields.channels}: ${interaction.client.channels.cache.size}`,
-                        `${texts.fields.commands}: ${(interaction.client as any).commands?.size ?? 0}`
+                        `${texts.fields.commands}: ${data.bot.commands.size}`
                     ].join("\n"),
                     inline: true
                 },
