@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, AutocompleteInteraction } from "discord.js";
-import db from "../mysql/database";
+import db, { withTransaction } from "../mysql/database";
 import utils from "../utils";
 import { RPGCraftingMaterial, RPGCraftingRecipe, CountResult } from "../types/interfaces";
 
@@ -269,23 +269,38 @@ export default {
 
             const success = Math.random() * 100 <= r.success_rate;
 
-            await db.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ?", [r.gold_cost, character.id]);
-
-            for (const mat of requiredMaterials) {
-                await db.query(
-                    "UPDATE rpg_character_materials SET quantity = quantity - ? WHERE character_id = ? AND material_id = ?",
-                    [mat.qty, character.id, mat.id]
-                );
+            try {
+                await withTransaction(async conn => {
+                    const paid = await conn.query("UPDATE rpg_characters SET gold = gold - ? WHERE id = ? AND gold >= ?", [r.gold_cost, character.id, r.gold_cost]);
+                    if (paid.affectedRows !== 1) throw new Error("#INSUFFICIENT_GOLD");
+                    for (const mat of requiredMaterials) {
+                        const used = await conn.query(
+                            "UPDATE rpg_character_materials SET quantity = quantity - ? WHERE character_id = ? AND material_id = ? AND quantity >= ?",
+                            [mat.qty, character.id, mat.id, mat.qty]
+                        );
+                        if (used.affectedRows !== 1) throw new Error("#INSUFFICIENT_MATERIALS");
+                    }
+                    if (success) {
+                        await conn.query("INSERT INTO rpg_inventory SET ?", [{
+                            character_id: character.id,
+                            item_id: r.result_item_id,
+                            quantity: 1,
+                            acquired_at: Date.now(),
+                            bound: false
+                        }]);
+                    }
+                });
+            } catch (error: any) {
+                if (error?.message === "#INSUFFICIENT_GOLD") {
+                    return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.need_gold + r.gold_cost + texts.errors.gold_to_craft });
+                }
+                if (error?.message === "#INSUFFICIENT_MATERIALS") {
+                    return utils.safeInteractionRespond(interaction, { content: "❌ " + texts.errors.not_enough });
+                }
+                throw error;
             }
 
             if (success) {
-                await db.query("INSERT INTO rpg_inventory SET ?", [{
-                    character_id: character.id,
-                    item_id: r.result_item_id,
-                    quantity: 1,
-                    acquired_at: Date.now(),
-                    bound: false
-                }]);
 
                 const embed = new EmbedBuilder()
                     .setColor("#2ECC71")
