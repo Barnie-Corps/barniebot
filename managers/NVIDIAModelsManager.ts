@@ -331,9 +331,10 @@ export default class NVIDIAModelsManager {
     };
     public GetConversationSafety = async (messages: ChatCompletionMessageParam[], timeoutMs: number = 40000): Promise<{ safe: boolean, reason?: string }> => {
         const client = this.getNextClient();
+        let timer: NodeJS.Timeout | undefined;
         try {
             const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), Math.max(500, timeoutMs));
+            timer = setTimeout(() => controller.abort(), Math.max(500, timeoutMs));
             const response = await client.openai.chat.completions.create({
                 model: "nvidia/llama-3.1-nemoguard-8b-content-safety",
                 messages,
@@ -348,13 +349,16 @@ export default class NVIDIAModelsManager {
             this.markClientFailure(client, error);
             Log.error("Error checking conversation safety:", error);
             return { safe: true };
+        } finally {
+            clearTimeout(timer);
         }
     };
     public GetModelChatResponse = async (messages: ChatCompletionMessageParam[], timeoutMs: number = 60000, task: string, think: boolean): Promise<{ content: string, reasoning?: string }> => {
         const client = this.getNextClient();
+        let timer: NodeJS.Timeout | undefined;
         try {
             const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), Math.max(500, timeoutMs));
+            timer = setTimeout(() => controller.abort(), Math.max(500, timeoutMs));
             const selectedTask = this.NormalizeTask(task);
             const modelConfig = this.GetTaskBasedModel(selectedTask);
             if (!modelConfig.name) {
@@ -375,6 +379,8 @@ export default class NVIDIAModelsManager {
             this.markClientFailure(client, error);
             Log.error("Error getting reasoning response:", error);
             return { content: "", reasoning: undefined };
+        } finally {
+            clearTimeout(timer);
         }
     }
     private NormalizeTask = (task: string | null | undefined): string => {
