@@ -10,7 +10,10 @@ export default {
     category: "Moderation",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
         if (!interaction.guild) return await utils.safeInteractionRespond(interaction, "No.");
-        await interaction.deferReply({ ephemeral: true });
+        if (!interaction.memberPermissions?.has(PermissionFlagsBits.KickMembers)) {
+            await utils.safeInteractionRespond(interaction, "You need the Kick Members permission to use this command.");
+            return;
+        }
         await interaction.guild?.members.fetch();
         const user = interaction.options.getUser('user');
         if (!user) {
@@ -20,6 +23,15 @@ export default {
         const member = interaction.guild?.members.cache.get(user.id);
         if (!member) {
             await utils.safeInteractionRespond(interaction, 'Member not found');
+            return;
+        }
+        const executorMember = interaction.guild.members.cache.get(interaction.user.id);
+        if (interaction.guild.ownerId !== interaction.user.id && (!executorMember || executorMember.roles.highest.comparePositionTo(member.roles.highest) <= 0)) {
+            await utils.safeInteractionRespond(interaction, "You cannot kick a member with an equal or higher role.");
+            return;
+        }
+        if (!member.kickable) {
+            await utils.safeInteractionRespond(interaction, "I cannot kick this member.");
             return;
         }
         const executorRank = await utils.getUserStaffRank(interaction.user.id);
