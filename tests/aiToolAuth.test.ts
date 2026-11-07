@@ -238,5 +238,14 @@ describe("AI tool authorization", () => {
       fetchSpy.mockRestore();
     }
   });
+
+  test("every declared AI tool has an implementation", () => {
+    const { AIFunctionDeclarations } = require("../AIFunctions");
+    const localHandlers = new Set(["add_user_to_convo", "remove_user_from_convo", "end_conversation"]);
+    const missing = (AIFunctionDeclarations as any[])
+      .map(decl => decl.name)
+      .filter((name: string) => !localHandlers.has(name) && typeof tools[name] !== "function");
+    expect(missing).toEqual([]);
+  });
 });
 

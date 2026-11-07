@@ -43,7 +43,6 @@ describe("AIFunctions declarations", () => {
     "set_channel_permissions",
     "kick_member",
     "send_dm",
-    "edit_msg",
     "check_vip_status",
     "list_workspace_files",
     "read_workspace_file",

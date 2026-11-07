@@ -26,19 +26,6 @@ const membersDeclarations = {
             required: ["userId", "content"]
         }
     },
-    edit_msg: {
-        name: "edit_msg",
-        description: "Edit a message sent by the bot. This can be used to update information or correct mistakes in previously sent messages. Requires ManageMessages permission in that guild and admin+ staff or owner.",
-        parameters: {
-            type: SchemaType.OBJECT,
-            properties: {
-                messageId: { type: SchemaType.STRING },
-                channelId: { type: SchemaType.STRING },
-                content: { type: SchemaType.STRING }
-            },
-            required: ["messageId", "channelId", "content"]
-        }
-    },
     check_vip_status: {
         name: "check_vip_status",
         description: "Check if a user has VIP status. VIP users may have access to special features or privileges. This function can be used to verify a user's VIP status based on their user ID.",
