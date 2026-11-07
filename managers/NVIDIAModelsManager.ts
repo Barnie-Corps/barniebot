@@ -601,7 +601,7 @@ message WordInfo {
                 },
                 audio: audioBuffer
             };
-            return new Promise((resolve, reject) => {
+            return new Promise<string>((resolve, reject) => {
                 const deadline = new Date(Date.now() + timeoutMs);
 
                 client.Recognize(request, { deadline }, (error: Error | null, response: any) => {
@@ -621,7 +621,7 @@ message WordInfo {
 
                     resolve("");
                 });
-            });
+            }).finally(() => client.close());
 
         } catch (error) {
             Log.error("Error in GetSpeechToText:", error);
@@ -786,11 +786,15 @@ enum AudioEncoding {
             });
 
             const audioParts: Buffer[] = [];
-            for (const [idx, part] of chunks.entries()) {
-                const t = (part || "").trim();
-                if (!t) continue;
-                const buf = await synthOne(t);
-                audioParts.push(buf);
+            try {
+                for (const [idx, part] of chunks.entries()) {
+                    const t = (part || "").trim();
+                    if (!t) continue;
+                    const buf = await synthOne(t);
+                    audioParts.push(buf);
+                }
+            } finally {
+                client.close();
             }
 
             if (audioParts.length === 0) {
