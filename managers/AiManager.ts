@@ -164,12 +164,12 @@ class AiManager {
             return fallbackReply;
         }
         let preparedArgs: any = args;
-        if (["current_guild_info", "on_guild"].includes(name)) {
+        if (["current_guild_info", "on_guild", "current_channel_info", "get_current_channel_info"].includes(name)) {
             preparedArgs = message as any;
         } else {
             const isPlainObject = typeof args === "object" && args !== null && !Array.isArray(args);
             if (isPlainObject) {
-                if (Object.keys(args).length === 0) {
+                if (Object.keys(args).length === 0 && name === "get_user_data") {
                     preparedArgs = id;
                 } else {
                     preparedArgs = {
@@ -306,7 +306,7 @@ class AiManager {
                         if (!suppressProgress) {
                             await message.edit(`Executing command ${call.name} ${data.bot.loadingEmoji.mention}`);
                         }
-                        lastResult = await this.executeFunction(id, call.name, call.args, message, Queue!.slice(1), { ...options, deferEdit: childDeferEdit });
+                        lastResult = await this.executeFunction(id, call.name, call.args, message, Queue?.slice(1), { ...options, deferEdit: childDeferEdit });
                     }
                     status = "followup";
                     return lastResult;
@@ -328,13 +328,13 @@ class AiManager {
                 }
             } else {
                 let preparedArgs: any = args;
-                if (["current_guild_info", "on_guild", "current_channel_info"].includes(name)) {
+                if (["current_guild_info", "on_guild", "current_channel_info", "get_current_channel_info"].includes(name)) {
                     preparedArgs = message;
                     if (AI_DEBUG) console.log(name, preparedArgs);
                 } else {
                     const isPlainObject = typeof args === "object" && args !== null && !Array.isArray(args);
                     if (isPlainObject) {
-                        if (Object.keys(args).length === 0) {
+                        if (Object.keys(args).length === 0 && name === "get_user_data") {
                             preparedArgs = requesterId;
                             if (AI_DEBUG) console.log(name, preparedArgs);
                         } else {

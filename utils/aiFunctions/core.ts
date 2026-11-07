@@ -174,7 +174,8 @@ const coreFunctions = {
     retrieve_owners: (): string[] => {
       return data.bot.owners;
     },
-    isOwner: (userId: string): boolean => {
+    isOwner: (args: string | { userId?: string; requesterId?: string }): boolean => {
+      const userId = typeof args === "string" ? args : (args?.userId ?? args?.requesterId);
       return isOwner(userId);
     },
     fetch_user: async (args: { userId: string }): Promise<{ error: string } | { user: DiscordUser }> => {
