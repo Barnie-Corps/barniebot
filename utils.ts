@@ -1713,17 +1713,11 @@ const utils: any = {
     if (!status.allowed) return status;
     const usageDate = utils.getUtcDateKey();
     const now = Date.now();
-    const existing: any = await db.query("SELECT messages_used FROM ai_chat_daily_usage WHERE user_id = ? AND usage_date = ? LIMIT 1", [userId, usageDate]);
-    if (existing?.[0]) {
-      await db.query("UPDATE ai_chat_daily_usage SET messages_used = messages_used + 1, updated_at = ? WHERE user_id = ? AND usage_date = ?", [now, userId, usageDate]);
-    } else {
-      await db.query("INSERT INTO ai_chat_daily_usage SET ?", [{
-        user_id: userId,
-        usage_date: usageDate,
-        messages_used: 1,
-        updated_at: now
-      }]);
-    }
+    const limit = status.dailyLimit ?? Number.MAX_SAFE_INTEGER;
+    await db.query(
+      "INSERT INTO ai_chat_daily_usage (user_id, usage_date, messages_used, updated_at) VALUES (?, ?, 1, ?) ON DUPLICATE KEY UPDATE messages_used = IF(messages_used < ?, messages_used + 1, messages_used), updated_at = VALUES(updated_at)",
+      [userId, usageDate, now, limit]
+    );
     await utils.recordDailyMetric("ai_chat_messages", 1, now);
     await utils.recordDailyDistinctMetric("ai_chat_users", userId, now);
     return await utils.getAiChatTierStatus(userId);
