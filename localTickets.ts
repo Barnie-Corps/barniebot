@@ -2,6 +2,7 @@ import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, Channe
 import client from ".";
 import db from "./mysql/database";
 import utils from "./utils";
+import Log from "./Log";
 import type { LocalTicket, LocalTicketCloseTexts, LocalTicketConfig, LocalTicketCreateTexts } from "./types/tickets";
 import * as fs from "fs";
 import * as path from "path";
@@ -203,12 +204,15 @@ export const closeLocalTicket = async (ticketId: number, closerId: string, close
     if (ticket.status === "closed") return { error: texts?.already_closed_error ?? "Ticket is already closed." };
     const channel = await client.channels.fetch(ticket.channel_id).catch(() => null) as TextChannel | null;
     if (!channel) return { error: texts?.channel_not_found_error ?? "Ticket channel not found." };
+    const claim: any = await db.query("UPDATE local_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ? AND status <> 'closed'", [Date.now(), closerId, ticket.id]);
+    if (!claim || claim.affectedRows !== 1) return { error: texts?.already_closed_error ?? "Ticket is already closed." };
     const config = await getLocalTicketConfig(ticket.guild_id);
     const transcript = await buildTranscriptFiles(ticket, channel, `${closerTag} (${closerId})`);
+    try {
     const transcriptsChannel = config?.transcripts_channel_id
         ? await client.channels.fetch(config.transcripts_channel_id).catch(() => null) as TextChannel | null
         : null;
-    if (transcriptsChannel) {
+    if (transcriptsChannel) try {
         const transcriptEmbed = new EmbedBuilder()
             .setColor("Orange")
             .setTitle(`${texts?.transcript_title ?? "Local Ticket"} #${ticket.id}`)
@@ -226,8 +230,9 @@ export const closeLocalTicket = async (ticketId: number, closerId: string, close
                 new AttachmentBuilder(transcript.htmlPath, { name: `local-ticket-${ticket.id}.html` })
             ]
         });
+    } catch (error) {
+        Log.error("Failed to send local ticket transcript:", error);
     }
-    await db.query("UPDATE local_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ?", [Date.now(), closerId, ticket.id]);
     try {
         if (ticket.opener_message_id) {
             const opener = await channel.messages.fetch(ticket.opener_message_id);
@@ -254,7 +259,9 @@ export const closeLocalTicket = async (ticketId: number, closerId: string, close
         ],
         components: [deleteRow]
     });
-    fs.unlinkSync(transcript.textPath);
-    fs.unlinkSync(transcript.htmlPath);
+    } finally {
+        fs.rmSync(transcript.textPath, { force: true });
+        fs.rmSync(transcript.htmlPath, { force: true });
+    }
     return { success: true, channelId: channel.id };
 };
