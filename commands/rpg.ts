@@ -1381,24 +1381,39 @@ export default {
                         return utils.safeInteractionRespond(interaction, "❌ You cannot sell equipped items! Unequip it first.");
                     }
 
-                    if (invItem[0].quantity > 1) {
-                        await db.query(
-                            "UPDATE rpg_inventory SET quantity = quantity - 1 WHERE id = ?",
-                            [itemId]
-                        );
-                    } else {
-                        await db.query("DELETE FROM rpg_inventory WHERE id = ?", [itemId]);
+                    try {
+                        await withTransaction(async (conn) => {
+                            const lockedRows: any = await conn.query(
+                                `SELECT inv.*, i.tradeable FROM rpg_inventory inv JOIN rpg_items i ON inv.item_id = i.id
+                                WHERE inv.id = ? AND inv.character_id = ? FOR UPDATE`,
+                                [itemId, character.id]
+                            );
+                            const locked = lockedRows?.[0];
+                            if (!locked || Number(locked.quantity) < 1) throw new Error("#ITEM_GONE");
+                            if (!locked.tradeable || locked.bound) throw new Error("#NOT_TRADEABLE");
+                            const equippedNow: any = await conn.query("SELECT inventory_id FROM rpg_equipped_items WHERE inventory_id = ? LIMIT 1", [itemId]);
+                            if (equippedNow?.[0]) throw new Error("#EQUIPPED");
+                            if (Number(locked.quantity) > 1) {
+                                await conn.query("UPDATE rpg_inventory SET quantity = quantity - 1 WHERE id = ?", [itemId]);
+                            } else {
+                                await conn.query("DELETE FROM rpg_inventory WHERE id = ?", [itemId]);
+                            }
+                            await conn.query("INSERT INTO rpg_market_listings SET ?", [{
+                                seller_id: character.id,
+                                item_id: locked.item_id,
+                                quantity: 1,
+                                price_per_unit: price,
+                                sold: false,
+                                listed_at: Date.now(),
+                                expires_at: Date.now() + 30 * 24 * 60 * 60 * 1000
+                            }]);
+                        });
+                    } catch (error: any) {
+                        if (error?.message === "#ITEM_GONE") return utils.safeInteractionRespond(interaction, "❌ Item not found in your inventory!");
+                        if (error?.message === "#NOT_TRADEABLE") return utils.safeInteractionRespond(interaction, "❌ This item cannot be traded!");
+                        if (error?.message === "#EQUIPPED") return utils.safeInteractionRespond(interaction, "❌ You cannot sell equipped items! Unequip it first.");
+                        throw error;
                     }
-
-                    await db.query("INSERT INTO rpg_market_listings SET ?", [{
-                        seller_id: character.id,
-                        item_id: invItem[0].item_id,
-                        quantity: 1,
-                        price_per_unit: price,
-                        sold: false,
-                        listed_at: Date.now(),
-                        expires_at: Date.now() + 30 * 24 * 60 * 60 * 1000
-                    }]);
 
                     return utils.safeInteractionRespond(interaction, `✅ Item listed for **${price} gold**! Other players can now purchase it.`);
                 }
