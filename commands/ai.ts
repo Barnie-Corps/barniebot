@@ -24,6 +24,7 @@ import { Writable, PassThrough } from "stream";
 import prism from "prism-media";
 
 const AI_DEBUG = process.env.AI_DEBUG === "1";
+const activeChatSessions = new Set<string>();
 
 export default {
     data: new SlashCommandBuilder()
@@ -157,6 +158,7 @@ export default {
             errors: {
                 not_vip: "You must be a VIP to use this feature.",
                 free_tier_limit: "You reached the free AI chat limit for today. Free tier allows 10 messages per day.",
+                chat_already_active: "You already have an active AI chat. Say `stop ai` there to end it first.",
                 no_response: "Oh no! I couldn't generate a reply. Try repeating what you said, maybe changing a couple of words.",
                 long_response: "Oh no! The response is too long. I'll send it as a Markdown-formatted text file.",
                 unsafe_message: "Your message was flagged as unsafe. Conversation cannot continue and it'll be ended. You can reach out in our support server if you believe this was a mistake made by the safety check model.",
@@ -341,6 +343,7 @@ export default {
                 const starterTier = await utils.getAiChatTierStatus(interaction.user.id);
                 if (!starterTier.allowed) return await reply(texts.errors.free_tier_limit);
                 const convoOwnerId = interaction.user.id;
+                if (activeChatSessions.has(convoOwnerId)) return await reply(texts.errors.chat_already_active);
                 let addedUserId: string | null = null;
                 let conversationEndedBy: string | null = null;
                 const add_user_to_convo = async (args: { userId?: string }): Promise<any> => {
@@ -370,6 +373,10 @@ export default {
                     filter: (m: { author: { id: string } }) => m.author.id === convoOwnerId || (addedUserId !== null && m.author.id === addedUserId),
                     idle: 15 * 60 * 1000
                 });
+                if (collector) {
+                    activeChatSessions.add(convoOwnerId);
+                    collector.once("end", () => activeChatSessions.delete(convoOwnerId));
+                }
                 let isWaitingForResponse = false;
                 let chatEnded = false;
                 const startLines = [
