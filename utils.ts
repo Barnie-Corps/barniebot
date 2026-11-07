@@ -50,28 +50,50 @@ const USER_LANGUAGE_GLOBAL_PREFIX = "barniebot:chat:lang:";
 const pendingUserLanguages = new Map<string, Promise<string>>();
 
 export const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
-const isPrivateIP = (ip: string): boolean => {
+const PRIVATE_IPV4_RANGES = new net.BlockList();
+for (const [network, prefix] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.0.2.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["198.51.100.0", 24], ["203.0.113.0", 24], ["224.0.0.0", 4], ["240.0.0.0", 4]] as Array<[string, number]>) {
+  PRIVATE_IPV4_RANGES.addSubnet(network, prefix, "ipv4");
+}
+const PRIVATE_IPV6_RANGES = new net.BlockList();
+for (const [network, prefix] of [["::", 128], ["::1", 128], ["100::", 64], ["2001:db8::", 32], ["fc00::", 7], ["fe80::", 10], ["fec0::", 10], ["ff00::", 8]] as Array<[string, number]>) {
+  PRIVATE_IPV6_RANGES.addSubnet(network, prefix, "ipv6");
+}
+const expandIPv6 = (ip: string): number[] | null => {
+  let addr = ip.toLowerCase().split("%")[0];
+  const dotted = addr.match(/(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (dotted) {
+    const p = dotted.slice(1, 5).map(Number);
+    if (p.some(n => n > 255)) return null;
+    addr = addr.slice(0, -dotted[0].length) + ((p[0] << 8) | p[1]).toString(16) + ":" + ((p[2] << 8) | p[3]).toString(16);
+  }
+  const hasGap = addr.includes("::");
+  const [head, tail] = hasGap ? addr.split("::") : [addr, ""];
+  const headGroups = head ? head.split(":") : [];
+  const tailGroups = tail ? tail.split(":") : [];
+  const fill = hasGap ? 8 - headGroups.length - tailGroups.length : 0;
+  if (fill < 0) return null;
+  const groups = [...headGroups, ...Array(fill).fill("0"), ...tailGroups].map(g => parseInt(g, 16));
+  if (groups.length !== 8 || groups.some(n => Number.isNaN(n) || n < 0 || n > 0xffff)) return null;
+  return groups;
+};
+const embeddedIPv4 = (groups: number[]): string | null => {
+  const zeroPrefix = groups.slice(0, 5).every(n => n === 0);
+  const isMapped = zeroPrefix && (groups[5] === 0xffff || groups[5] === 0);
+  const isNat64 = groups[0] === 0x64 && groups[1] === 0xff9b && groups.slice(2, 6).every(n => n === 0);
+  if (!isMapped && !isNat64) return null;
+  return [groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff].join(".");
+};
+export const isPrivateIP = (ip: string): boolean => {
   const version = net.isIP(ip);
-  if (version === 4) {
-    const parts = ip.split(".").map(Number);
-    if (parts.length !== 4) return true;
-    const [a, b] = parts;
-    if (a === 10) return true;
-    if (a === 127) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    return false;
-  }
+  if (version === 4) return PRIVATE_IPV4_RANGES.check(ip, "ipv4");
   if (version === 6) {
-    const lower = ip.toLowerCase();
-    if (lower === "::1" || lower === "::") return true;
-    if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
-    if (lower.startsWith("fe8") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) return true;
-    if (lower.startsWith("::ffff:127.") || lower.startsWith("::ffff:10.") || lower.startsWith("::ffff:172.") || lower.startsWith("::ffff:192.168.")) return true;
-    return false;
+    const groups = expandIPv6(ip);
+    if (!groups) return true;
+    const v4 = embeddedIPv4(groups);
+    if (v4) return PRIVATE_IPV4_RANGES.check(v4, "ipv4");
+    return PRIVATE_IPV6_RANGES.check(groups.map(n => n.toString(16)).join(":"), "ipv6");
   }
-  return false;
+  return true;
 };
 export const assertPublicUrl = async (rawUrl: string, redirectUrl?: string): Promise<URL> => {
   let parsed: URL;

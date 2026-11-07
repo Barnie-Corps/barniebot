@@ -387,3 +387,24 @@ describe("utils.AIFunctions", () => {
     }
   });
 });
+
+describe("isPrivateIP and assertPublicUrl", () => {
+  const { isPrivateIP, assertPublicUrl } = require("../utils");
+
+  test("blocks loopback, private, link-local, CGNAT and unspecified ranges", () => {
+    for (const ip of ["127.0.0.1", "10.1.2.3", "172.20.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "::1", "::", "fd00::1", "fe80::1", "::ffff:127.0.0.1", "::ffff:7f00:1", "::ffff:a9fe:a9fe", "64:ff9b::7f00:1"]) {
+      expect(isPrivateIP(ip)).toBe(true);
+    }
+  });
+
+  test("allows public addresses", () => {
+    for (const ip of ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111", "::ffff:8.8.8.8"]) {
+      expect(isPrivateIP(ip)).toBe(false);
+    }
+  });
+
+  test("rejects URLs whose host is an IPv4-mapped loopback in hex form", async () => {
+    await expect(assertPublicUrl("http://[::ffff:127.0.0.1]:8080/")).rejects.toThrow("private network");
+    await expect(assertPublicUrl("http://0.0.0.0:3000/")).rejects.toThrow("private network");
+  });
+});
