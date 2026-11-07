@@ -57,14 +57,20 @@ const ticketsFunctions = {
           assigned_to: assignedStaff
         }]);
         const ticketId = result.insertId;
-        const user = await client.users.fetch(args.userId);
-        const channelName = `support-request-${ticketId}`;
-        const ticketChannel = await homeGuild.channels.create({
-          name: channelName,
-          type: ChannelType.GuildText,
-          parent: data.bot.support_category,
-          topic: `Support ticket #${ticketId} - User: ${user.tag} (${args.userId})`
-        });
+        let user;
+        let ticketChannel;
+        try {
+          user = await client.users.fetch(args.userId);
+          ticketChannel = await homeGuild.channels.create({
+            name: `support-request-${ticketId}`,
+            type: ChannelType.GuildText,
+            parent: data.bot.support_category,
+            topic: `Support ticket #${ticketId} - User: ${user.tag} (${args.userId})`
+          });
+        } catch (error) {
+          await db.query("DELETE FROM support_tickets WHERE id = ? AND channel_id = 'pending'", [ticketId]);
+          throw error;
+        }
         await db.query("UPDATE support_tickets SET channel_id = ? WHERE id = ?", [ticketChannel.id, ticketId]);
         const ticketEmbed = new EmbedBuilder()
           .setColor("Purple")

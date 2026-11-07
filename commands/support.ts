@@ -112,12 +112,18 @@ export default {
             );
 
             const ticketId = result.insertId;
-            const ticketChannel = await homeGuild.channels.create({
-                name: `support-request-${ticketId}`,
-                type: ChannelType.GuildText,
-                parent: data.bot.support_category,
-                topic: `Support ticket #${ticketId} - User: ${interaction.user.tag} (${interaction.user.id})`
-            });
+            let ticketChannel;
+            try {
+                ticketChannel = await homeGuild.channels.create({
+                    name: `support-request-${ticketId}`,
+                    type: ChannelType.GuildText,
+                    parent: data.bot.support_category,
+                    topic: `Support ticket #${ticketId} - User: ${interaction.user.tag} (${interaction.user.id})`
+                });
+            } catch (error) {
+                await db.query("DELETE FROM support_tickets WHERE id = ? AND channel_id = 'pending'", [ticketId]);
+                throw error;
+            }
 
             await db.query("UPDATE support_tickets SET channel_id = ? WHERE id = ?", [ticketChannel.id, ticketId]);
 

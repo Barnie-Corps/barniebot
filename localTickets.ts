@@ -158,13 +158,19 @@ export const createLocalTicket = async (guildId: string, creatorId: string, init
             allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ManageMessages]
         });
     }
-    const channel = await guild.channels.create({
-        name: channelName,
-        type: ChannelType.GuildText,
-        parent: config.category_id,
-        topic: `Local ticket #${ticketId} • User ${creator.user.tag} (${creatorId})`,
-        permissionOverwrites
-    });
+    let channel;
+    try {
+        channel = await guild.channels.create({
+            name: channelName,
+            type: ChannelType.GuildText,
+            parent: config.category_id,
+            topic: `Local ticket #${ticketId} • User ${creator.user.tag} (${creatorId})`,
+            permissionOverwrites
+        });
+    } catch (error) {
+        await db.query("DELETE FROM local_tickets WHERE id = ? AND channel_id = 'pending'", [ticketId]);
+        throw error;
+    }
     await db.query("UPDATE local_tickets SET channel_id = ? WHERE id = ?", [channel.id, ticketId]);
     const embed = new EmbedBuilder()
         .setColor("Blue")
