@@ -1,5 +1,5 @@
 export function stereoToMono(buffer: Buffer): Buffer {
-    const samples = buffer.length / 4;
+    const samples = Math.floor(buffer.length / 4);
     const monoBuffer = Buffer.alloc(samples * 2);
 
     for (let i = 0; i < samples; i++) {
@@ -18,8 +18,9 @@ export function resampleAudio(buffer: Buffer, fromRate: number, toRate: number, 
     }
 
     const bytesPerSample = 2;
-    const inputSamples = buffer.length / (bytesPerSample * channels);
+    const inputSamples = Math.floor(buffer.length / (bytesPerSample * channels));
     const outputSamples = Math.floor(inputSamples * toRate / fromRate);
+    if (outputSamples <= 0) return Buffer.alloc(0);
     const outputBuffer = Buffer.alloc(outputSamples * bytesPerSample * channels);
 
     const ratio = inputSamples / outputSamples;
@@ -56,7 +57,7 @@ export function wavToRawPCM(wavBuffer: Buffer): Buffer {
             break;
         }
 
-        offset += 8 + chunkSize;
+        offset += 8 + chunkSize + (chunkSize & 1);
     }
 
     if (dataOffset === 0) {
@@ -152,7 +153,7 @@ export function getWavInfo(wavBuffer: Buffer): {
             break;
         }
 
-        offset += 8 + chunkSize;
+        offset += 8 + chunkSize + (chunkSize & 1);
     }
 
     if (fmtOffset === 0) {
@@ -175,7 +176,7 @@ export function getWavInfo(wavBuffer: Buffer): {
             break;
         }
 
-        offset += 8 + chunkSize;
+        offset += 8 + chunkSize + (chunkSize & 1);
     }
 
     const duration = dataSize / (sampleRate * channels * (bitsPerSample / 8));
