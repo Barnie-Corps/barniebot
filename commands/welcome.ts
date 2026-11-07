@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, TextChannel } from "discord.js";
+import { ChannelType, ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, TextChannel } from "discord.js";
 import utils from "../utils";
 import db from "../mysql/database";
 
@@ -10,7 +10,7 @@ export default {
         .addSubcommand(s =>
             s.setName("channel")
                 .setDescription("Set the welcome/goodbye channel")
-                .addChannelOption(o => o.setName("channel").setDescription("The channel for messages").setRequired(true))
+                .addChannelOption(o => o.setName("channel").setDescription("The channel for messages").setRequired(true).addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement))
         )
         .addSubcommand(s =>
             s.setName("message")
@@ -100,7 +100,7 @@ export default {
                 return utils.safeInteractionRespond(interaction, { content: "Please set a channel first using `/welcome channel`.", ephemeral: true });
             }
             const channel = interaction.guild?.channels.cache.get(config.channel_id) as TextChannel;
-            if (!channel) {
+            if (!channel || !channel.isTextBased()) {
                 return utils.safeInteractionRespond(interaction, { content: "Configured channel not found. Set a new one with `/welcome channel`.", ephemeral: true });
             }
             const member = interaction.member as any;
