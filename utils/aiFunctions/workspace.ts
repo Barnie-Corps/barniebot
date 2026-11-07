@@ -331,6 +331,7 @@ const workspaceFunctions = {
         },
         extensions: { value: undefined, writable: false, enumerable: false }
       });
+      const sandboxTimers = new Set<NodeJS.Timeout>();
       const sandbox: Record<string, any> = {
         console: {
           log: (...values: any[]) => pushLog(...values)
@@ -341,8 +342,16 @@ const workspaceFunctions = {
         TextDecoder,
         Date,
         Math,
-        setTimeout,
-        setInterval,
+        setTimeout: (handler: (...a: any[]) => void, ms?: number, ...rest: any[]) => {
+          const handle = setTimeout(handler, ms, ...rest);
+          sandboxTimers.add(handle);
+          return handle;
+        },
+        setInterval: (handler: (...a: any[]) => void, ms?: number, ...rest: any[]) => {
+          const handle = setInterval(handler, ms, ...rest);
+          sandboxTimers.add(handle);
+          return handle;
+        },
         clearTimeout,
         clearInterval
       };
@@ -354,6 +363,7 @@ const workspaceFunctions = {
       sandbox.exports = undefined;
       sandbox.__dirname = undefined;
       sandbox.__filename = undefined;
+      let raceTimer: NodeJS.Timeout | undefined;
       try {
         const scriptSource = `(async () => {\n${args.code}\n})()`;
         const script = new vm.Script(scriptSource, { filename: "ai-workspace.js" });
@@ -362,7 +372,7 @@ const workspaceFunctions = {
         const resultPromise = script.runInContext(context, { timeout: timeoutMs });
         const executionResult = await Promise.race([
           resultPromise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Execution timed out")), timeoutMs))
+          new Promise((_, reject) => { raceTimer = setTimeout(() => reject(new Error("Execution timed out")), timeoutMs); })
         ]);
         const formattedResult = typeof executionResult === "undefined" ? "undefined" : formatLogValue(executionResult);
         return {
@@ -375,6 +385,9 @@ const workspaceFunctions = {
           error: error?.message ?? "Failed to execute code",
           logs
         };
+      } finally {
+        clearTimeout(raceTimer);
+        for (const handle of sandboxTimers) clearTimeout(handle);
       }
     },
     execute_command: async (args: { command: string; requesterId?: string }): Promise<any> => {
