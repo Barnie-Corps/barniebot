@@ -10,7 +10,7 @@ export default {
         .addSubcommand(s =>
             s.setName("start")
                 .setDescription("Start a new giveaway")
-                .addStringOption(o => o.setName("prize").setDescription("The prize to give away").setRequired(true))
+                .addStringOption(o => o.setName("prize").setDescription("The prize to give away").setRequired(true).setMaxLength(250))
                 .addStringOption(o => o.setName("duration").setDescription("Duration (e.g. 30m, 2h, 1d)").setRequired(true))
                 .addIntegerOption(o => o.setName("winners").setDescription("Number of winners (default 1)").setMinValue(1).setMaxValue(25))
                 .addStringOption(o => o.setName("description").setDescription("Description of the giveaway"))
