@@ -183,8 +183,8 @@ export const executeAiMonitorTool = async (name: AIMonitorToolName, args: any, c
     if (isPlainObject) {
         preparedArgs = {
             ...args,
-            guildId: args.guildId ?? context?.guildId ?? null,
-            requesterId: args.requesterId ?? context?.requesterId ?? "__ai_monitor__"
+            guildId: context?.guildId ?? args.guildId ?? null,
+            requesterId: context?.requesterId ?? "__ai_monitor__"
         };
     }
     try {
