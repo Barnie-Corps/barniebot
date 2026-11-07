@@ -1,6 +1,8 @@
 import { ChatInputCommandInteraction, EmbedBuilder, SlashCommandBuilder, User, TimestampStyles, time } from "discord.js";
 import db from "../mysql/database";
 import utils from "../utils";
+const fitField = (value: string): string => value.length <= 1024 ? value : `${value.slice(0, 1020)}...`;
+
 export default {
     data: new SlashCommandBuilder()
         .setName("userinfo")
@@ -54,7 +56,7 @@ export default {
                 },
                 {
                     name: texts.common.roles,
-                    value: member ? member.roles.cache.map(r => r.toString()).join(", ") : "Not in the server",
+                    value: member ? fitField(member.roles.cache.map(r => r.toString()).join(", ") || "-") : "Not in the server",
                     inline: true
                 },
                 {
@@ -69,7 +71,7 @@ export default {
                 },
                 {
                     name: texts.common.permissions,
-                    value: member ? member.permissions.toArray().join(", ") : "Not in the server",
+                    value: member ? fitField(member.permissions.toArray().join(", ") || "-") : "Not in the server",
                     inline: false
                 },
             )
