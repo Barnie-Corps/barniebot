@@ -1153,14 +1153,15 @@ export default {
                     if (silenceTimeout) clearTimeout(silenceTimeout);
                 });
 
-                setTimeout(() => {
+                const sessionTimeout = setTimeout(() => {
                     const conn = getVoiceConnection(interaction.guild!.id);
-                    if (conn) {
+                    if (conn && conn === connection && conn.state.status !== VoiceConnectionStatus.Destroyed) {
                         conn.destroy();
                         ai.clearChat(interaction.user.id);
                         interaction.followUp(texts.voice.timed_out).catch(() => { });
                     }
                 }, 600000);
+                connection.on(VoiceConnectionStatus.Destroyed, () => clearTimeout(sessionTimeout));
 
                 break;
             }
