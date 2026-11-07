@@ -1,4 +1,4 @@
-import utils, { closeSupportTicket } from "../../utils";
+import utils, { canAccessUserData, closeSupportTicket, resolveSubjectUser } from "../../utils";
 import db from "../../mysql/database";
 import client from "../..";
 import data from "../../data";
@@ -6,7 +6,10 @@ import Log from "../../Log";
 import { EmbedBuilder, TextChannel, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 
 const ticketsFunctions = {
-    create_support_ticket: async (args: { userId: string; initialMessage: string; guildId?: string }): Promise<any> => {
+    create_support_ticket: async (args: { requesterId?: string; userId?: string; initialMessage: string; guildId?: string }): Promise<any> => {
+      const subject = resolveSubjectUser(args);
+      if (subject.error) return { error: subject.error };
+      args.userId = subject.userId!;
       if (!args.userId || !args.initialMessage) return { error: "Missing parameters" };
       try {
         const homeGuild = await client.guilds.fetch(data.bot.home_guild);
@@ -181,14 +184,16 @@ const ticketsFunctions = {
       const sent = await channel.send({ embeds: [embed] });
       return { success: true, messageId: sent.id, channelId: sent.channelId };
     },
-    get_ticket_details: async (args: { ticketId: number }): Promise<any> => {
+    get_ticket_details: async (args: { requesterId?: string; ticketId: number }): Promise<any> => {
       if (!args.ticketId) return { error: "Missing ticketId parameter" };
       const ticket: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [args.ticketId]);
       if (!ticket || !ticket[0]) return { error: "Ticket not found" };
+      if (!(await canAccessUserData(args.requesterId, ticket[0].user_id))) return { error: "Ticket not found" };
       return { ticket: ticket[0] };
     },
-    get_user_tickets: async (args: { userId: string; status?: string }): Promise<any> => {
+    get_user_tickets: async (args: { requesterId?: string; userId: string; status?: string }): Promise<any> => {
       if (!args.userId) return { error: "Missing userId parameter" };
+      if (!(await canAccessUserData(args.requesterId, args.userId))) return { error: "Requester is not authorized to view this user's tickets" };
       let query = "SELECT * FROM support_tickets WHERE user_id = ?";
       const params: any[] = [args.userId];
       if (args.status) {
@@ -226,11 +231,15 @@ const ticketsFunctions = {
       if ("error" in result) return result;
       return { success: true };
     },
-    add_ticket_message: async (args: { ticketId: number; userId: string; username: string; content: string; isStaff?: boolean }): Promise<any> => {
-      if (!args.ticketId || !args.userId || !args.username || !args.content) return { error: "Missing parameters" };
+    add_ticket_message: async (args: { requesterId?: string; ticketId: number; userId?: string; username: string; content: string; isStaff?: boolean }): Promise<any> => {
+      if (!args.requesterId) return { error: "Missing requesterId" };
+      args.userId = args.requesterId;
+      if (!args.ticketId || !args.username || !args.content) return { error: "Missing parameters" };
       const ticket: any = await db.query("SELECT * FROM support_tickets WHERE id = ?", [args.ticketId]);
       if (!ticket || !ticket[0]) return { error: "Ticket not found" };
       const staffRank = await utils.getUserStaffRank(args.userId);
+      if (ticket[0].user_id !== args.userId && !staffRank) return { error: "Ticket not found" };
+      args.isStaff = staffRank !== null;
       const message: any = {
         ticket_id: args.ticketId,
         user_id: args.userId,
@@ -246,8 +255,10 @@ const ticketsFunctions = {
       }
       return { success: true, messageId: result.insertId };
     },
-    get_ticket_messages: async (args: { ticketId: number }): Promise<any> => {
+    get_ticket_messages: async (args: { requesterId?: string; ticketId: number }): Promise<any> => {
       if (!args.ticketId) return { error: "Missing ticketId parameter" };
+      const ticket: any = await db.query("SELECT user_id FROM support_tickets WHERE id = ?", [args.ticketId]);
+      if (!ticket || !ticket[0] || !(await canAccessUserData(args.requesterId, ticket[0].user_id))) return { error: "Ticket not found" };
       const messages: any = await db.query("SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY timestamp ASC", [args.ticketId]);
       return { messages: Array.isArray(messages) ? messages : [] };
     },

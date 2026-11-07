@@ -1,19 +1,24 @@
-import utils from "../../utils";
+import utils, { canAccessUserData, resolveSubjectUser } from "../../utils";
 import db from "../../mysql/database";
 
 const moderationFunctions = {
-    get_user_warnings: async (args: { userId: string }): Promise<any> => {
+    get_user_warnings: async (args: { requesterId?: string; userId: string }): Promise<any> => {
       if (!args.userId) return { error: "Missing userId parameter" };
+      if (!(await canAccessUserData(args.requesterId, args.userId))) return { error: "Requester is not authorized to view this user's warnings" };
       const warnings: any = await db.query("SELECT * FROM global_warnings WHERE userid = ? ORDER BY createdAt DESC", [args.userId]);
       return { warnings: Array.isArray(warnings) ? warnings : [] };
     },
-    get_warning_details: async (args: { warningId: number }): Promise<any> => {
+    get_warning_details: async (args: { requesterId?: string; warningId: number }): Promise<any> => {
       if (!args.warningId) return { error: "Missing warningId parameter" };
       const warning: any = await db.query("SELECT * FROM global_warnings WHERE id = ?", [args.warningId]);
       if (!warning || !warning[0]) return { error: "Warning not found" };
+      if (!(await canAccessUserData(args.requesterId, warning[0].userid))) return { error: "Warning not found" };
       return { warning: warning[0] };
     },
-    appeal_warning: async (args: { userId: string; warningId: number; reason: string }): Promise<any> => {
+    appeal_warning: async (args: { requesterId?: string; userId?: string; warningId: number; reason: string }): Promise<any> => {
+      const subject = resolveSubjectUser(args);
+      if (subject.error) return { error: subject.error };
+      args.userId = subject.userId!;
       if (!args.userId || !args.warningId || !args.reason) return { error: "Missing parameters" };
       const warning: any = await db.query("SELECT * FROM global_warnings WHERE id = ? AND userid = ?", [args.warningId, args.userId]);
       if (!warning || !warning[0]) return { error: "Warning not found or does not belong to user" };

@@ -194,5 +194,21 @@ describe("AI tool authorization", () => {
     const result = await tools.update_user_data({ requesterId: "user-1", userId: "user-1", data: { id: "x" } });
     expect(result.error).toBeDefined();
   });
+
+  test("ticket tools hide other users' tickets and ignore spoofed staff flags", async () => {
+    (db as any).query.mockImplementation(async (sql: string) => {
+      if (sql.startsWith("SELECT") && sql.includes("support_tickets")) return [{ id: 7, user_id: "user-2" }];
+      return [];
+    });
+    expect((await tools.get_ticket_messages({ requesterId: "user-1", ticketId: 7 })).error).toBeDefined();
+    expect((await tools.get_ticket_details({ requesterId: "user-1", ticketId: 7 })).error).toBeDefined();
+    const spoof = await tools.add_ticket_message({ requesterId: "user-1", ticketId: 7, userId: "user-2", username: "x", content: "hi", isStaff: true });
+    expect(spoof.error).toBeDefined();
+    expect((db as any).query).not.toHaveBeenCalledWith("INSERT INTO support_messages SET ?", expect.anything());
+  });
+
+  test("warning tools only expose the requester's own warnings", async () => {
+    expect((await tools.get_user_warnings({ requesterId: "user-1", userId: "user-2" })).error).toBeDefined();
+  });
 });
 
