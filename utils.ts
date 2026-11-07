@@ -520,16 +520,19 @@ export const closeSupportTicket = async (args: {
   if (!ticketData || !ticketData[0]) return { error: "Ticket not found" };
   const ticket = ticketData[0];
   if (ticket.status === "closed") return { error: "Ticket is already closed" };
+  const closedAt = Date.now();
+  const claim: any = await db.query("UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ? AND status <> 'closed'", [closedAt, args.closedById, args.ticketId]);
+  if (!claim || claim.affectedRows !== 1) return { error: "Ticket is already closed" };
 
   const messages: any = await db.query("SELECT * FROM support_messages WHERE ticket_id = ? ORDER BY timestamp ASC", [args.ticketId]);
-  const user = await client.users.fetch(ticket.user_id);
-  const closedAt = Date.now();
+  const user = await client.users.fetch(ticket.user_id).catch(() => null);
+  const userTag = user?.tag ?? String(ticket.user_id);
 
   const durationMs = closedAt - Number(ticket.created_at || closedAt);
   const durationText = utils.formatDurationText(durationMs);
 
   let textTranscript = `Support Ticket #${args.ticketId} - Transcript\n`;
-  textTranscript += `User: ${user.tag} (${user.id})\n`;
+  textTranscript += `User: ${userTag} (${ticket.user_id})\n`;
   textTranscript += `Created: ${new Date(Number(ticket.created_at)).toISOString()}\n`;
   textTranscript += `Closed: ${new Date(closedAt).toISOString()}\n`;
   textTranscript += `Duration: ${durationText}\n`;
@@ -586,8 +589,8 @@ export const closeSupportTicket = async (args: {
 
   const htmlContent = htmlTemplate
     .replace(/{ticketId}/g, String(args.ticketId))
-    .replace(/{username}/g, escapeHtml(user.tag))
-    .replace(/{userId}/g, escapeHtml(user.id))
+    .replace(/{username}/g, escapeHtml(userTag))
+    .replace(/{userId}/g, escapeHtml(String(ticket.user_id)))
     .replace(/{status}/g, "Closed")
     .replace(/{statusClass}/g, "status-closed")
     .replace(/{createdAt}/g, new Date(Number(ticket.created_at)).toLocaleString())
@@ -601,14 +604,14 @@ export const closeSupportTicket = async (args: {
   await fs.writeFile(textPath, textTranscript);
   await fs.writeFile(htmlPath, htmlContent);
 
-  const transcriptsChannel = await client.channels.fetch(data.bot.transcripts_channel) as TextChannel | null;
-  if (transcriptsChannel) {
+  const transcriptsChannel = await client.channels.fetch(data.bot.transcripts_channel).catch(() => null) as TextChannel | null;
+  if (transcriptsChannel) try {
     const transcriptEmbed = new EmbedBuilder()
       .setColor("Purple")
       .setTitle(`🎫 Ticket #${args.ticketId} - Closed`)
       .setDescription(`Ticket closed by ${args.closedByLabel}`)
       .addFields(
-        { name: "User", value: `${user.tag} (${user.id})`, inline: true },
+        { name: "User", value: `${userTag} (${ticket.user_id})`, inline: true },
         { name: "Messages", value: messages.length.toString(), inline: true },
         { name: "Duration", value: durationText, inline: true }
       )
@@ -621,9 +624,9 @@ export const closeSupportTicket = async (args: {
         { attachment: htmlPath, name: `transcript-${args.ticketId}.html` }
       ]
     });
+  } catch (error) {
+    Log.error("Failed to send ticket transcript:", error);
   }
-
-  await db.query("UPDATE support_tickets SET status = 'closed', closed_at = ?, closed_by = ? WHERE id = ?", [closedAt, args.closedById, args.ticketId]);
 
   try {
     const ticketChannel = await client.channels.fetch(ticket.channel_id) as TextChannel | null;
@@ -670,7 +673,7 @@ export const closeSupportTicket = async (args: {
       )
       .setFooter({ text: closeTexts.footer })
       .setTimestamp();
-    await user.send({ embeds: [closedEmbed] });
+    if (user) await user.send({ embeds: [closedEmbed] });
   } catch (error) {
     Log.error("Failed to notify user of ticket closure:", error);
   }
