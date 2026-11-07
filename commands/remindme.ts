@@ -7,7 +7,7 @@ export default {
         .setName("remindme")
         .setDescription("Set a reminder")
         .addStringOption(o => o.setName("time").setDescription("When to remind you (e.g. 30m, 2h, 1d)").setRequired(true))
-        .addStringOption(o => o.setName("message").setDescription("What to remind you about").setRequired(true)),
+        .addStringOption(o => o.setName("message").setDescription("What to remind you about").setRequired(true).setMaxLength(1500)),
     category: "Utility",
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
         let texts = {
