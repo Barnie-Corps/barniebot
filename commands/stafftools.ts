@@ -899,7 +899,7 @@ export default {
 
                 await db.query("UPDATE rpg_sessions SET active = FALSE WHERE account_id = ?", [account[0].id]);
 
-                const user = await client.users.fetch(account[0].last_user_logged).catch(() => null);
+                const user = account[0].uid ? await client.users.fetch(account[0].uid).catch(() => null) : null;
                 if (user) {
                     try {
                         const passwordEmbed = new EmbedBuilder()
