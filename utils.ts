@@ -1146,6 +1146,21 @@ export const authorizeGuildRequester = async (requesterId: string | null | undef
   if (!member.permissions.has(permission)) return { error: "Requester is not authorized" };
   return { guild, member, privileged: false };
 };
+export const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const regexSandbox = vm.createContext({ pattern: "", flags: "", input: "" });
+const regexScript = new vm.Script("new RegExp(pattern, flags).test(input)");
+export const safeRegexTest = (pattern: string, flags: string, input: string, timeoutMs = 25): boolean => {
+  regexSandbox.pattern = pattern;
+  regexSandbox.flags = flags;
+  regexSandbox.input = input;
+  try {
+    return regexScript.runInContext(regexSandbox, { timeout: timeoutMs }) === true;
+  } catch {
+    return false;
+  } finally {
+    regexSandbox.input = "";
+  }
+};
 export const resolveSubjectUser = (args: { requesterId?: string | null; userId?: string | null }): { userId?: string; error?: string } => {
   const requesterId = args?.requesterId ?? null;
   if (!requesterId) return { error: "Missing requesterId" };

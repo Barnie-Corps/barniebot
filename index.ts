@@ -32,7 +32,7 @@ import data from "./data";
 import queries from "./mysql/queries";
 import db from "./mysql/database";
 import { initializeShopItems, initializeRPGData } from "./rpg_init";
-import utils from "./utils";
+import utils, { safeRegexTest } from "./utils";
 import load_slash from "./load_slash";
 import ChatManager from "./managers/ChatManager";
 import StaffRanksManager from "./managers/StaffRanksManager";
@@ -1108,11 +1108,7 @@ client.on("messageCreate", async (message): Promise<any> => {
     for (const cr of customResponses) {
         let match = false;
         if (cr.is_regex) {
-            try {
-                match = new RegExp(cr.command, "i").test(message.content);
-            } catch (error) {
-                Log.error("Error parsing regex:", error);
-            }
+            match = safeRegexTest(cr.command, "i", message.content);
         } else {
             match = message.content.toLowerCase() === cr.command.toLowerCase();
         }

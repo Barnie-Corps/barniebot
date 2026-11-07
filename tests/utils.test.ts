@@ -408,3 +408,26 @@ describe("isPrivateIP and assertPublicUrl", () => {
     await expect(assertPublicUrl("http://0.0.0.0:3000/")).rejects.toThrow("private network");
   });
 });
+
+describe("safeRegexTest", () => {
+  const { safeRegexTest, escapeRegex } = require("../utils");
+
+  test("matches ordinary patterns", () => {
+    expect(safeRegexTest("^hel+o", "i", "Hello there")).toBe(true);
+    expect(safeRegexTest("^bye", "i", "Hello there")).toBe(false);
+  });
+
+  test("returns false for invalid patterns", () => {
+    expect(safeRegexTest("(", "i", "anything")).toBe(false);
+  });
+
+  test("aborts catastrophic backtracking instead of blocking", () => {
+    const started = Date.now();
+    expect(safeRegexTest("(a+)+$", "i", "a".repeat(40) + "!", 50)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  test("escapeRegex makes literal words safe to compile", () => {
+    expect(new RegExp(escapeRegex("c++"), "i").test("I like C++")).toBe(true);
+  });
+});
