@@ -126,12 +126,12 @@ export default {
             .setDescription("Give an item to a character (Admin+)")
             .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true))
             .addIntegerOption(o => o.setName("item_id").setDescription("Item ID").setRequired(true))
-            .addIntegerOption(o => o.setName("quantity").setDescription("Quantity (default: 1)").setRequired(false)))
+            .addIntegerOption(o => o.setName("quantity").setDescription("Quantity (default: 1)").setRequired(false).setMinValue(1)))
         .addSubcommand(s => s.setName("rpg_remove_item")
             .setDescription("Remove an item from a character (Admin+)")
             .addStringOption(o => o.setName("username").setDescription("Account username").setRequired(true))
             .addIntegerOption(o => o.setName("item_id").setDescription("Item ID").setRequired(true))
-            .addIntegerOption(o => o.setName("quantity").setDescription("Quantity (default: 1)").setRequired(false)))
+            .addIntegerOption(o => o.setName("quantity").setDescription("Quantity (default: 1)").setRequired(false).setMinValue(1)))
     ,
     category: "Bot Staff",
     async execute(interaction: ChatInputCommandInteraction, lang: string) {
