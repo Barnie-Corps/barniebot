@@ -101,15 +101,15 @@ const buildTranscriptFiles = async (ticket: LocalTicket, channel: TextChannel, c
     let htmlTemplate = fs.readFileSync("./transcript_placeholder.html", "utf-8");
     htmlTemplate = htmlTemplate
         .replace(/{ticketId}/g, String(ticket.id))
-        .replace(/{username}/g, utils.escapeHtml(user?.tag ?? ticket.creator_id))
+        .replace(/{username}/g, () => utils.escapeHtml(user?.tag ?? ticket.creator_id))
         .replace(/{userId}/g, utils.escapeHtml(ticket.creator_id))
         .replace(/{status}/g, "Closed")
         .replace(/{statusClass}/g, "status-closed")
         .replace(/{createdAt}/g, new Date(ticket.created_at).toLocaleString())
         .replace(/{closedAt}/g, new Date(closedAt).toLocaleString())
         .replace(/{origin}/g, `Guild: ${utils.escapeHtml(ticket.guild_id)}`)
-        .replace(/{initialMessage}/g, utils.escapeHtml(ticket.initial_message))
-        .replace(/{messages}/g, messagesHtml);
+        .replace(/{initialMessage}/g, () => utils.escapeHtml(ticket.initial_message))
+        .replace(/{messages}/g, () => messagesHtml);
     const textPath = path.join(process.cwd(), `local-ticket-${ticket.id}.txt`);
     const htmlPath = path.join(process.cwd(), `local-ticket-${ticket.id}.html`);
     fs.writeFileSync(textPath, textTranscript);

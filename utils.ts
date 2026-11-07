@@ -589,15 +589,15 @@ export const closeSupportTicket = async (args: {
 
   const htmlContent = htmlTemplate
     .replace(/{ticketId}/g, String(args.ticketId))
-    .replace(/{username}/g, escapeHtml(userTag))
+    .replace(/{username}/g, () => escapeHtml(userTag))
     .replace(/{userId}/g, escapeHtml(String(ticket.user_id)))
     .replace(/{status}/g, "Closed")
     .replace(/{statusClass}/g, "status-closed")
     .replace(/{createdAt}/g, new Date(Number(ticket.created_at)).toLocaleString())
     .replace(/{closedAt}/g, new Date(closedAt).toLocaleString())
-    .replace(/{origin}/g, ticket.guild_id ? `Guild: ${escapeHtml(ticket.guild_name)} (${ticket.guild_id})` : "Direct Message")
-    .replace(/{initialMessage}/g, escapeHtml(ticket.initial_message) || "No initial message")
-    .replace(/{messages}/g, messagesHtml);
+    .replace(/{origin}/g, () => ticket.guild_id ? `Guild: ${escapeHtml(ticket.guild_name)} (${ticket.guild_id})` : "Direct Message")
+    .replace(/{initialMessage}/g, () => escapeHtml(ticket.initial_message) || "No initial message")
+    .replace(/{messages}/g, () => messagesHtml);
 
   const textPath = path.join(process.cwd(), `transcript-${args.ticketId}.txt`);
   const htmlPath = path.join(process.cwd(), `transcript-${args.ticketId}.html`);
@@ -1202,9 +1202,9 @@ const utils: any = {
   formatWelcomeMessage: (msg: string, userId: string, username: string, displayName: string, server: string, count: number): string => {
     return msg
       .replace(/\{user\}/g, `<@${userId}>`)
-      .replace(/\{username\}/g, username)
-      .replace(/\{displayname\}/g, displayName)
-      .replace(/\{server\}/g, server)
+      .replace(/\{username\}/g, () => username)
+      .replace(/\{displayname\}/g, () => displayName)
+      .replace(/\{server\}/g, () => server)
       .replace(/\{count\}/g, String(count));
   },
   formatDurationText: (ms: number): string => {
