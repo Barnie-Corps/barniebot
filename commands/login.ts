@@ -125,13 +125,11 @@ export default {
 
         const character: any = await db.query("SELECT * FROM rpg_characters WHERE account_id = ?", [account[0].id]);
 
-        await db.query("INSERT INTO rpg_sessions SET ?", [{
-            account_id: account[0].id,
-            uid: interaction.user.id,
-            logged_in_at: Date.now(),
-            last_activity: Date.now(),
-            active: true
-        }]);
+        const loginAt = Date.now();
+        await db.query(
+            "INSERT INTO rpg_sessions (account_id, uid, logged_in_at, last_activity, active) VALUES (?, ?, ?, ?, TRUE) ON DUPLICATE KEY UPDATE uid = VALUES(uid), logged_in_at = VALUES(logged_in_at), last_activity = VALUES(last_activity), active = TRUE",
+            [account[0].id, interaction.user.id, loginAt, loginAt]
+        );
 
         await db.query("UPDATE registered_accounts SET last_login = ?, last_user_logged = ? WHERE id = ?", [Date.now(), interaction.user.id, account[0].id]);
 
