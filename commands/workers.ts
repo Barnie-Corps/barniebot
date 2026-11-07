@@ -8,6 +8,8 @@ export default {
         .setDescription("Shows worker pool stats and latencies"),
     category: "Admin",
     execute: async (interaction: ChatInputCommandInteraction, lang: string) => {
+        const perm = utils.ensureStaff(await utils.getUserStaffRank(interaction.user.id));
+        if (!perm.ok) return utils.safeInteractionRespond(interaction, perm.error || "Permission denied.");
         const stats = Workers.getWorkerStats();
         let texts = {
             title: "Worker Pools",
