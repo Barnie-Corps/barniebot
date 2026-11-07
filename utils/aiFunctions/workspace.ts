@@ -112,17 +112,25 @@ const workspaceFunctions = {
         return { error: error?.message || "URL validation failed" };
       }
       let response: Response;
-      try {
-        response = await fetch(args.url);
-      } catch (error: any) {
-        return { error: `Download failed: ${error?.message || String(error)}` };
+      let currentUrl = args.url;
+      let redirects = 0;
+      while (true) {
+        try {
+          response = await fetch(currentUrl, { redirect: "manual" });
+        } catch (error: any) {
+          return { error: `Download failed: ${error?.message || String(error)}` };
+        }
+        if (response.status < 300 || response.status >= 400) break;
+        const location = response.headers.get("location");
+        if (!location) return { error: `Failed to download resource: ${response.status}` };
+        if (++redirects > 5) return { error: "Too many redirects" };
+        try {
+          currentUrl = (await assertPublicUrl(new URL(location, currentUrl).toString())).toString();
+        } catch (error: any) {
+          return { error: error?.message || "URL validation failed" };
+        }
       }
       if (!response.ok) return { error: `Failed to download resource: ${response.status}` };
-      try {
-        await assertPublicUrl(args.url, response.url);
-      } catch (error: any) {
-        return { error: error?.message || "URL validation failed" };
-      }
       const filePath = resolveWorkspacePath(args.path, userId);
       const stats = await safeStat(filePath);
       if (stats && !args.overwrite) return { error: "File already exists" };

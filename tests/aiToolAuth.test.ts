@@ -214,5 +214,29 @@ describe("AI tool authorization", () => {
   test("fetch_ai_rules loads the repository rules file", async () => {
     await expect(tools.fetch_ai_rules()).resolves.toEqual(require("../ai_rules.json"));
   });
+
+  test("github_fetch_repo_file rejects path traversal before sending a request", async () => {
+    const fetchSpy = jest.spyOn(global, "fetch" as any).mockResolvedValue({ ok: true, text: async () => "x" } as any);
+    try {
+      expect((await tools.github_fetch_repo_file({ path: "../../Other/private/main/.env" })).error).toBeDefined();
+      expect((await tools.github_fetch_repo_file({ path: "README.md", ref: ".." })).error).toBeDefined();
+      expect((await tools.github_search_repo({ query: "secret repo:Other/private" })).error).toBeDefined();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  test("download_to_workspace validates redirect targets before following them", async () => {
+    const fetchSpy = jest.spyOn(global, "fetch" as any).mockResolvedValue({ status: 302, ok: false, headers: new Headers({ location: "http://127.0.0.1/admin" }) } as any);
+    try {
+      const result = await tools.download_to_workspace({ url: "http://93.184.216.34/file", path: "file.txt", requesterId: "user-1" });
+      expect(result.error).toMatch(/private network/);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(fetchSpy.mock.calls[0][1]).toEqual(expect.objectContaining({ redirect: "manual" }));
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
 });
 
